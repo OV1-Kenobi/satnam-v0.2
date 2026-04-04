@@ -1,0 +1,263 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Security Invariants ────────────────────────────────────────────────────
+  security-invariants:
+    name: Security Invariants (S1–S12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # S1 — No encrypted_nsec / nsec / secret_key / private_key column in SQL
+      - name: "S1: No key-material columns in SQL"
+        run: |
+          echo "::group::S1 — No encrypted_nsec/nsec/secret_key/private_key in SQL files"
+          # Exclude SQL comment lines (-- prefix) before pattern matching
+          MATCHES=$(grep -rn \
+            --include="*.sql" \
+            -E 'encrypted_nsec|nsec\s+(TEXT|CHAR|VARCHAR|BYTEA)|secret_key|private_key' \
+            . | grep -v '\s*--' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::S1 FAILED — key-material column found in SQL:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "S1 PASSED — no key-material columns in SQL files"
+          echo "::endgroup::"
+
+      # S2 — No JWT imports in source files
+      - name: "S2: No JWT imports in source files"
+        run: |
+          echo "::group::S2 — No jsonwebtoken/jose/JWT_SECRET/jwt in source"
+          MATCHES=$(grep -rn \
+            --include="*.ts" --include="*.tsx" --include="*.js" --include="*.mjs" \
+            -E "from ['\"]jsonwebtoken['\"]|from ['\"]jose['\"]|JWT_SECRET|import.*\bjwt\b" \
+            src/ netlify/ scripts/ || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::S2 FAILED — JWT import/reference found:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "S2 PASSED — no JWT imports found"
+          echo "::endgroup::"
+
+      # S3 — No @sentry/* in package.json
+      - name: "S3: No @sentry/* in package.json"
+        run: |
+          echo "::group::S3 — No @sentry/* in package.json"
+          MATCHES=$(grep -n '@sentry/' package.json || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::S3 FAILED — @sentry package found:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "S3 PASSED — no @sentry/* in package.json"
+          echo "::endgroup::"
+
+      # S4 — No localStorage.setItem storing nsec/priv/secret/key/pairing
+      - name: "S4: No localStorage storing key material"
+        run: |
+          echo "::group::S4 — No localStorage.setItem with nsec/priv/secret/key/pairing"
+          # Match localStorage.setItem calls where the key or value variable name
+          # contains nsec|priv|secret|key|pairing (case-insensitive)
+          MATCHES=$(grep -rn \
+            --include="*.ts" --include="*.tsx" --include="*.js" \
+            -iE "localStorage\.setItem\s*\([^)]*['\"]?(nsec|priv|secret|key|pairing)['\"]?" \
+            src/ || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::S4 FAILED — localStorage.setItem with key material found:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "S4 PASSED — no localStorage.setItem with key material"
+          echo "::endgroup::"
+
+      # S5 — No OPFS reference in netlify/functions/
+      - name: "S5: No OPFS in Netlify functions"
+        run: |
+          echo "::group::S5 — No OPFS reference in netlify/functions/"
+          if [ -d "netlify/functions" ]; then
+            MATCHES=$(grep -rn \
+              --include="*.ts" --include="*.js" --include="*.mjs" \
+              -E 'navigator\.storage|getDirectory|OPFS|FileSystemDirectoryHandle|showDirectoryPicker' \
+              netlify/functions/ || true)
+            if [ -n "$MATCHES" ]; then
+              echo "::error::S5 FAILED — OPFS reference in Netlify function:"
+              echo "$MATCHES"
+              exit 1
+            fi
+          fi
+          echo "S5 PASSED — no OPFS references in netlify/functions/"
+          echo "::endgroup::"
+
+      # S6 — No CMAC values in netlify/functions/
+      - name: "S6: No CMAC values in Netlify functions"
+        run: |
+          echo "::group::S6 — No cmacHex/piccDataHex in netlify/functions/"
+          if [ -d "netlify/functions" ]; then
+            MATCHES=$(grep -rn \
+              --include="*.ts" --include="*.js" --include="*.mjs" \
+              -E 'cmacHex|piccDataHex' \
+              netlify/functions/ || true)
+            if [ -n "$MATCHES" ]; then
+              echo "::error::S6 FAILED — CMAC value found in Netlify function:"
+              echo "$MATCHES"
+              exit 1
+            fi
+          fi
+          echo "S6 PASSED — no CMAC values in netlify/functions/"
+          echo "::endgroup::"
+
+      # S7 — No external font CDN link tags in index.html
+      - name: "S7: No external font CDN links in index.html"
+        run: |
+          echo "::group::S7 — No external font CDN <link> tags in index.html"
+          MATCHES=$(grep -in \
+            -E '<link[^>]+(fonts\.googleapis\.com|fonts\.gstatic\.com|use\.typekit\.net|fast\.fonts\.net|cloud\.typography\.com|use\.fontawesome\.com|kit\.fontawesome\.com)' \
+            index.html || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::S7 FAILED — external font CDN link found in index.html:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "S7 PASSED — no external font CDN links in index.html"
+          echo "::endgroup::"
+
+      # S8 — Production dependencies ≤ 22
+      - name: "S8: Production dependency count ≤ 22"
+        run: node scripts/check-deps.mjs
+
+      # S9 — Netlify function count ≤ 8
+      - name: "S9: Netlify function count ≤ 8"
+        run: |
+          echo "::group::S9 — Netlify function count ≤ 8"
+          if [ -d "netlify/functions" ]; then
+            COUNT=$(find netlify/functions -maxdepth 1 \
+              \( -name "*.ts" -o -name "*.js" -o -name "*.mjs" \) \
+              -not -name "_*" \
+              -not -name "*.test.*" \
+              -not -name "*.spec.*" \
+              | wc -l | tr -d ' ')
+          else
+            COUNT=0
+          fi
+          echo "Function count: $COUNT"
+          if [ "$COUNT" -gt 8 ]; then
+            echo "::error::S9 FAILED — $COUNT Netlify functions found (max 8)"
+            exit 1
+          fi
+          echo "S9 PASSED — $COUNT functions (≤ 8)"
+          echo "::endgroup::"
+
+      # S10 — Every NIP-98 function calls verifyNip98
+      - name: "S10: All NIP-98 functions call verifyNip98"
+        run: |
+          echo "::group::S10 — Every NIP-98 function calls verifyNip98"
+          if [ -d "netlify/functions" ]; then
+            # Find functions that reference NIP-98 auth requirement (nip98 marker comment or usage)
+            # Any function that imports or mentions nip98 must also call verifyNip98
+            NIP98_FUNCS=$(grep -rl \
+              --include="*.ts" --include="*.js" --include="*.mjs" \
+              -E "NIP-98|nip98|NIP98" \
+              netlify/functions/ 2>/dev/null || true)
+
+            FAILED=0
+            for f in $NIP98_FUNCS; do
+              if ! grep -qE "verifyNip98\s*\(" "$f"; then
+                echo "::error::S10 FAILED — $f references NIP-98 but does not call verifyNip98()"
+                FAILED=1
+              fi
+            done
+            if [ "$FAILED" -eq 1 ]; then
+              exit 1
+            fi
+          fi
+          echo "S10 PASSED — all NIP-98 functions call verifyNip98"
+          echo "::endgroup::"
+
+      # S11 — No console.log/error with key-material variable names
+      - name: "S11: No console logging of key material"
+        run: |
+          echo "::group::S11 — No console.log/error with nsec/key/secret/share/proof vars"
+          MATCHES=$(grep -rn \
+            --include="*.ts" --include="*.tsx" --include="*.js" --include="*.mjs" \
+            -E 'console\.(log|error)\s*\([^)]*\b(nsec|key|secret|share|proof)\b' \
+            src/ netlify/ || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::S11 FAILED — console logging of sensitive variable:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "S11 PASSED — no console logging of key material"
+          echo "::endgroup::"
+
+      # S12 — CSP header does not contain unsafe-eval
+      - name: "S12: CSP does not include unsafe-eval"
+        run: |
+          echo "::group::S12 — CSP header does not include unsafe-eval"
+          MATCHES=$(grep -in "'unsafe-eval'" netlify.toml || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::S12 FAILED — 'unsafe-eval' found in netlify.toml CSP:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "S12 PASSED — CSP does not include unsafe-eval"
+          echo "::endgroup::"
+
+  # ── TypeScript & Tests ─────────────────────────────────────────────────────
+  typecheck:
+    name: TypeScript Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+  test:
+    name: Vitest Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test -- --run --reporter=verbose
+
+  build:
+    name: Production Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7

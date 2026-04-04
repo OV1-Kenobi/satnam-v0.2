@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- ── Primary meta ─────────────────────────────────────────────────── -->
+    <title>Satnam — Sovereign Nostr Identity</title>
+    <meta name="description" content="Satnam: self-custodial Nostr identity, FROST threshold keys, Lightning payments, and NIP-90 agent economy. Your keys, your sovereignty." />
+    <meta name="author" content="Satnam" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- ── Theme / color ────────────────────────────────────────────────── -->
+    <!-- NOTE: theme_color matches manifest.webmanifest (#f7931a = Bitcoin orange) -->
+    <meta name="theme-color" content="#f7931a" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="msapplication-TileColor" content="#0a0a0a" />
+    <meta name="msapplication-config" content="/browserconfig.xml" />
+
+    <!-- ── PWA / iOS ────────────────────────────────────────────────────── -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Satnam" />
+    <link rel="apple-touch-icon" href="/icons/192.png" />
+
+    <!-- ── PWA manifest ─────────────────────────────────────────────────── -->
+    <!-- S7 INVARIANT: NO external font CDN links. All fonts self-hosted.   -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- ── Favicon ──────────────────────────────────────────────────────── -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
+    <link rel="shortcut icon" href="/icons/favicon.ico" />
+
+    <!-- ── Self-hosted Cinzel font ──────────────────────────────────────── -->
+    <!--
+      SECURITY INVARIANT S7: Fonts are served from /fonts/ — no external CDN.
+      The @font-face declarations are in src/styles/index.css and public/sw.js
+      pre-caches the .woff2 files. DO NOT add <link rel="stylesheet"> pointing
+      to fonts.googleapis.com or any other external font service.
+
+      Font files required in /public/fonts/:
+        cinzel-v21-latin-regular.woff2  (weight 400)
+        cinzel-v21-latin-700.woff2      (weight 700)
+
+      Download from: https://google-webfonts-helper.herokuapp.com/fonts/cinzel
+    -->
+
+    <!-- ── Open Graph ───────────────────────────────────────────────────── -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Satnam — Sovereign Nostr Identity" />
+    <meta property="og:description" content="Self-custodial identity, FROST group keys, Lightning payments, and the NIP-90 agent economy." />
+    <meta property="og:image" content="/icons/512.png" />
+    <meta property="og:site_name" content="Satnam" />
+
+    <!-- ── Twitter / X Card ─────────────────────────────────────────────── -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Satnam — Sovereign Nostr Identity" />
+    <meta name="twitter:description" content="Self-custodial identity, FROST group keys, Lightning payments, and the NIP-90 agent economy." />
+    <meta name="twitter:image" content="/icons/512.png" />
+
+    <!-- ── Preconnect / DNS prefetch ────────────────────────────────────── -->
+    <!-- Only our own relay and Supabase — no external font CDNs -->
+    <link rel="dns-prefetch" href="wss://pylon.openagents.com" />
+  </head>
+
+  <body>
+    <!-- React mounts here -->
+    <div id="root"></div>
+
+    <!-- ── Service Worker Registration ──────────────────────────────────── -->
+    <!--
+      Inline script is permitted under CSP (style-src 'self' 'unsafe-inline').
+      This is a minimal bootstrap only — no business logic.
+    -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker
+            .register('/sw.js', { scope: '/' })
+            .then(function (registration) {
+              // Listen for SW updates and notify the React app
+              registration.addEventListener('updatefound', function () {
+                const newWorker = registration.installing;
+                if (!newWorker) return;
+                newWorker.addEventListener('statechange', function () {
+                  if (
+                    newWorker.state === 'installed' &&
+                    navigator.serviceWorker.controller
+                  ) {
+                    // Dispatch a custom event that the React app can listen for
+                    window.dispatchEvent(new CustomEvent('swUpdateAvailable'));
+                  }
+                });
+              });
+            })
+            .catch(function (err) {
+              // SW registration failure is non-fatal — the app works without it
+              console.warn('Service Worker registration failed:', err);
+            });
+        });
+      }
+    </script>
+
+    <!-- ── Vite entry point ──────────────────────────────────────────────── -->
+    <!-- S7: This is a module script loaded from /src/ — no external CDN.   -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

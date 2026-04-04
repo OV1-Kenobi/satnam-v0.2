@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@lib/*": ["./src/lib/*"],
+      "@components/*": ["./src/components/*"],
+      "@types/*": ["./src/types/*"],
+      "@config/*": ["./src/config/*"],
+      "@noble/curves/secp256k1": ["./node_modules/@noble/curves/secp256k1.d.ts"],
+      "@noble/curves/nist": ["./node_modules/@noble/curves/nist.d.ts"]
+    },
+    "types": ["vite/client"]
+  },
+  "include": ["src", "types", "netlify"],
+  "exclude": ["node_modules", "dist"]
+}

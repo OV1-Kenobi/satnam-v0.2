@@ -1,0 +1,66 @@
+# Satnam v2 — Netlify Configuration
+# Target: ≤8 serverless functions, CSP enforced, zero key material on server
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--prefer-offline"
+
+# ─── Security Headers ───────────────────────────────────────────────
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # CSP: no unsafe-eval, no external fonts, wasm-unsafe-eval for FROSTR bifrost
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://pylon.openagents.com wss://*.nostr.com wss://*.relay.* https://*.supabase.co; img-src 'self' data: blob: https:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+
+# ─── PWA Service Worker ─────────────────────────────────────────────
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+# ─── Font Caching ───────────────────────────────────────────────────
+[[headers]]
+  for = "/fonts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# ─── NIP-05 well-known ──────────────────────────────────────────────
+[[redirects]]
+  from = "/.well-known/nostr.json"
+  to = "/.netlify/functions/nip05-resolver"
+  status = 200
+  force = true
+
+# ─── NIP-SA agent discovery ─────────────────────────────────────────
+[[redirects]]
+  from = "/.well-known/agent.json"
+  to = "/.netlify/functions/well-known-agent"
+  status = 200
+  force = true
+
+# ─── SPA Routing ────────────────────────────────────────────────────
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ─── Feature Flags ──────────────────────────────────────────────────
+[context.production.environment]
+  VITE_PYLON_RELAY = "wss://pylon.openagents.com"
+  VITE_FX_ENABLED = "false"
+  VITE_BIFROST_ENABLED = "false"
+  VITE_NFC_ENABLED = "true"
+  VITE_CASHU_ENABLED = "false"
+  VITE_NIP90_ENABLED = "false"
+  VITE_PROBE_ENABLED = "false"
