@@ -45,8 +45,6 @@ VITE_ENABLE_NIP90=false
 # FROST group key management via @frostr/bifrost
 VITE_ENABLE_FROST=false
 
-# v1 → v2 migration ceremony UI (existing users re-encrypting from Supabase)
-VITE_ENABLE_MIGRATION=false
 ```
 
 ### Config Module API (`src/config/env.ts`)
@@ -64,7 +62,7 @@ VITE_ENABLE_MIGRATION=false
 | `isCashuEnabled()` | `boolean` | Cashu feature flag |
 | `isNip90Enabled()` | `boolean` | NIP-90 feature flag |
 | `isFrostEnabled()` | `boolean` | FROST feature flag |
-| `isMigrationEnabled()` | `boolean` | Migration ceremony flag |
+
 
 ```typescript
 // Usage

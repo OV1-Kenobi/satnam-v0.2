@@ -15,12 +15,18 @@ export { NTAG424ProductionManager, ntag424Manager } from "./ntag424.js";
 export type { PinGateConfig, PinGateState, PinGatedOperation } from "./pin-gate.js";
 export { PinGate, createPinGate } from "./pin-gate.js";
 
-// Proof of Life
-export type { PolState, PolCeremony } from "./proof-of-life.js";
+// Proof of Life — mutual contact exchange ceremony
+export type {
+  PolState,
+  PolCeremony,
+  PeerScanResult,
+  AttestationEvents,
+} from "./proof-of-life.js";
 export {
   ProofOfLifeService,
   POL_EVENT_KIND,
   POL_D_TAG,
+  RECIPROCAL_SCAN_TIMEOUT_MS,
   hashCardUid,
 } from "./proof-of-life.js";
 

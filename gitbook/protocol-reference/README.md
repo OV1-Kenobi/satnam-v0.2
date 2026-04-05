@@ -83,7 +83,7 @@ Each NIP solves a specific problem. Together they form a complete, trustless sys
 | NIP-44 | — | Encrypted content (NIP-44 v2 ChaCha20-Poly1305) |
 | NIP-47 | — | Nostr Wallet Connect (Lightning operations) |
 | NIP-65 | 10002 | Relay list metadata (outbox model) |
-| NIP-78 | 30078 | App-specific data (Proof of Life) |
+| NIP-78 | 30078 | App-specific data (Proof of Life bilateral contact attestation) |
 | NIP-90 | 5xxx, 6xxx, 7000, 31990 | Data Vending Machine marketplace |
 | NIP-98 | 27235 | HTTP authentication |
 
@@ -110,7 +110,7 @@ All event kinds used in Satnam v2, organized by range:
 | 13 | Proof of Work | NIP-13 | Not implemented in v2 |
 | 22242 | Relay Auth | NIP-42 | Pylon NIP-42 authentication challenge response |
 | 27235 | HTTP Auth | NIP-98 | Per-request HTTP authentication (replaces JWT) |
-| 30078 | App-Specific Data | NIP-78 | Proof of Life ceremony events (`d: satnam:proof-of-life`) |
+| 30078 | App-Specific Data | NIP-78 | Bilateral contact attestation events (`d: satnam:proof-of-life`). Published by each participant in a Proof of Life ceremony, with a `p` tag pointing to the other participant's pubkey and an `nfc-card-hash` tag containing the SHA-256 of the other participant's NFC card UID. |
 | 1059 | Gift Wrap | NIP-17 | Outer wrapper for DMs (metadata protection) |
 | 1985 | Label | NIP-32 | Skill attestations (tier1–tier4) |
 | 5000–5999 | Job Request | NIP-90 | DVM job requests (5100 = text gen, etc.) |

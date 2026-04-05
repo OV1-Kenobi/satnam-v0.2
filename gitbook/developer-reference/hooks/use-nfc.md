@@ -41,7 +41,7 @@ interface UseNfcReturn {
   lastTap: NfcTapResult | null;
   clearLastTap: () => void;
 
-  // Proof of Life
+  // Proof of Life (mutual ceremony)
   proofOfLife: ProofOfLifeService;
   activeProofState: ProofOfLifeState | null;
 
@@ -57,6 +57,9 @@ interface NfcTapResult {
   cmacValid: boolean;
 }
 ```
+
+`ProofOfLifeState` follows the corrected mutual ceremony state machine:
+`'IDLE' | 'INITIATED' | 'SCANNING_PEER' | 'PEER_VERIFIED' | 'AWAITING_RECIPROCAL' | 'MUTUAL_VERIFIED' | 'PIN_EXCHANGE' | 'ATTESTING' | 'PUBLISHED' | 'CONFIRMED' | 'FAILED'`
 
 ---
 
@@ -116,35 +119,48 @@ function NfcTapHandler() {
 
 ### Proof of Life Ceremony
 
+The Proof of Life ceremony is mutual — both users must scan each other's card. The state machine follows:
+`IDLE → INITIATED → SCANNING_PEER → PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED → PIN_EXCHANGE → ATTESTING → PUBLISHED → CONFIRMED`
+
 ```tsx
 import { useNfc } from '@hooks/useNfc';
 
-function ProofOfLifeFlow({ guardianPubkey }: { guardianPubkey: string }) {
+function ProofOfLifeFlow() {
   const nfc = useNfc();
   const { proofOfLife, activeProofState } = nfc;
 
   async function start() {
-    await proofOfLife.initiate(guardianPubkey);
+    await proofOfLife.initiate();
     // State: IDLE → INITIATED
     await nfc.startScan();
-    // User taps card → State: CARD_TAPPED
+    // User A scans User B's card → State: SCANNING_PEER → PEER_VERIFIED
   }
 
-  async function submitPin(pin: string) {
-    await proofOfLife.verifyPin(pin);
-    // State: PIN_VERIFIED → SIGNED → PUBLISHED → CONFIRMED
-    const eventId = await proofOfLife.publish();
-    console.log('Proof of Life published:', eventId);
+  async function handleReciprocal() {
+    // User B scans User A's card
+    // processTap() is called automatically by startScan()
+    // State: PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED
+  }
+
+  async function submitPins(myPin: string, peerPin: string) {
+    await proofOfLife.exchangePins(myPin, peerPin);
+    // State: MUTUAL_VERIFIED → PIN_EXCHANGE → ATTESTING
+    const [myEventId, peerEventId] = await proofOfLife.publish();
+    console.log('Bilateral PoL published:', myEventId, peerEventId);
+    // State: PUBLISHED → CONFIRMED
   }
 
   const stateMessages: Record<string, string> = {
     IDLE: 'Ready to start.',
-    INITIATED: 'Tap your NFC card...',
-    CARD_TAPPED: 'Card verified. Enter PIN.',
-    PIN_VERIFIED: 'Signing...',
-    SIGNED: 'Publishing to relay...',
-    PUBLISHED: 'Waiting for confirmation...',
-    CONFIRMED: 'Proof of Life recorded ✓',
+    INITIATED: 'Tap your contact’s Name Tag...',
+    SCANNING_PEER: 'Reading contact’s card...',
+    PEER_VERIFIED: 'Card verified. Have your contact scan your card.',
+    AWAITING_RECIPROCAL: 'Waiting for your contact to tap your card...',
+    MUTUAL_VERIFIED: 'Both scans complete. Enter your PINs.',
+    PIN_EXCHANGE: 'Authorizing...',
+    ATTESTING: 'Constructing attestation...',
+    PUBLISHED: 'Waiting for relay confirmation...',
+    CONFIRMED: 'Contact added ✓ Proof of Life recorded',
     FAILED: 'Ceremony failed.',
   };
 
@@ -154,8 +170,8 @@ function ProofOfLifeFlow({ guardianPubkey }: { guardianPubkey: string }) {
       {activeProofState === 'IDLE' && (
         <button onClick={start}>Begin Ceremony</button>
       )}
-      {activeProofState === 'CARD_TAPPED' && (
-        <PinEntry onSubmit={submitPin} />
+      {activeProofState === 'MUTUAL_VERIFIED' && (
+        <DualPinEntry onSubmit={submitPins} />
       )}
     </div>
   );

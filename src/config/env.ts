@@ -16,7 +16,6 @@
  *   VITE_ENABLE_CASHU        — Feature flag: Cashu ecash (default: false)
  *   VITE_ENABLE_NIP90        — Feature flag: NIP-90 DVM marketplace (default: false)
  *   VITE_ENABLE_FROST         — Feature flag: FROST group keys (default: false)
- *   VITE_ENABLE_MIGRATION     — Feature flag: v1 → v2 migration ceremony (default: false)
  *   VITE_APP_ENV              — 'development' | 'staging' | 'production' (default: 'production')
  */
 
@@ -39,7 +38,6 @@ interface EnvConfig {
     cashu: boolean;
     nip90: boolean;
     frost: boolean;
-    migration: boolean;
   };
 }
 
@@ -178,7 +176,6 @@ function buildConfig(): EnvConfig {
     cashu:     parseFlag('VITE_ENABLE_CASHU',     false),
     nip90:     parseFlag('VITE_ENABLE_NIP90',     false),
     frost:     parseFlag('VITE_ENABLE_FROST',     false),
-    migration: parseFlag('VITE_ENABLE_MIGRATION', false),
   };
 
   return {
@@ -288,14 +285,6 @@ export function isNip90Enabled(): boolean {
  */
 export function isFrostEnabled(): boolean {
   return getConfig().features.frost;
-}
-
-/**
- * Phase 1 Week 4: v1 → v2 migration ceremony UI.
- * Shows the passphrase-decrypt + OPFS re-encrypt flow for existing users.
- */
-export function isMigrationEnabled(): boolean {
-  return getConfig().features.migration;
 }
 
 // ── Re-export for convenience ─────────────────────────────────────────────────

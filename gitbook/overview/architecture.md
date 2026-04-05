@@ -91,18 +91,18 @@ Netlify functions are **minimally trusted**. They handle public-data endpoints (
 
 ## Custody Model
 
-The table below shows where each category of sensitive material lives in v1 (the audited failing state) and v2 (the corrected architecture), along with the migration path for existing users.
+Satnam v2 is a complete greenfield rebuild. v1 was a research and development prototype with only test accounts — there are no real users, data, or credentials to carry over. The table below shows where each category of sensitive material lives in v1 (the audited failing state) and v2 (the corrected architecture).
 
-| Material | v1 Location | v2 Location | Migration |
-|---|---|---|---|
-| User nsec | `user_identities.encrypted_nsec` (Supabase) | OPFS Vault (device-only) | User re-encrypts under device key during migration ceremony |
-| Group nsec | `family_federations.federation_nsec_encrypted` (Supabase) | FROST-managed — no single party holds full nsec | FROST key ceremony generates new group keypair |
-| Shamir shares | `secret_shares` table (Supabase) | Eliminated — FROST replaces SSS | Table dropped |
-| NIP-46 pairing | `localStorage` (plaintext) | OPFS Vault (AES-GCM encrypted) | Automatic migration on first v2 load |
-| NFC AES keys | Server-verified via LNbits | OPFS Vault (AES-GCM encrypted) | Re-provisioned during NFC setup ceremony |
-| NWC URI | Unknown/absent in v1 audit | OPFS Vault (AES-GCM encrypted) | User re-enters NWC URI in v2 |
-| LLM API keys | `agent_llm_credentials` (Supabase, encrypted) | OPFS Vault (AES-GCM encrypted) | Re-entered by Principal in v2 |
-| FROST bfprofile | Not present (BIFROST disabled in v1) | OPFS Vault (AES-GCM encrypted) | Generated fresh in v2 |
+| Material | v1 Location (R&D only) | v2 Location |
+|---|---|---|
+| User nsec | `user_identities.encrypted_nsec` (Supabase) | OPFS Vault (device-only) |
+| Group nsec | `family_federations.federation_nsec_encrypted` (Supabase) | FROST-managed — no single party holds full nsec |
+| Shamir shares | `secret_shares` table (Supabase) | Eliminated — FROST replaces SSS |
+| NIP-46 pairing | `localStorage` (plaintext) | OPFS Vault (AES-GCM encrypted) |
+| NFC AES keys | Server-verified via LNbits | OPFS Vault (AES-GCM encrypted) |
+| NWC URI | Unknown/absent in v1 audit | OPFS Vault (AES-GCM encrypted) |
+| LLM API keys | `agent_llm_credentials` (Supabase, encrypted) | OPFS Vault (AES-GCM encrypted) |
+| FROST bfprofile | Not present (BIFROST disabled in v1) | OPFS Vault (AES-GCM encrypted) |
 
 > **Note:** Supabase in v2 stores only four tables of **public, non-sensitive data**: `nip05_identifiers`, `lightning_addresses`, `rate_limits`, and `username_reservations`. Zero key material. Zero auth tokens. Zero session state.
 

@@ -159,7 +159,7 @@ Satnam v2 makes the following trust assumptions. If these are violated, the secu
 | OS-level compromise | Below the browser trust boundary |
 | Physical coercion ("$5 wrench attack") | Human threat, not technical |
 | Malicious browser extension with full-page access | Browser extension model supersedes web origin isolation |
-| NIP-05 username squatting before migration | Registration race condition — first-come, first-served |
+| NIP-05 username squatting at launch | Registration race condition — first-come, first-served |
 | Lightning routing privacy leaks | Inherent to Lightning Network (not specific to Satnam) |
 | Cashu mint insolvency | Mint operator risk — mitigated by `allowed_mints` policy and sweep automation |
 | Quantum computing attacks on secp256k1 | Long-term theoretical risk — not addressed in v2 |

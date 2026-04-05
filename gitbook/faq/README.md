@@ -172,26 +172,10 @@ Static assets (HTML, CSS, JS, fonts, icons) use cache-first strategy — they lo
 
 ## Migration
 
-### I'm on Satnam v1. How do I migrate?
+### Is there a migration from v1?
 
-The v1-to-v2 migration is a one-time ceremony. You navigate to the migration page, enter your v1 password, and Satnam decrypts your v1 nsec from Supabase, re-encrypts it under your v2 OPFS Vault key, and confirms the migration. After confirmation, your nsec is deleted from Supabase. Your NIP-05 name and Lightning address are preserved automatically.
+No. Satnam v1 was a research and development prototype with only test accounts. v2 is a complete greenfield rebuild — no user data, credentials, or configuration carries over from v1.
 
-### What happens to my v1 data?
+### What happened to v1?
 
-- **NIP-05 names and Lightning addresses** — preserved, migrated to the new `nip05_identifiers` schema
-- **Your private key (nsec)** — decrypted during migration ceremony, re-encrypted in OPFS Vault, then deleted from Supabase
-- **Group/family data** — not migrated automatically; groups must be re-created using the FROST DKG ceremony in v2
-- **Agent profiles** — not migrated; agents must be re-configured in v2 (they will have new nsecs)
-- **Shamir shares** — not migrated; the `secret_shares` table is dropped
-
-### What if I don't migrate before the v1 deadline?
-
-After the migration deadline (announced with 90 days notice), v1 auth endpoints are decommissioned. Your encrypted nsec remains in the v1 Supabase table (encrypted, but inaccessible via v1 functions). You can still recover your nsec by importing the migration tool directly and providing your v1 password. Contact support for extended-deadline access.
-
-### Will my v1 Nostr identity (npub/nsec) change?
-
-No. Your Nostr identity (npub/nsec) is yours and is portable. The migration moves your nsec from Supabase to your OPFS Vault — it does not change it. All your existing followers, NIP-05 associations, and signed events remain valid.
-
-### Can v1 and v2 run simultaneously?
-
-During the migration window, yes. v1 remains functional for users who have not yet migrated. v2 is the new system. After migration, the v1 Netlify functions are decommissioned and the v1 authentication endpoints stop accepting requests. You can run both simultaneously on different devices during the transition.
+v1 served its purpose as a testing ground and scored 3.2/10 in the security audit. Its codebase (2,182 files, 60 Netlify functions, 45 dependencies) proved that a greenfield rewrite was more economical than refactoring. Key architectural learnings from v1 informed v2’s design, and 10 salvageable modules were extracted and decontaminated for reuse.

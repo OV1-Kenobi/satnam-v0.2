@@ -147,32 +147,34 @@ If you use an iPhone, you cannot provision cards but you can read them after And
 
 ## Step 8: Run a Proof of Life Ceremony
 
-The Proof of Life ceremony creates a verifiable, timestamped record of physical card presence.
+The Proof of Life ceremony creates a mutual, bilaterally-attested contact record between two Satnam users who are physically co-present. You will need a second Satnam user with their own provisioned NFC card nearby.
 
-1. Navigate to **NFC Cards** → select your card → **Proof of Life**
-2. Tap **Initiate Ceremony**
-3. Status shows: IDLE → INITIATED
-4. Hold your card to the device: INITIATED → CARD_TAPPED
-5. CMAC is verified: CARD_TAPPED → PIN_VERIFIED (PIN entry prompt appears)
-6. Enter your PIN: PIN_VERIFIED → SIGNED
-7. Satnam constructs a `kind:30078` event:
+1. Navigate to **Contacts → Add Contact → Proof of Life**.
+2. Tap **Begin Ceremony**. State: IDLE → INITIATED.
+3. **You scan your contact’s card:** Tap “Tap your contact’s Name Tag.” Hold your device to your contact’s NFC card.
+   - Satnam reads the card and verifies the CMAC client-side. State: INITIATED → SCANNING_PEER → PEER_VERIFIED.
+4. **Your contact scans your card:** Satnam shows “Now have your contact scan your card.” Your contact taps their device to your NFC card.
+   - State: PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED.
+5. **Both users enter their PINs.** You enter your PIN; your contact enters theirs. State: MUTUAL_VERIFIED → PIN_EXCHANGE.
+6. Satnam constructs two bilateral `kind:30078` attestation events:
    ```json
    {
      "kind": 30078,
      "tags": [
        ["d", "satnam:proof-of-life"],
-       ["card_uid_hash", "<sha256_of_card_uid>"],
-       ["guardian", "<your_pubkey>"],
-       ["cmac_counter", "47"],
-       ["t", "proof-of-life"]
+       ["p", "<contact_pubkey>"],
+       ["nfc-card-hash", "<sha256_of_contact_card_uid>"],
+       ["ots", "<opentimestamps_commitment>"],
+       ["bilateral", "true"]
      ],
-     "content": "{\"timestamp\": 1700000000, \"ceremony_type\": \"presence\"}"
+     "content": "{\"timestamp\": 1700000000, \"ceremony_type\": \"mutual\"}"
    }
    ```
-8. You sign and publish: SIGNED → PUBLISHED
-9. Satnam waits for relay confirmation: PUBLISHED → CONFIRMED
+   State: PIN_EXCHANGE → ATTESTING.
+7. Both events are published to Pylon and the OTS commitment is submitted. State: ATTESTING → PUBLISHED.
+8. Satnam waits for relay confirmation: PUBLISHED → CONFIRMED.
 
-The Proof of Life event is now on the Nostr relay network, anchored with a Bitcoin timestamp via OpenTimestamps (if simpleproof-anchor is called).
+After the ceremony, your new contact appears in your contact list. Any future DM or Zap they send you will require them to tap their NFC card + enter their PIN before the event publishes.
 
 ---
 

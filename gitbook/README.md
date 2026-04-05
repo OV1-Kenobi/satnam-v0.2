@@ -62,4 +62,4 @@ Satnam sits at the **user management vertex** of the Sovereignty Tetrahedron —
 | React components | 35 |
 | Application pages | 7 |
 
-> **Note:** Satnam v2 is a complete greenfield rebuild. If you are migrating from v1, see the [Migration Guide](./overview/architecture.md#custody-model) for the custody migration path.
+> **Note:** Satnam v2 is a complete greenfield rebuild. v1 was a research and development prototype with only test accounts — no user data, credentials, or configuration carries over from v1.

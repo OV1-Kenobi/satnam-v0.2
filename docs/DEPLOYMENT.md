@@ -63,10 +63,6 @@ npx netlify dev
 | `VITE_CASHU_ENABLED` | Enable Cashu eCash features | `false` |
 | `VITE_NIP90_ENABLED` | Enable NIP-90 DVM marketplace | `false` |
 | `VITE_PROBE_ENABLED` | Enable Probe session monitoring | `false` |
-| `MIGRATION_DRY_RUN` | Dry-run mode for migration script | `false` |
-| `V1_SUPABASE_URL` | v1 Supabase URL (migration only) | — |
-| `V1_SUPABASE_SERVICE_KEY` | v1 service key (migration only) | — |
-
 ### Security Note
 
 `SUPABASE_SERVICE_ROLE_KEY` bypasses Supabase RLS. It is only used in Netlify functions (server-side). Never set it in `VITE_*` variables or expose it to the client bundle.
@@ -97,7 +93,6 @@ CREATE TABLE IF NOT EXISTS public.nip05_identifiers (
   pubkey        text NOT NULL,
   domain        text NOT NULL DEFAULT 'satnam.pub',
   is_active     boolean NOT NULL DEFAULT true,
-  migrated_from_v1 boolean DEFAULT false,
   created_at    timestamptz NOT NULL DEFAULT now(),
   UNIQUE (username, pubkey),
   UNIQUE (username)
@@ -110,7 +105,6 @@ CREATE TABLE IF NOT EXISTS public.lightning_addresses (
   lud16         text NOT NULL,
   username      text,
   domain        text NOT NULL DEFAULT 'satnam.pub',
-  migrated_from_v1 boolean DEFAULT false,
   created_at    timestamptz NOT NULL DEFAULT now()
 );
 

@@ -157,7 +157,7 @@ The verifier is stored in OPFS. The PIN is never stored. Verification compares t
 
 ## ProofOfLifeService State Machine
 
-The Proof of Life ceremony proves physical presence of an NFC cardholder. It is used for identity verification, recovery ceremonies, and governance confirmations.
+The Proof of Life ceremony is a **mutual contact attestation** between two Satnam users who are physically co-present. Both users scan each other's NFC "Name Tag" card. The ceremony produces bilateral `kind:30078` events, adding each person to the other's contact list and establishing the NFC card as a physical authenticator for all future communications from that contact.
 
 ### State Machine
 
@@ -165,22 +165,31 @@ The Proof of Life ceremony proves physical presence of an NFC cardholder. It is 
 IDLE
   │
   ▼
-INITIATED ────────────────────────────────────────────► FAILED (timeout)
-  │                                                         ▲
-  ▼                                                         │
-CARD_TAPPED ──────────────────────────────────────────► FAILED (invalid CMAC)
-  │                                                         ▲
-  ▼                                                         │
-PIN_VERIFIED ─────────────────────────────────────────► FAILED (wrong PIN / lockout)
+INITIATED ───────────────────────────────────────────────────────► FAILED (timeout)
+  │                                                                     ▲
+  ▼                                                                     │
+SCANNING_PEER (User A scans User B's card) ──────────────────────► FAILED (invalid CMAC)
+  │                                                                     ▲
+  ▼                                                                     │
+PEER_VERIFIED (User B's card CMAC verified) ─────────────────────► FAILED (timeout)
+  │                                                                     ▲
+  ▼                                                                     │
+AWAITING_RECIPROCAL (User B scans User A's card) ────────────────► FAILED (invalid CMAC)
+  │                                                                     ▲
+  ▼                                                                     │
+MUTUAL_VERIFIED (both scans complete) ───────────────────────────► FAILED (timeout)
+  │                                                                     ▲
+  ▼                                                                     │
+PIN_EXCHANGE (both users enter their PINs) ──────────────────────► FAILED (wrong PIN / lockout)
   │
   ▼
-SIGNED (Nostr kind:30078 event constructed)
+ATTESTING (bilateral kind:30078 events constructed)
   │
   ▼
-PUBLISHED (event published to Pylon via CEPS)
+PUBLISHED (events published to Pylon via CEPS + OTS committed)
   │
   ▼
-CONFIRMED (relay ACK received)
+CONFIRMED (relay ACK received by both sides)
 ```
 
 ### `ProofOfLifeService` Class
@@ -189,59 +198,99 @@ CONFIRMED (relay ACK received)
 type ProofOfLifeState =
   | 'IDLE'
   | 'INITIATED'
-  | 'CARD_TAPPED'
-  | 'PIN_VERIFIED'
-  | 'SIGNED'
+  | 'SCANNING_PEER'
+  | 'PEER_VERIFIED'
+  | 'AWAITING_RECIPROCAL'
+  | 'MUTUAL_VERIFIED'
+  | 'PIN_EXCHANGE'
+  | 'ATTESTING'
   | 'PUBLISHED'
   | 'CONFIRMED'
   | 'FAILED';
 
-interface ProofOfLifeEvent {
-  timestamp: number;        // Unix timestamp of ceremony
-  cardUidHash: string;      // SHA-256 of card UID (privacy — UID not exposed)
-  guardianPubkey: string;   // Guardian who initiated or witnessed
-  readCounter: number;      // CMAC counter at time of proof (proves recency)
-  gpsCoords?: string;       // Optional, ephemeral — only if user consents
+interface ProofOfLifeAttestation {
+  timestamp: number;         // Unix timestamp of ceremony
+  peerPubkey: string;        // The OTHER participant's pubkey (the new contact)
+  peerCardUidHash: string;   // SHA-256 of the OTHER participant's card UID
+  otsCommitment: string;     // OpenTimestamps commitment hash
+  bilateral: true;           // Always true — solo attestation is not supported
 }
 
 class ProofOfLifeService {
   readonly state: ProofOfLifeState;
-  readonly lastEvent?: ProofOfLifeEvent;
-
-  /** Initiate a new ceremony. Returns a session ID. */
-  initiate(guardianPubkey: string, timeoutMs?: number): Promise<string>;
-
-  /** Process an NFC tap. Updates state to CARD_TAPPED if CMAC is valid. */
-  processTap(cardUid: string, piccDataHex: string, cmacHex: string): Promise<void>;
-
-  /** Verify PIN and advance to PIN_VERIFIED. */
-  verifyPin(pin: string): Promise<void>;
+  readonly lastAttestation?: ProofOfLifeAttestation;
 
   /**
-   * Sign and publish the Proof of Life event.
-   * Constructs kind:30078 with d-tag 'satnam:proof-of-life'.
-   * Publishes via CEPS to Pylon.
+   * Initiate a new mutual ceremony. User A starts here.
+   * Returns a session ID.
    */
-  publish(opts?: { includeGps?: boolean }): Promise<string>; // Returns event ID
+  initiate(timeoutMs?: number): Promise<string>;
+
+  /**
+   * Process User A scanning User B's NFC card.
+   * Verifies the CMAC client-side.
+   * Updates state: INITIATED → SCANNING_PEER → PEER_VERIFIED (or FAILED).
+   */
+  scanPeer(cardUid: string, piccDataHex: string, cmacHex: string): Promise<void>;
+
+  /**
+   * Process User B scanning User A's NFC card (reciprocal step).
+   * Updates state: PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED (or FAILED).
+   */
+  processReciprocal(cardUid: string, piccDataHex: string, cmacHex: string): Promise<void>;
+
+  /**
+   * Verify both PINs and advance to PIN_EXCHANGE → ATTESTING.
+   * @param myPin - The local user's PIN
+   * @param peerPin - The peer's PIN (entered on their device; passed here for bilateral auth)
+   */
+  exchangePins(myPin: string, peerPin: string): Promise<void>;
+
+  /**
+   * Construct and publish bilateral kind:30078 events.
+   * Submits OTS commitment via simpleproof-anchor.
+   * Updates contact list (kind:3 or kind:30000).
+   * Returns array of published event IDs [myEventId, peerEventId].
+   */
+  publish(opts?: { includeLocation?: boolean }): Promise<[string, string]>;
 
   /** Subscribe to state changes. */
   onStateChange(callback: (state: ProofOfLifeState) => void): () => void;
 }
 ```
 
-### Proof of Life Nostr Event
+### PIN-Gated Operations Added After Ceremony
+
+The Proof of Life ceremony establishes `message_send` and `zap_send` as PIN-gated operations for the attested contact:
+
+```typescript
+type PinGatedOperation =
+  | 'proof_of_life'        // The ceremony itself
+  | 'contact_modify'       // Add/remove contact
+  | 'payment_above_threshold'
+  | 'group_membership'
+  | 'agent_delegation'
+  | 'message_send'         // NIP-17 DM to a PoL-verified contact
+  | 'zap_send';            // Zap payment to a PoL-verified contact
+```
+
+### Bilateral kind:30078 Event Structure
+
+Each participant publishes one event, pointing to the OTHER participant:
 
 ```json
 {
   "kind": 30078,
+  "pubkey": "<participant_A_pubkey>",
+  "created_at": 1700000000,
   "tags": [
     ["d", "satnam:proof-of-life"],
-    ["guardian", "<guardianPubkeyHex>"],
-    ["counter", "<readCounterDecimal>"],
-    ["card", "<cardUidHash>"]
+    ["p", "<participant_B_pubkey>"],
+    ["nfc-card-hash", "<sha256_of_participant_B_card_uid>"],
+    ["ots", "<opentimestamps_commitment>"],
+    ["bilateral", "true"]
   ],
-  "content": "<JSON-encoded ProofOfLifeEvent>",
-  "created_at": 1700000000
+  "content": "<JSON-encoded ProofOfLifeAttestation>"
 }
 ```
 

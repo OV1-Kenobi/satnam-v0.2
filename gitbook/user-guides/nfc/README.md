@@ -69,13 +69,13 @@ The Satnam PWA intercepts the URL, extracts `piccDataHex` and `cmacHex` as query
 
 ## What NFC Enables in Satnam
 
-### 1. Physical Presence Verification
+### 1. Physical Presence Verification and Mutual Contact Exchange
 
 NFC provides proof that a real person tapped a real card at a real moment. Unlike purely digital operations, NFC ceremonies require physical possession of the card. This is used for:
 
-- **Proof of Life ceremonies** — Verifying a group member is alive and in possession of their card
+- **Proof of Life ceremonies** — Two Satnam users meet in person and each scans the other’s NFC card. This creates a bilateral, cryptographically attested contact record, adding each person to the other’s contact list and anchoring the npub↗NFC card connection via OpenTimestamps. After the ceremony, that contact’s NFC card acts as a physical authenticator for all future communications — every DM or Zap they send to you requires them to tap their card and enter their PIN first.
 - **High-value authorizations** — Requiring card tap before authorizing payments above threshold
-- **Identity binding** — Linking a physical card to a Nostr identity
+- **Identity binding** — Linking a physical card (“Name Tag”) to a Nostr identity
 
 ### 2. Hardware-Backed Signing
 

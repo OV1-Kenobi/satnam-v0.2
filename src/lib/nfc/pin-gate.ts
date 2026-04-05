@@ -54,7 +54,11 @@ export type PinGatedOperation =
   | 'proof_of_life'
   | 'payment_above_threshold'
   | 'group_membership_change'
-  | 'agent_delegation_change';
+  | 'agent_delegation_change'
+  /** NIP-17 DM to a PoL-verified contact requires NFC card tap + PIN */
+  | 'message_send'
+  /** Zap payment to a PoL-verified contact requires NFC card tap + PIN */
+  | 'zap_send';
 
 /** argon2id parameters per spec §5.3 */
 const ARGON2_PARAMS = { m: 65536, t: 3, p: 4 } as const;

@@ -185,7 +185,7 @@ If running your own Pylon instance:
 | `VITE_ENABLE_CASHU` | No | Enable Cashu feature (default: false) |
 | `VITE_ENABLE_NIP90` | No | Enable DVM marketplace (default: false) |
 | `VITE_ENABLE_FROST` | No | Enable FROST group keys (default: false) |
-| `VITE_ENABLE_MIGRATION` | No | Enable v1→v2 migration UI (default: false) |
+
 
 ### Server-Side (Netlify Function env — never in client bundle)
 

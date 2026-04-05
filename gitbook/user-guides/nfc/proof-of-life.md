@@ -1,204 +1,167 @@
 # Proof of Life
 
-**Proof of Life** is a Satnam ceremony that proves a group member is physically present and in possession of their NFC card at a specific moment in time. It produces a signed, timestamped Nostr event (kind:30078) that serves as a cryptographic affidavit of presence.
+**Proof of Life** is a Satnam ceremony in which two users who are physically co-present each scan the other's NFC "Name Tag" card. The result is a bilateral, OTS-anchored attestation that proves the npub↔NFC card connection for both participants. After the ceremony, the other person becomes an authenticated contact — their card acts as a physical authenticator for every DM and Zap they send you.
 
 ---
 
 ## What Is Proof of Life?
 
-In trust structures, a "proof of life" is evidence that a person is alive and capable of authorizing actions on their own behalf. Satnam's Proof of Life ceremony provides a digital equivalent:
+The ceremony is **mutual, not solo**. Both participants must be present and both must scan each other's card. This design ensures that only living humans — not bots or agents — can create a Proof of Life relationship.
 
-- **Card possession** — Verified by NTAG424 CMAC authentication
-- **PIN knowledge** — Verified by argon2id PIN verifier check
-- **Moment of time** — Anchored by the CMAC counter (monotonically increasing, prevents replay)
-- **Identity binding** — The resulting event is signed by the member's Nostr nsec
+When two users complete the ceremony:
 
-The published Proof of Life event can be used by:
-- Guardians verifying that a beneficiary is alive and capable
-- Smart trust protocols that trigger actions on periodic Proof of Life confirmation
-- Legal or governance structures requiring documented presence attestation
-- Group operations that require physical co-presence
+1. **Each person is added to the other's contact list** (bidirectional).
+2. **A bilateral OTS-anchored Nostr event is published** — a `kind:30078` event that attests to the npub↔NFC card connection for both participants.
+3. **Physical MFA is established for all future communications** — any time that contact sends you a DM or Zap, their device requires them to tap their NFC card and enter their PIN before the event publishes.
+
+### Why Only Humans Can Do This
+
+The NFC card is a physical "Name Tag." It can only be tapped by someone holding it in their hands. Combined with the PIN, the ceremony proves that a living human with physical possession of a specific card controls a specific npub. This becomes the trust root for all future interactions from that contact.
 
 ---
 
-## The Ceremony Flow: 7 States
-
-The Proof of Life ceremony is a state machine with seven states:
+## The Ceremony Flow: 10 States
 
 ```
 IDLE
   │
-  │  Member initiates ceremony
+  │  User A initiates the ceremony
   ▼
 INITIATED
   │
-  │  Member taps NTAG424 card
+  │  User A scans User B's NFC "Name Tag" card
   ▼
-CARD_TAPPED
+SCANNING_PEER
   │
-  │  Client verifies CMAC (Section 5.2)
-  │  Verifies counter is monotonically increasing
+  │  User B's card CMAC is verified client-side
   ▼
-  [If CMAC invalid or counter reused → FAILED]
+PEER_VERIFIED
   │
+  │  User B scans User A's NFC card (reciprocal)
   ▼
-PIN_VERIFIED
+AWAITING_RECIPROCAL
   │
-  │  Member enters PIN
-  │  argon2id(pin, card_uid) compared to stored verifier
+  │  Both scans are complete
   ▼
-  [If PIN wrong → FAILED]
+MUTUAL_VERIFIED
   │
+  │  Both users enter their PINs to authorize
   ▼
-SIGNED
+PIN_EXCHANGE
   │
-  │  Client constructs and signs kind:30078 event with nsec
+  │  Bilateral attestation events are constructed
+  ▼
+ATTESTING
+  │
+  │  Events published to relay + OpenTimestamps anchored
   ▼
 PUBLISHED
   │
-  │  CEPS publishes event to Pylon and configured relays
+  │  Both sides confirm receipt
   ▼
-CONFIRMED
-  │
-  │  Event confirmed by relay (EOSE received)
-  ▼
-  [Success]
+CONFIRMED ✓
+
+FAILED — reached from any state on timeout, invalid CMAC, or wrong PIN
 ```
 
-**FAILED** can be reached from CARD_TAPPED (invalid CMAC or replayed counter) or PIN_VERIFIED (wrong PIN, 3 retries before lockout).
+---
+
+## Step-by-Step: Performing the Ceremony
+
+**What you need:** Two Satnam users, physically co-present. Both must have provisioned NTAG424 NFC cards and set their PINs. Android is required for scanning (iOS cannot use Web NFC API to initiate scanning; iOS users can participate in the reciprocal step via Universal Link).
+
+1. **User A** navigates to **Contacts → Add Contact → Proof of Life**.
+2. Tap **Begin Ceremony**. State: `IDLE → INITIATED`.
+3. **SCANNING_PEER:** User A sees: "Tap your contact's Name Tag."
+   - User A holds their device to User B's NFC card.
+   - Satnam reads User B's card and verifies the CMAC client-side.
+   - State: `SCANNING_PEER → PEER_VERIFIED`.
+
+4. **AWAITING_RECIPROCAL:** Satnam shows: "Now have your contact scan your card."
+   - User A holds their NFC card up. User B taps their own device to User A's card.
+   - Alternatively, User A hands their device to User B, who uses it to scan User A's card.
+   - Both scans are now complete. State: `AWAITING_RECIPROCAL → MUTUAL_VERIFIED`.
+
+5. **PIN_EXCHANGE:** Both users enter their PINs.
+   - User A enters their PIN on their device.
+   - User B enters their PIN on their device (or is prompted by User A's device if sharing).
+   - State: `MUTUAL_VERIFIED → PIN_EXCHANGE`.
+
+6. **ATTESTING:** Satnam constructs two bilateral attestation events — one for each participant. State: `PIN_EXCHANGE → ATTESTING`.
+
+7. **PUBLISHED:** CEPS publishes both events to Pylon and the configured relays, and submits an OpenTimestamps commitment. State: `ATTESTING → PUBLISHED`.
+
+8. **CONFIRMED:** Both sides confirm relay receipt. State: `PUBLISHED → CONFIRMED`.
+
+A success screen shows the new contact's npub, NIP-05 identifier (if set), and a link to the published event ID.
 
 ---
 
-## Step-by-Step: Performing a Ceremony
+## What Gets Published
 
-1. Navigate to **Groups → [Your Group] → Proof of Life**.
-2. Click **Begin Ceremony**.
-
-   The ceremony can also be initiated by a Guardian on behalf of a member (remote request) — the member receives a NIP-17 direct message with the ceremony link.
-
-3. **INITIATED:** Satnam displays: "Tap your NFC card now."
-
-4. **CARD_TAPPED:** Tap your NTAG424 card to your device.
-   - Android: Hold the card to the back of your phone.
-   - iOS: Tap the card — the Universal Link opens Satnam automatically.
-
-   Satnam reads the SUN message and verifies the CMAC client-side. Progress shows:
-   - ✓ Card detected
-   - ✓ CMAC verified
-   - ✓ Counter valid (not replayed)
-
-5. **PIN GATE:** A PIN entry dialog appears.
-
-   Enter your 4–8 digit PIN. Satnam:
-   - Derives `argon2id(pin, card_uid_as_salt, {m: 65536, t: 3, p: 4})` → 32-byte verifier
-   - Compares to the stored verifier in OPFS Vault
-   - If correct: proceeds to SIGNED state
-   - If incorrect: shows remaining attempts (3 total before lockout)
-
-6. **SIGNED:** Satnam constructs the Proof of Life event.
-
-7. **PUBLISHED:** CEPS publishes the event.
-
-8. **CONFIRMED:** Relay confirms receipt. The ceremony is complete.
-
-A success screen shows the event details and a shareable event ID link.
-
----
-
-## The Proof of Life Event (kind:30078)
-
-The published event is a NIP-78 application-specific data event:
+For each participant, the ceremony publishes one `kind:30078` event:
 
 ```json
 {
   "kind": 30078,
-  "pubkey": "<member_pubkey>",
+  "pubkey": "<participant_A_pubkey>",
   "created_at": <unix_timestamp>,
   "tags": [
     ["d", "satnam:proof-of-life"],
-    ["card_uid_hash", "<sha256_of_card_uid>"],
-    ["guardian", "<guardian_pubkey>"],
-    ["cmac_counter", "<counter_value>"],
-    ["relay", "wss://pylon.openagents.com"]
+    ["p", "<participant_B_pubkey>"],
+    ["nfc-card-hash", "<sha256_of_participant_B_card_uid>"],
+    ["ots", "<opentimestamps_commitment>"],
+    ["bilateral", "true"]
   ],
-  "content": ""
+  "content": "{\"timestamp\": 1700000000, \"ceremony_type\": \"mutual\", \"peer_pubkey_hash\": \"...\"}"
 }
 ```
 
-**Privacy design:**
-- The card UID is **hashed** (SHA-256), not included in plaintext. This prevents correlating the UID across events.
-- GPS coordinates are **opt-in** only — a location consent dialog appears before publishing. If consented, coordinates are included as an `["location", "lat", "lon"]` tag. Location data is ephemeral — it is not stored by Satnam; it exists only in the published event.
-- The CMAC counter value proves recency (high counter = recent tap, cannot be replayed from an old tap).
+And a contact list update (`kind:3` or `kind:30000`) adding the new contact.
+
+**What each field means:**
+- `p` tag — the OTHER participant's pubkey (the contact being added)
+- `nfc-card-hash` — SHA-256 of the OTHER participant's card UID (hashed for privacy — the UID is not exposed in plaintext)
+- `ots` — OpenTimestamps commitment, anchored to Bitcoin later via the `simpleproof-anchor` function
+- `bilateral` — marks this as a mutual ceremony, not a solo attestation
 
 ---
 
-## PIN Gate Security
+## After the Ceremony: PIN-Gated Communications
 
-The PIN gate is enforced before any Proof of Life event is signed. Here is the full technical flow:
+Once a contact is established via Proof of Life, **every DM and Zap that contact sends you** is a PIN-gated operation on their end:
 
-1. Member enters PIN (4–8 digits).
-2. Client derives: `argon2id(pin, card_uid_bytes, { m: 65536, t: 3, p: 4 })` → 32-byte verifier.
-3. Client compares the derived verifier to the stored verifier in OPFS Vault (`nfc/{card_uid}.pin_verifier`).
-4. If PIN is correct: operation proceeds.
-5. If PIN is wrong: counter increments. After 3 failed attempts, the card is locked for 15 minutes.
+| Operation | Trigger | Requirement |
+|---|---|---|
+| `message_send` | NIP-17 DM to a PoL-verified contact | Card tap + PIN on the sender's device |
+| `zap_send` | Zap payment to a PoL-verified contact | Card tap + PIN on the sender's device |
 
-**PIN-gated operations in Satnam:**
-
-| Operation | Requires PIN |
-|---|---|
-| Proof of Life ceremony | Yes |
-| Contact addition/removal | Yes |
-| Payment authorization above threshold | Yes |
-| Group membership changes | Yes |
-| Agent delegation changes | Yes |
-
-The PIN never leaves the client. The server receives a derived verifier hash for the HMAC operation token — it cannot recover the original PIN from the hash.
+This ensures only a living human with physical possession of their card can initiate communications to you. A bot, agent, or stolen key cannot send you a DM or Zap without also tapping the card and knowing the PIN.
 
 ---
 
-## When to Use Proof of Life
+## Privacy Design
 
-| Scenario | Use Case |
-|---|---|
-| Trust maintenance | A Guardian requests periodic Proof of Life from all beneficiaries (e.g., annually) |
-| Recovery authorization | Before releasing a group's FROST shares in a recovery ceremony |
-| High-value spending | Guardian co-signs a payment by providing Proof of Life |
-| Compliance | Legal or regulatory requirements for presence attestation |
-| Agent operator verification | Human operator proves presence before extending agent autonomy |
-
-### Offspring Members
-
-Offspring members can perform a Proof of Life ceremony, but it requires a Guardian co-signature. The ceremony flow adds an additional step:
-
-```
-... PIN_VERIFIED
-  │
-  ▼
-GUARDIAN_COSIGN_REQUESTED
-  │  (Guardian receives NIP-17 message with ceremony event)
-  │  (Guardian reviews and co-signs)
-  ▼
-SIGNED  →  PUBLISHED  →  CONFIRMED
-```
+- The NFC card UID is **hashed** (SHA-256) in all published events. The raw UID is never exposed.
+- The ceremony content is signed by each participant's nsec but does not reveal the card UID in plaintext.
+- Location data is **opt-in only** — a consent dialog appears before publishing. If granted, coordinates are included as an ephemeral tag; they are not stored by Satnam.
 
 ---
 
-## Viewing Proof of Life History
+## Viewing Proof of Life Contacts
 
-Navigate to **Groups → [Your Group] → Members → [Member Name] → Proof of Life History**.
+Navigate to **Contacts → [Contact Name] → Proof of Life**.
 
-The history shows all published kind:30078 events for that member, sorted by timestamp. Each entry shows:
+The contact detail shows:
 - Ceremony date and time
-- CMAC counter value
-- Location (if consent was given)
-- Guardian who co-signed (for Offspring ceremonies)
-- Event ID (linkable to the Nostr relay)
+- The other party's npub and NIP-05 identifier (if set)
+- The OTS-anchored event ID (linkable to the Nostr relay)
+- PIN-gate status for this contact (active / suspended)
 
 ---
 
 ## Related Pages
 
 - [NFC Operations Overview](./README.md) — Card types, Android vs. iOS, CMAC verification
-- [Group Management](../groups/README.md) — How Proof of Life fits into trust management
-- [Managing Roles](../groups/managing-roles.md) — Guardian co-signature for Offspring
-- [OPFS Vault](../../overview/architecture.md#opfs-vault-structure) — Where PIN verifiers and NFC keys are stored
+- [Setting Up NFC Cards](../../tutorials/nfc-setup.md) — How to provision a card before the ceremony
+- [OPFS Vault](../../overview/architecture.md#opfs-vault-structure) — Where NFC keys and PIN verifiers are stored

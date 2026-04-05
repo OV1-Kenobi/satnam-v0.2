@@ -51,14 +51,14 @@ WalletPage
 ```
 NfcTapHandler               — Continuous Web NFC scan; iOS Universal Link handler
 ├── PinEntry                — 4–8 digit PIN pad with lockout countdown
-└── ProofOfLifeFlow         — State machine UI: tap → PIN → sign → publish → confirm
+└── ProofOfLifeFlow         — Mutual ceremony UI: scan peer → await reciprocal → PIN exchange → attest → publish → confirm
 ```
 
 | Component | File | Description |
 |---|---|---|
 | `NfcTapHandler` | `src/components/nfc/NfcTapHandler.tsx` | Manages NFC reader lifecycle; calls `nfc.processTap()` |
 | `PinEntry` | `src/components/nfc/PinEntry.tsx` | Masked PIN input, shows lockout timer if locked |
-| `ProofOfLifeFlow` | `src/components/nfc/ProofOfLifeFlow.tsx` | Full Proof of Life ceremony with 7-state progress indicator |
+| `ProofOfLifeFlow` | `src/components/nfc/ProofOfLifeFlow.tsx` | Full mutual Proof of Life ceremony with 10-state progress indicator: IDLE → INITIATED → SCANNING_PEER → PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED → PIN_EXCHANGE → ATTESTING → PUBLISHED → CONFIRMED |
 
 ---
 

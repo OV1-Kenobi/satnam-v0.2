@@ -174,8 +174,11 @@ See **NWC**.
 **NIP-65**
 The relay list specification. kind:10002 events declare a Principal's preferred read/write relays. Satnam uses NIP-65 for relay discovery and fallback routing via CEPS.
 
+**Name Tag**
+The NFC card (NTAG424 DNA) carried by a Satnam user as a physical identity token. The Name Tag is presented to another user during the Proof of Life ceremony. After the ceremony, the Name Tag acts as a smart card — authenticating all DMs and Zaps its owner sends to that contact by requiring a card tap and PIN before the event publishes.
+
 **NIP-78**
-Application-specific data (kind:30078). Used for Satnam's Proof of Life ceremony events tagged with `d: satnam:proof-of-life`. See [Proof of Life](../user-guides/nfc/proof-of-life.md).
+Application-specific data (kind:30078). Used for Satnam's Proof of Life ceremony events tagged with `d: satnam:proof-of-life`. Each event is bilateral: it attests to the npub↔NFC card connection of BOTH participants, with a `p` tag pointing to the contact being added and an `nfc-card-hash` tag containing the SHA-256 of that contact's card UID. See [Proof of Life](../user-guides/nfc/proof-of-life.md).
 
 **NIP-90**
 Data Vending Machine specification. Defines job request (kinds 5000–5999), job result (kinds 6000–6999), job feedback (kind:7000), and provider announcement (kind:31990) events. See [DVM Marketplace](../user-guides/marketplace/README.md).
@@ -243,7 +246,7 @@ A human user who holds a root Nostr keypair. The sovereign entity in the Satnam 
 The OpenAgents coding agent. Satnam provides session monitoring, tool call approval UI, and execution result display for Probe sessions via trajectory event subscriptions (kinds 39230/39231). See [Monitoring Agents](../user-guides/agents/monitoring-agents.md).
 
 **Proof of Life**
-A NIP-78 ceremony that proves physical presence of an NFC card holder. The ceremony runs through seven states: IDLE → INITIATED → CARD_TAPPED → PIN_VERIFIED → SIGNED → PUBLISHED → CONFIRMED. See [Proof of Life](../user-guides/nfc/proof-of-life.md).
+A mutual contact attestation ceremony in which two Satnam users who are physically co-present each scan the other’s NFC “Name Tag” card. The ceremony produces bilateral `kind:30078` events with OTS commitments, attesting to the npub↔NFC card connection for both participants and adding each person to the other’s contact list. After the ceremony, the contact’s NFC card acts as a physical authenticator: every DM and Zap they send requires a card tap + PIN on their device. The state machine runs: IDLE → INITIATED → SCANNING_PEER → PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED → PIN_EXCHANGE → ATTESTING → PUBLISHED → CONFIRMED. See [Proof of Life](../user-guides/nfc/proof-of-life.md).
 
 ---
 

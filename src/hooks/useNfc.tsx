@@ -5,12 +5,16 @@
  * Provides:
  * - NFC tap state management (Web NFC + iOS Universal Link)
  * - PIN gate operations (setup, verify, lockout state)
- * - Proof of Life ceremony management
+ * - Proof of Life ceremony management (mutual contact exchange)
  * - Platform detection
+ *
+ * The PoL ceremony is a bilateral mutual contact exchange — two co-present
+ * users scan each other's NFC "Name Tag" cards, then both enter their PINs
+ * to authorize bilateral attestation events published to Nostr.
  *
  * @example
  * ```tsx
- * const { tap, pinGate, pol, startPolCeremony } = useNfc({ vault, cardUid });
+ * const { tap, pinGate, polCeremony, startPolCeremony } = useNfc({ vault, cardUid });
  * ```
  */
 
@@ -29,7 +33,10 @@ import {
   isWebNfcAvailable,
   type NfcUrlParams,
 } from '../lib/nfc/ios-fallback.js';
-import type { PolCeremony } from '../lib/nfc/proof-of-life.js';
+import type {
+  PolCeremony,
+  PeerScanResult,
+} from '../lib/nfc/proof-of-life.js';
 import type { VaultOps } from '../lib/vault/types.js';
 import type { NfcTapEvent } from '../components/nfc/NfcTapHandler.js';
 
@@ -42,7 +49,7 @@ interface UseNfcOptions {
   vault?: VaultOps;
   /** Card UID to scope PIN gate to (if known in advance) */
   cardUid?: string;
-  /** Guardian pubkey for PoL ceremonies */
+  /** Local user's pubkey for PoL ceremonies */
   guardianPubkey?: string;
   /** Called when a card is tapped */
   onTap?: (event: NfcTapEvent) => void;
@@ -72,15 +79,36 @@ interface UseNfcReturn {
   createOperationToken: (cardUid: string, operationPayload: Uint8Array, pin: string) => Promise<Uint8Array>;
   hasPinSetup: (cardUid: string) => Promise<boolean>;
 
-  // Proof of Life
+  // Proof of Life — mutual contact exchange ceremony
   polCeremony: PolCeremony | null;
   polService: ProofOfLifeService | null;
-  startPolCeremony: (guardianPubkey: string) => Promise<PolCeremony | null>;
-  processPolTap: (piccDataHex: string, cmacHex: string) => Promise<void>;
-  processPolPin: (pin: string) => Promise<void>;
-  signPolEvent: (signerNsec: string) => Promise<void>;
-  publishPolEvent: (relayUrl: string) => Promise<void>;
+  /** Start a new PoL ceremony as the local user */
+  startPolCeremony: (localPubkey: string) => Promise<PolCeremony | null>;
+  /** Scan the PEER's NFC card (local user taps peer's card) */
+  scanPolPeerCard: (piccDataHex: string, cmacHex: string) => Promise<void>;
+  /** Mark ceremony as awaiting reciprocal scan */
+  awaitPolReciprocal: () => Promise<void>;
+  /** Confirm that peer has scanned our card */
+  confirmPolReciprocalScan: (peerScanResult: PeerScanResult) => Promise<void>;
+  /** Local user verifies their PIN */
+  verifyPolLocalPin: (pin: string) => Promise<void>;
+  /** Acknowledge that peer has verified their PIN */
+  verifyPolPeerPin: () => Promise<void>;
+  /** Construct bilateral attestation events */
+  constructPolAttestations: (localNsec: string) => Promise<void>;
+  /** Publish attestation events to relay */
+  publishPolAttestations: (relayUrl: string) => Promise<void>;
   resetPol: () => void;
+
+  // Deprecated — kept for backward compatibility
+  /** @deprecated Use startPolCeremony(localPubkey) */
+  processPolTap: (piccDataHex: string, cmacHex: string) => Promise<void>;
+  /** @deprecated Use verifyPolLocalPin */
+  processPolPin: (pin: string) => Promise<void>;
+  /** @deprecated Use constructPolAttestations */
+  signPolEvent: (signerNsec: string) => Promise<void>;
+  /** @deprecated Use publishPolAttestations */
+  publishPolEvent: (relayUrl: string) => Promise<void>;
 
   // Loading states
   isPinLoading: boolean;
@@ -222,10 +250,10 @@ export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
     return gate.hasPinSetup();
   }, [_getPinGate]);
 
-  // ── Proof of Life methods ──────────────────────────────────────────────────
+  // ── Proof of Life methods (new mutual ceremony) ────────────────────────────
 
   const startPolCeremony = useCallback(async (
-    gpubkey: string,
+    localPubkey: string,
   ): Promise<PolCeremony | null> => {
     const svc = _getPolService();
     if (!svc) {
@@ -235,7 +263,7 @@ export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
     setIsPolLoading(true);
     setPolError(null);
     try {
-      const ceremony = await svc.initiate(gpubkey);
+      const ceremony = await svc.initiateCeremony(localPubkey);
       setPolCeremony(ceremony);
       return ceremony;
     } catch (err) {
@@ -246,12 +274,12 @@ export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
     }
   }, [_getPolService]);
 
-  const processPolTap = useCallback(async (piccDataHex: string, cmacHex: string) => {
+  const scanPolPeerCard = useCallback(async (piccDataHex: string, cmacHex: string) => {
     const svc = _getPolService();
     if (!svc || !polCeremony) return;
     setIsPolLoading(true);
     try {
-      const updated = await svc.processCardTap(polCeremony, piccDataHex, cmacHex);
+      const updated = await svc.scanPeerCard(polCeremony, piccDataHex, cmacHex);
       setPolCeremony(updated);
       if (updated.state === 'FAILED') setPolError(updated.error ?? null);
     } finally {
@@ -259,13 +287,39 @@ export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
     }
   }, [polCeremony, _getPolService]);
 
-  const processPolPin = useCallback(async (pin: string) => {
+  const awaitPolReciprocal = useCallback(async () => {
+    const svc = _getPolService();
+    if (!svc || !polCeremony) return;
+    setIsPolLoading(true);
+    try {
+      const updated = await svc.awaitReciprocalScan(polCeremony);
+      setPolCeremony(updated);
+      if (updated.state === 'FAILED') setPolError(updated.error ?? null);
+    } finally {
+      setIsPolLoading(false);
+    }
+  }, [polCeremony, _getPolService]);
+
+  const confirmPolReciprocalScan = useCallback(async (peerScanResult: PeerScanResult) => {
+    const svc = _getPolService();
+    if (!svc || !polCeremony) return;
+    setIsPolLoading(true);
+    try {
+      const updated = await svc.confirmReciprocalScan(polCeremony, peerScanResult);
+      setPolCeremony(updated);
+      if (updated.state === 'FAILED') setPolError(updated.error ?? null);
+    } finally {
+      setIsPolLoading(false);
+    }
+  }, [polCeremony, _getPolService]);
+
+  const verifyPolLocalPin = useCallback(async (pin: string) => {
     const svc = _getPolService();
     if (!svc || !polCeremony) return;
     setIsPolLoading(true);
     setPolError(null);
     try {
-      const updated = await svc.processPin(polCeremony, pin);
+      const updated = await svc.verifyLocalPin(polCeremony, pin);
       setPolCeremony(updated);
       if (updated.state === 'FAILED') setPolError(updated.error ?? null);
     } finally {
@@ -273,12 +327,12 @@ export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
     }
   }, [polCeremony, _getPolService]);
 
-  const signPolEvent = useCallback(async (signerNsec: string) => {
+  const verifyPolPeerPin = useCallback(async () => {
     const svc = _getPolService();
     if (!svc || !polCeremony) return;
     setIsPolLoading(true);
     try {
-      const updated = await svc.sign(polCeremony, signerNsec);
+      const updated = await svc.verifyPeerPin(polCeremony);
       setPolCeremony(updated);
       if (updated.state === 'FAILED') setPolError(updated.error ?? null);
     } finally {
@@ -286,12 +340,25 @@ export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
     }
   }, [polCeremony, _getPolService]);
 
-  const publishPolEvent = useCallback(async (relayUrl: string) => {
+  const constructPolAttestations = useCallback(async (localNsec: string) => {
     const svc = _getPolService();
     if (!svc || !polCeremony) return;
     setIsPolLoading(true);
     try {
-      const updated = await svc.publish(polCeremony, relayUrl);
+      const updated = await svc.constructAttestations(polCeremony, localNsec);
+      setPolCeremony(updated);
+      if (updated.state === 'FAILED') setPolError(updated.error ?? null);
+    } finally {
+      setIsPolLoading(false);
+    }
+  }, [polCeremony, _getPolService]);
+
+  const publishPolAttestations = useCallback(async (relayUrl: string) => {
+    const svc = _getPolService();
+    if (!svc || !polCeremony) return;
+    setIsPolLoading(true);
+    try {
+      const updated = await svc.publishAttestations(polCeremony, relayUrl);
       setPolCeremony(updated);
       if (updated.state === 'FAILED') setPolError(updated.error ?? null);
     } finally {
@@ -303,6 +370,24 @@ export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
     setPolCeremony(null);
     setPolError(null);
   }, []);
+
+  // ── Deprecated backward-compat wrappers ────────────────────────────────────
+
+  const processPolTap = useCallback(async (piccDataHex: string, cmacHex: string) => {
+    return scanPolPeerCard(piccDataHex, cmacHex);
+  }, [scanPolPeerCard]);
+
+  const processPolPin = useCallback(async (pin: string) => {
+    return verifyPolLocalPin(pin);
+  }, [verifyPolLocalPin]);
+
+  const signPolEvent = useCallback(async (signerNsec: string) => {
+    return constructPolAttestations(signerNsec);
+  }, [constructPolAttestations]);
+
+  const publishPolEvent = useCallback(async (relayUrl: string) => {
+    return publishPolAttestations(relayUrl);
+  }, [publishPolAttestations]);
 
   const clearErrors = useCallback(() => {
     setPinError(null);
@@ -323,11 +408,19 @@ export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
     polCeremony,
     polService: polServiceRef.current,
     startPolCeremony,
+    scanPolPeerCard,
+    awaitPolReciprocal,
+    confirmPolReciprocalScan,
+    verifyPolLocalPin,
+    verifyPolPeerPin,
+    constructPolAttestations,
+    publishPolAttestations,
+    resetPol,
+    // Deprecated
     processPolTap,
     processPolPin,
     signPolEvent,
     publishPolEvent,
-    resetPol,
     isPinLoading,
     isPolLoading,
     pinError,
