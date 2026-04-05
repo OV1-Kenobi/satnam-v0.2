@@ -36,7 +36,7 @@ export type {
   DelegationConditions,
   DelegationEvent,
   DelegationChain,
-  DelegationGraph,
+  DelegationGraph as DelegationGraphInterface,
 } from './types.js';
 
 export {
@@ -55,3 +55,6 @@ export {
   constructRoleDelegation,
   ROLE_ALLOWED_KINDS,
 } from './construct.js';
+
+// Delegation Graph implementation
+export { DelegationGraph } from './graph.js';
