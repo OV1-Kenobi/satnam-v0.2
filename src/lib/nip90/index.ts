@@ -15,6 +15,8 @@
  *   constructJobRequest,
  *   subscribeToJobResults,
  *   subscribeToProviders,
+ *   DvmMarketplace,
+ *   discoverProviders,
  * } from '@lib/nip90';
  * import { finalizeEvent } from 'nostr-tools';
  *
@@ -69,3 +71,12 @@ export {
   waitForJobResult,
   fetchProviders,
 } from './subscribe.js';
+
+// Marketplace client
+export {
+  discoverProviders,
+  DvmMarketplace,
+  constructJobFeedback as constructJobFeedbackFromMarketplace,
+} from './marketplace.js';
+
+export type { ActiveJob, PaymentResult } from './marketplace.js';

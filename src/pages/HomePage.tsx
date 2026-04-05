@@ -1,23 +1,341 @@
 /**
- * Satnam v2 — Home Page (stub)
- * Phase 1, Week 4: Identity dashboard (kind:0 profile, relay list, NIP-05 status)
+ * Satnam v2 — Home Page (Dashboard)
+ * Phase 3: Dashboard overview with navigation cards
+ *
+ * Overview cards:
+ * - Active agents count + status
+ * - Wallet balance summary (Lightning + Cashu)
+ * - Recent marketplace activity
+ * - Group membership
+ *
+ * Quick action buttons:
+ * - Create agent
+ * - Submit job
+ * - Send payment
  */
 
 import React from 'react';
 import { Helmet } from 'react-helmet-async';
+import { Link, useNavigate } from 'react-router-dom';
+import clsx from 'clsx';
+import {
+  Bot,
+  Store,
+  Users,
+  Wallet,
+  Plus,
+  Zap,
+  Send,
+  ArrowRight,
+  Activity,
+  Shield,
+  ChevronRight,
+} from 'lucide-react';
+
+import { useAgentProfile } from '../hooks/useAgentProfile.js';
+import { useMarketplace } from '../hooks/useMarketplace.js';
+import { useCreditLifecycle } from '../hooks/useCreditLifecycle.js';
+import { useNwc } from '../hooks/useNwc.js';
+import { useFrost } from '../hooks/useFrost.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatSats(msats: bigint | number): string {
+  const sats = typeof msats === 'bigint' ? Number(msats) / 1000 : msats;
+  return Math.floor(sats).toLocaleString();
+}
+
+// ---------------------------------------------------------------------------
+// Overview stat card
+// ---------------------------------------------------------------------------
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  accent = false,
+  href,
+  color = '#f7931a',
+}: {
+  icon: typeof Bot;
+  label: string;
+  value: string | number;
+  sub?: string;
+  accent?: boolean;
+  href?: string;
+  color?: string;
+}) {
+  const content = (
+    <div
+      className={clsx(
+        'card flex items-center gap-4 transition-all duration-150',
+        href && 'cursor-pointer hover:border-[#f7931a]/40 active:scale-[0.99]',
+      )}
+    >
+      <div
+        className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+        style={{ backgroundColor: `${color}15`, borderColor: `${color}25`, border: '1px solid' }}
+      >
+        <Icon size={22} style={{ color }} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-[#555555] uppercase tracking-widest">{label}</p>
+        <p className="font-mono text-xl font-bold text-[#f5f5f5] mt-0.5">{value}</p>
+        {sub && <p className="text-xs text-[#555555] mt-0.5">{sub}</p>}
+      </div>
+      {href && <ChevronRight size={16} className="text-[#555555] flex-shrink-0" aria-hidden="true" />}
+    </div>
+  );
+
+  if (href) {
+    return <Link to={href} aria-label={`Go to ${label}`}>{content}</Link>;
+  }
+  return content;
+}
+
+// ---------------------------------------------------------------------------
+// Quick action button
+// ---------------------------------------------------------------------------
+
+function QuickAction({
+  icon: Icon,
+  label,
+  description,
+  onClick,
+  primary = false,
+}: {
+  icon: typeof Plus;
+  label: string;
+  description?: string;
+  onClick: () => void;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className={clsx(
+        'flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-left transition-all duration-150 active:scale-[0.99]',
+        primary
+          ? 'bg-[#f7931a]/10 border-[#f7931a]/30 hover:bg-[#f7931a]/20'
+          : 'bg-[#1a1a1a] border-[#2a2a2a] hover:border-[#3a3a3a]',
+      )}
+    >
+      <div className={clsx(
+        'w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0',
+        primary ? 'bg-[#f7931a]/20 text-[#f7931a]' : 'bg-slate-800 text-[#a0a0a0]',
+      )}>
+        <Icon size={18} />
+      </div>
+      <div>
+        <p className={clsx('font-medium text-sm', primary ? 'text-[#f7931a]' : 'text-[#f5f5f5]')}>{label}</p>
+        {description && <p className="text-xs text-[#555555]">{description}</p>}
+      </div>
+      <ChevronRight size={14} className="text-[#555555] ml-auto" aria-hidden="true" />
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recent activity item
+// ---------------------------------------------------------------------------
+
+function ActivityItem({
+  icon: Icon,
+  text,
+  time,
+  color = 'text-[#555555]',
+}: {
+  icon: typeof Activity;
+  text: string;
+  time: string;
+  color?: string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className={clsx('w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center flex-shrink-0', color)}>
+        <Icon size={13} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-[#a0a0a0] truncate">{text}</p>
+      </div>
+      <span className="text-xs text-[#555555] flex-shrink-0">{time}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main Page
+// ---------------------------------------------------------------------------
 
 export default function HomePage() {
+  const navigate = useNavigate();
+
+  // Hooks (data may be empty — hooks handle their own loading states)
+  const { agents } = useAgentProfile();
+  const { activeJobs, providers } = useMarketplace();
+  const { envelopes } = useCreditLifecycle();
+  const { balance } = useNwc();
+  const { groups } = useFrost();
+
+  // Derived stats
+  const activeAgents = agents.filter(a => a.status === 'active').length;
+  const totalAgents = agents.length;
+  const pendingJobs = activeJobs.filter(j => j.status === 'pending' || j.status === 'processing').length;
+  const activeEnvelopes = envelopes.filter(e => !['Settlement', 'Default'].includes(e.state)).length;
+  const balanceSats = balance ? Math.floor(Number(balance) / 1000) : 0;
+
+  // Recent combined activity (mock until real event stream)
+  const recentActivity = [
+    ...(agents.length > 0 ? [{ Icon: Bot, text: `Agent "${agents[0].name}" is ${agents[0].status}`, time: '2m ago', color: 'text-green-500' }] : []),
+    ...(activeJobs.length > 0 ? [{ Icon: Store, text: `Job ${activeJobs[0].jobType} — ${activeJobs[0].status}`, time: '5m ago', color: 'text-blue-400' }] : []),
+    ...(groups.length > 0 ? [{ Icon: Shield, text: `Group "${groups[0].metadata.name}" active`, time: '1h ago', color: 'text-[#ffd700]' }] : []),
+  ];
+
   return (
     <>
       <Helmet>
-        <title>Satnam — Identity</title>
-        <meta name="description" content="Your sovereign Nostr identity dashboard." />
+        <title>Satnam — Dashboard</title>
+        <meta name="description" content="Satnam v2 sovereign identity, agent, and marketplace dashboard." />
       </Helmet>
-      <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
-        <h1 className="heading-display text-4xl text-[#f7931a]">Satnam</h1>
-        <p className="text-[#a0a0a0] text-center max-w-sm">
-          Phase 1 in progress. Identity dashboard coming in Week 4.
-        </p>
+
+      <main className="min-h-screen bg-[#0a0a0a] pb-safe">
+        <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
+          {/* Header */}
+          <div>
+            <h1 className="heading-display text-3xl text-[#f7931a] tracking-wider">Dashboard</h1>
+            <p className="text-sm text-[#555555] mt-1">Your sovereign identity at a glance</p>
+          </div>
+
+          {/* Overview stats */}
+          <section aria-label="Overview statistics">
+            <h2 className="text-xs font-medium text-[#555555] uppercase tracking-widest mb-3">Overview</h2>
+            <div className="grid grid-cols-1 gap-3">
+              {/* Agents */}
+              <StatCard
+                icon={Bot}
+                label="Agents"
+                value={totalAgents}
+                sub={activeAgents > 0 ? `${activeAgents} active` : 'None active'}
+                href="/agents"
+                color="#f7931a"
+              />
+
+              {/* Wallet */}
+              <StatCard
+                icon={Wallet}
+                label="Lightning Balance"
+                value={`${balanceSats.toLocaleString()} sats`}
+                sub="NWC wallet"
+                href="/wallet"
+                color="#ffd700"
+              />
+
+              {/* Marketplace */}
+              <StatCard
+                icon={Store}
+                label="Marketplace"
+                value={pendingJobs}
+                sub={`${providers.length} providers · ${activeEnvelopes} open envelopes`}
+                href="/marketplace"
+                color="#3b82f6"
+              />
+
+              {/* Groups */}
+              <StatCard
+                icon={Users}
+                label="Groups"
+                value={groups.length}
+                sub={groups.length === 0 ? 'No groups yet' : `${groups.length} FROST group${groups.length !== 1 ? 's' : ''}`}
+                href="/groups"
+                color="#22c55e"
+              />
+            </div>
+          </section>
+
+          {/* Quick actions */}
+          <section aria-label="Quick actions">
+            <h2 className="text-xs font-medium text-[#555555] uppercase tracking-widest mb-3">Quick Actions</h2>
+            <div className="space-y-2">
+              <QuickAction
+                icon={Plus}
+                label="Create Agent"
+                description="Deploy a new autonomous NIP-SA agent"
+                onClick={() => navigate('/agents')}
+                primary
+              />
+              <QuickAction
+                icon={Zap}
+                label="Submit Job"
+                description="Send a task to a NIP-90 DVM provider"
+                onClick={() => navigate('/marketplace')}
+              />
+              <QuickAction
+                icon={Send}
+                label="Send Payment"
+                description="Pay via Lightning or Cashu"
+                onClick={() => navigate('/wallet')}
+              />
+              <QuickAction
+                icon={Users}
+                label="Manage Groups"
+                description="FROST threshold groups and delegation"
+                onClick={() => navigate('/groups')}
+              />
+            </div>
+          </section>
+
+          {/* Recent activity */}
+          <section aria-label="Recent activity">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-medium text-[#555555] uppercase tracking-widest">Recent Activity</h2>
+              <Link to="/agents" className="text-xs text-[#f7931a] hover:underline no-underline">
+                View all
+              </Link>
+            </div>
+
+            <div className="card space-y-3">
+              {recentActivity.length > 0 ? (
+                recentActivity.map((item, i) => (
+                  <ActivityItem key={i} icon={item.Icon} text={item.text} time={item.time} color={item.color} />
+                ))
+              ) : (
+                <div className="text-center py-4">
+                  <Activity size={24} className="mx-auto text-[#555555] mb-2" />
+                  <p className="text-sm text-[#555555]">No recent activity</p>
+                  <p className="text-xs text-[#555555] mt-0.5">Create an agent or submit a job to get started</p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* System status */}
+          <section aria-label="System status">
+            <h2 className="text-xs font-medium text-[#555555] uppercase tracking-widest mb-3">System Status</h2>
+            <div className="card">
+              <div className="space-y-2">
+                {[
+                  { label: 'Vault', status: 'Unlocked', color: 'text-green-500', dot: 'bg-green-500' },
+                  { label: 'Relay Pool', status: agents.length > 0 ? 'Connected' : 'Connecting…', color: agents.length > 0 ? 'text-green-500' : 'text-yellow-500', dot: agents.length > 0 ? 'bg-green-500' : 'bg-yellow-500' },
+                  { label: 'NWC', status: balance !== undefined ? 'Connected' : 'Not connected', color: balance !== undefined ? 'text-green-500' : 'text-slate-500', dot: balance !== undefined ? 'bg-green-500' : 'bg-slate-600' },
+                  { label: 'FROST', status: groups.length > 0 ? `${groups.length} group${groups.length !== 1 ? 's' : ''} (${groups.map(g => g.metadata.name).join(', ').slice(0, 24)})` : 'No groups', color: groups.length > 0 ? 'text-green-500' : 'text-slate-500', dot: groups.length > 0 ? 'bg-green-500' : 'bg-slate-600' },
+                ].map(item => (
+                  <div key={item.label} className="flex items-center justify-between text-sm">
+                    <span className="text-[#555555]">{item.label}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={clsx('w-2 h-2 rounded-full', item.dot)} aria-hidden="true" />
+                      <span className={clsx('font-medium', item.color)}>{item.status}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
       </main>
     </>
   );

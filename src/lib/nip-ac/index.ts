@@ -1,7 +1,11 @@
 /**
  * NIP-AC barrel export — Agent Credit
- * All public types for the NIP-AC credit lifecycle module (kinds 39240–39245).
+ * All public types and functions for the NIP-AC credit lifecycle module (kinds 39240–39245).
  */
+
+// ============================================================================
+// Types (from types.ts — do not modify types.ts directly)
+// ============================================================================
 
 export type {
   NostrEvent,
@@ -23,4 +27,27 @@ export type {
   ReputationDeltaInput,
   CreditLifecycleState,
   CreditLifecycleRecord,
-} from "./types";
+} from "./types.js";
+
+// ============================================================================
+// Client (client.ts)
+// ============================================================================
+
+export type {
+  UnsignedEvent,
+  CreditOffer,
+  CreditEnvelope,
+  IntentParams,
+  CreditLifecycleCallback,
+} from "./client.js";
+
+export {
+  buildCreditIntent,
+  parseCreditOffer,
+  buildCreditEnvelope,
+  buildSpendAuth,
+  buildSettlementReceipt,
+  buildDefaultNotice,
+  calculateReputationDelta,
+  CreditLifecycleManager,
+} from "./client.js";

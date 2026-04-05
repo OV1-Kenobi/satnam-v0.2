@@ -33,6 +33,7 @@ export { SkillRegistryCache, getSkillRegistry } from "./registry";
 
 // Runtime gate (safety-critical)
 export { verifySkillExecution } from "./runtime-gate";
+export type { RuntimeGateOptions } from "./runtime-gate";
 
 // Attestation verification
 export {
@@ -42,3 +43,21 @@ export {
   getMinimumCrossPlatformTier,
   tierMeetsMinimum,
 } from "./attestation-verifier";
+
+// Skill registration & lifecycle
+export {
+  buildSkillManifest,
+  buildSkillAttestation,
+  buildSkillVersionLog,
+  buildSkillRevocation,
+  SkillManager,
+} from "./skill-registration";
+
+export type {
+  SkillManifestParams,
+  SkillAttestationParams,
+  SkillVersionLogParams,
+  SkillRegistrationParams,
+  SkillVersionUpdateParams,
+  SkillWithAttestations,
+} from "./skill-registration";
