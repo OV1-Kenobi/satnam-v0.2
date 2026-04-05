@@ -6,6 +6,9 @@ All terms used in the Satnam documentation, alphabetically organized. Terms that
 
 ## A
 
+**Adaptor Signature**
+A partial cryptographic signature that becomes valid only when a secret is revealed. Satnam uses adaptor signatures (built on Schnorr primitives from `@noble/curves/secp256k1`) to atomically link Cashu payments to Nostr event authorizations in the Sig4Sats bond system. The partial signature is well-formed and verifiable, but not valid on its own; completing it requires the secret behind the adaptor point — which is revealed by the Cashu payment preimage. See [Sig4Sats Bonds](../user-guides/wallet/sig4sats-bonds.md).
+
 **Adult**
 A Mature Beneficiary in a Satnam group. Adults have spending authority within policy limits and can create agents within their span of control. Both human members and autonomous (NIP-SA) agents can hold the Adult role. See [Role Hierarchy](../user-guides/groups/README.md#role-hierarchy).
 
@@ -14,6 +17,12 @@ An autonomous Nostr keypair operating under the NIP-SA (Sovereign Agents) protoc
 
 **Agent Credit (NIP-AC)**
 The credit lifecycle protocol for machine-to-machine commerce in the OpenAgents ecosystem. Governs the flow from Intent (kind:39240) through Offer (39241), Envelope (39242), Spend Authorization (39243), and Settlement (39244) to Default Notice (39245). See [Credit Envelopes](../user-guides/marketplace/credit-envelopes.md).
+
+**Allowance Bond**
+A Sig4Sats bond type where a Guardian funds an offspring's or agent's spending with blinded Cashu tokens subject to spending constraints (max single payment, daily limit, allowed rails, allowed mints). The tokens refresh on a configured cadence (daily/weekly/monthly). The Guardian sees aggregate spending totals but not individual transactions. See [Sig4Sats Bonds: Allowance Bonds](../user-guides/wallet/sig4sats-bonds.md#bond-type-3-allowance-bonds).
+
+**Atomic Swap**
+An exchange of value between two payment rails that is structured so either both sides complete or neither does. Satnam supports five swap types: Cashu-to-Cashu (cross-mint), Cashu-to-Lightning, Lightning-to-Cashu, on-chain-to-Lightning (Boltz submarine), and Lightning-to-on-chain (Boltz reverse). If a failure occurs mid-swap, the engine attempts automatic rollback. See [Atomic Swaps](../user-guides/wallet/atomic-swaps.md).
 
 **Autopilot**
 The OpenAgents NIP-90 DVM marketplace. Satnam Principals and Agents are consumers and providers of compute jobs through Autopilot. See [DVM Marketplace](../user-guides/marketplace/README.md).
@@ -24,6 +33,9 @@ A memory-hard password hashing algorithm used in Satnam to derive vault wrapping
 ---
 
 ## B
+
+**Boltz**
+An open-source, non-custodial swap service enabling on-chain Bitcoin ↔ Lightning Network exchanges (submarine swaps and reverse swaps). Satnam accesses Boltz through the LNbits Boltz extension. See [Atomic Swaps](../user-guides/wallet/atomic-swaps.md) and [LNbits Integration](../user-guides/wallet/lnbits-integration.md).
 
 **bfprofile**
 A FROSTR v2 data structure containing the group public key, threshold metadata, and participant list — but no secret material. Each participant in a FROST group stores the bfprofile in their OPFS Vault and it is published as a kind:39200 event to Pylon.
@@ -59,6 +71,9 @@ An encrypted Web of Trust infrastructure built through Proof of Life ceremonies.
 **Content Security Policy (CSP)**
 The HTTP security header that controls what the browser is permitted to load. Satnam's CSP includes `'wasm-unsafe-eval'` (required for FROST's WASM bridge), `font-src 'self'` (no external font CDNs), and explicitly disallows `'unsafe-eval'` (Security Invariant S12).
 
+**Conditional Payment**
+A push payment that fires only when all attached conditions are satisfied — balance above a threshold, within a time window, recipient has sufficient trust score, or manual approval is given. Part of the `PaymentScheduler` system. See [Push Payments](../user-guides/wallet/push-payments.md).
+
 **Credit Envelope (kind:39242)**
 The accepted-offer state in the NIP-AC lifecycle. An Envelope is the authority state machine that governs how much an agent can spend and against which task. See [Credit Envelopes](../user-guides/marketplace/credit-envelopes.md).
 
@@ -81,6 +96,9 @@ A NIP-90 compute provider that accepts job requests (kind:5xxx), performs work, 
 
 **eCash**
 See **Cashu**.
+
+**Entitlement Bond**
+A Sig4Sats bond type that grants access to a premium feature in exchange for a Cashu payment. The payment and capability token issuance are linked via an adaptor signature — the token is blinded, so neither the mint nor the feature provider can link payment to access. See [Sig4Sats Bonds: Entitlement Bonds](../user-guides/wallet/sig4sats-bonds.md#bond-type-1-entitlement-bonds).
 
 ---
 
@@ -129,6 +147,9 @@ A Nostr event type number. All Nostr events have a `kind` field that identifies 
 ---
 
 ## L
+
+**LNbits**
+An open-source Lightning wallet and accounts system. Satnam v2 integrates LNbits as a third payment rail, primarily for its Boltz extension (on-chain↔Lightning atomic swaps) and LNURL-pay forwarding. All LNbits API keys are stored encrypted in the OPFS Vault. See [LNbits Integration](../user-guides/wallet/lnbits-integration.md).
 
 **Lightning Address**
 An internet-style identifier (`user@satnam.pub`) that resolves to a LNURL-pay endpoint. Satnam registers Lightning Addresses in its Supabase `lightning_addresses` table and routes incoming payments through NWC.
@@ -245,6 +266,15 @@ The encrypted key storage module in Satnam. All sensitive material (nsec, FROST 
 
 ## P
 
+**Payment Cascade**
+A distribution tree that splits a single payment amount across multiple recipients automatically. Nodes can have percentage or fixed-amount allocations and their own sub-nodes (multi-tier). The `CascadeEngine` validates that percentages at each level sum to ≤ 100% and executes the tree in sequential or parallel mode. See [Payment Cascades](../user-guides/wallet/payment-cascades.md).
+
+**Payment Rail**
+The mechanism used to route a payment. Satnam v2 supports three rails: `lightning` (NWC/NIP-47), `cashu` (Chaumian eCash), and `lnbits` (LNbits REST API). An `auto` rail mode selects the appropriate rail based on amount and context.
+
+**Push Payment**
+A scheduled or recurring outbound payment configured once and executed automatically by the `PaymentScheduler`. Push payments can be one-time, recurring (hourly/daily/weekly/biweekly/monthly), or conditional (fires when conditions are met). See [Push Payments](../user-guides/wallet/push-payments.md).
+
 **PIN Gate**
 Every NFC-triggered operation that modifies identity state requires PIN confirmation before execution. The PIN is verified against an argon2id-derived verifier stored in the OPFS Vault. See [Proof of Life](../user-guides/nfc/proof-of-life.md#pin-gate).
 
@@ -263,6 +293,9 @@ A mutual contact attestation ceremony in which two Satnam users who are physical
 ---
 
 ## R
+
+**Recovery Bond**
+A Sig4Sats bond type where Guardians stake Cashu collateral to authorize an account recovery request. An N-of-M threshold of Guardians must bond before the recovery can proceed. If the recovery is later found fraudulent, the bonds are forfeited. See [Sig4Sats Bonds: Recovery Bonds](../user-guides/wallet/sig4sats-bonds.md#bond-type-2-recovery-bonds).
 
 **Relay**
 A Nostr server that stores and serves signed events. Satnam publishes to and subscribes from multiple relays, with Pylon as the primary authenticated relay and public relays as fallback.
@@ -284,7 +317,10 @@ The 12 concrete technical rules that enforce the mandate axioms. See [What is Sa
 The NIP-AC event published after task completion. Includes Cashu token redemption proof for Sig4Sats performance bonds. See [Credit Envelopes](../user-guides/marketplace/credit-envelopes.md).
 
 **Sig4Sats**
-A performance bond mechanism where DVM providers post Cashu tokens as collateral before work begins. On successful settlement, the bond is returned plus a 15% reputation bonus. On default, the bond is forfeited. See [Credit Envelopes](../user-guides/marketplace/credit-envelopes.md).
+Satnam's cryptographic bond system using adaptor signatures to atomically link Cashu payments to Nostr event authorizations. Satnam v2 introduces three bond types: Entitlement (capability token for a feature), Recovery (Guardian collateral for account recovery), and Allowance (constrained spending allocation for offspring/agents). See [Sig4Sats Bonds](../user-guides/wallet/sig4sats-bonds.md).
+
+**Sig4Sats (v1)**
+The original v1 performance bond mechanism where DVM providers post Cashu tokens as collateral before work begins. On successful settlement, the bond is returned plus a 15% reputation bonus. On default, the bond is forfeited. See [Credit Envelopes](../user-guides/marketplace/credit-envelopes.md).
 
 **Skill**
 A capability that an Agent can execute, registered via NIP-SKL (kind:33400) and attested by Guardians. Skills have attestation tiers: tier1 (self-declared), tier2 (peer-reviewed), tier3 (guardian-attested), tier4 (oracle-verified). See [Creating an Agent](../user-guides/agents/creating-an-agent.md#assigning-skills).
@@ -300,6 +336,9 @@ The real-time coordination database used by OpenAgents for presence, session syn
 
 **Steward**
 The Trustee role — the operational authority level in a Satnam group. Stewards hold FROST share #2, co-sign group transactions above threshold, can add/remove members up to the Adult level, and can delegate authority to Adults and Offspring.
+
+**Submarine Swap**
+A Boltz atomic swap that converts on-chain Bitcoin into Lightning Network balance. The user sends BTC to a Boltz-provided on-chain address; once confirmed, Boltz pays out a Lightning invoice atomically. A **reverse submarine swap** goes the other direction (Lightning → on-chain). Both are accessible via LNbits' Boltz extension in Satnam. See [Atomic Swaps](../user-guides/wallet/atomic-swaps.md).
 
 **SUN (Secure Unique NFC)**
 The NTAG424 feature that generates a cryptographically authenticated URL on every tap. The URL includes an encrypted UID+counter (`piccDataHex`) and a CMAC value (`cmacHex`). Satnam verifies SUN messages client-side.

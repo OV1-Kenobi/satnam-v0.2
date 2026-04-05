@@ -26,6 +26,7 @@ Satnam v2 is built entirely on open, cryptographically verifiable protocols. The
 ├─────────────────────────────────────────────────────────────────┤
 │  Layer 4 — Payments                                              │
 │  NWC / NIP-47 (Lightning)  ·  Cashu eCash (blind tokens)       │
+│  LNbits REST API (proxy)   ·  Boltz atomic swaps               │
 ├─────────────────────────────────────────────────────────────────┤
 │  Layer 3 — Threshold Signing                                     │
 │  FROST via @frostr/bifrost  ·  DKG  ·  Group Pubkey             │
@@ -57,6 +58,8 @@ Each NIP solves a specific problem. Together they form a complete, trustless sys
 | "What can an agent do?" | NIP-SKL (skill manifests + attestations) | Capability flags in DB |
 | "How do I buy/sell compute?" | NIP-90 DVM (5xxx/6xxx events) | REST marketplace APIs |
 | "How does Lightning work?" | NWC / NIP-47 (wallet connect) | Direct daemon APIs |
+| "How do I swap between rails?" | LNbits REST + Boltz extension | Centralized swap services |
+| "How do I split payments?" | CascadeEngine (client-side) | Smart contract platforms |
 | "How do I call a contact?" | kind:25050 (NIP-44 encrypted signaling) + WebRTC | Traditional SIP/STUN servers |
 | "How do I prove a face-to-face meeting?" | kind:30078 + OTS block-height notarization | Centralized identity verification |
 
@@ -142,6 +145,46 @@ All event kinds used in Satnam v2, organized by range:
 | 39243 | Spend Authorization | NIP-AC | Signed spend within envelope limits |
 | 39244 | Settlement Receipt | NIP-AC | Completion proof, Cashu bond redemption |
 | 39245 | Default Notice | NIP-AC | Envelope expired without settlement |
+
+---
+
+## LNbits: REST API (Not Nostr Events)
+
+LNbits is the one component in Satnam's payment stack that does **not** use Nostr events. It communicates via a standard REST API (`application/json`) over HTTPS. This is an intentional architectural choice: LNbits is a third-party service with its own established API, and wrapping it in Nostr events would add unnecessary complexity without security benefit.
+
+### Proxy Pattern
+
+Because browsers cannot call external REST APIs directly (CORS restrictions), all LNbits calls from the browser are proxied through the existing `nwc-proxy` Netlify function:
+
+```
+Browser Context:
+  LNbitsClient.method()
+      ↓
+  /.netlify/functions/nwc-proxy
+      ↓  (decrypts API key from vault payload, forwards request, discards key)
+  https://your-lnbits-instance.com/api/v1/...
+
+Agent/Server Context:
+  LNbitsClient.method()
+      ↓  (direct call, no proxy needed)
+  https://your-lnbits-instance.com/api/v1/...
+```
+
+**Security properties:**
+- Admin and Invoice keys are stored encrypted in the OPFS Vault at `lnbits/{instance_hash}.admin`.
+- The proxy function receives the encrypted key in the request payload, decrypts it, forwards the request, and discards the key. It is never stored.
+- No LNbits API key ever touches Satnam's database or any persistent server storage.
+- The proxy function uses the same NIP-98 HTTP authentication as all other Netlify functions — unauthenticated LNbits proxy requests are rejected.
+
+### Why Not NIP-47 for LNbits?
+
+NWC (NIP-47) is the correct abstraction for protocol-standard Lightning wallet operations. LNbits has a NWC extension, but Satnam connects to LNbits directly (REST) rather than through NWC because:
+
+1. The Boltz extension API is not exposed through NWC.
+2. Multi-wallet administration requires Admin API access beyond NWC's scope.
+3. LNURL-pay endpoint configuration requires direct LNbits API calls.
+
+For standard Lightning operations (send/receive), use NWC. Reach for the LNbits rail only when you need Boltz swaps, LNURL forwarding, or wallet administration. See [LNbits Integration](../user-guides/wallet/lnbits-integration.md).
 
 ---
 

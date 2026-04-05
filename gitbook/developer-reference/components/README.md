@@ -1,6 +1,6 @@
 # Components Overview
 
-Satnam v2 has **52 React components** organized by domain. All components are pure presentational-plus-hook consumers — they do not perform cryptographic operations directly or access the vault. All state comes from hooks.
+Satnam v2 has **58 React components** organized by domain. Six new payment components were added in v2 for advanced payment features. All components are pure presentational-plus-hook consumers — they do not perform cryptographic operations directly or access the vault. All state comes from hooks.
 
 ---
 
@@ -23,7 +23,7 @@ GroupsPage
 
 ---
 
-### Wallet (6 components)
+### Wallet (12 components)
 
 ```
 WalletPage
@@ -32,7 +32,13 @@ WalletPage
 ├── ReceivePayment          — Generate invoice, display QR code, monitor payment
 ├── TransactionList         — Paginated history with filter by type/date
 ├── NWCModal                — NWC URI connection setup dialog
-└── NWCWalletSetupModal     — First-run wallet connection guide
+├── NWCWalletSetupModal     — First-run wallet connection guide
+├── PaymentFlowDashboard    — Real-time payment observability: Sankey flow + volume charts
+├── CascadeBuilder          — Visual cascade tree editor with live validation
+├── AtomicSwapPanel         — Swap interface: source/destination selector, fee preview, progress
+├── ScheduledPaymentsPanel  — Scheduled/push payment management: create, list, pause, cancel
+├── BondDashboard           — Sig4Sats bond overview: entitlements, recovery, allowances
+└── RailHealthIndicator     — Per-rail health: NWC, Cashu, LNbits, Boltz status
 ```
 
 | Component | File | Description |
@@ -43,6 +49,12 @@ WalletPage
 | `TransactionList` | `src/components/wallet/TransactionList.tsx` | Virtualized list with `TxListOptions` filters |
 | `NWCModal` | `src/components/wallet/NWCModal.tsx` | Add/remove NWC connection, set default |
 | `NWCWalletSetupModal` | `src/components/wallet/NWCWalletSetupModal.tsx` | Onboarding: explains NWC, links to Alby Hub |
+| `PaymentFlowDashboard` | `src/components/payments/PaymentFlowDashboard.tsx` | Live payment stream with rail indicator, multi-rail balance summary, CSS-only Sankey flow diagram, daily/weekly/monthly volume bar charts |
+| `CascadeBuilder` | `src/components/payments/CascadeBuilder.tsx` | Drag-and-drop (or button-based) cascade tree editor. Per-node: recipient selector, percentage/fixed amount input, rail selector. Live percentage validation, amount distribution preview, save-as-template button |
+| `AtomicSwapPanel` | `src/components/payments/AtomicSwapPanel.tsx` | Source/destination rail+mint selectors, amount input with fee preview, execute button with step-by-step progress indicator, swap history table |
+| `ScheduledPaymentsPanel` | `src/components/payments/ScheduledPaymentsPanel.tsx` | Create schedule form (recipient, amount, interval, conditions), active schedules list with next-execution countdown, execution history with success/failure badges, pause/resume/cancel actions |
+| `BondDashboard` | `src/components/payments/BondDashboard.tsx` | Entitlement tokens tab (active features, expiry, value); Recovery bonds tab (request list, Guardian participation bars, threshold progress); Allowances tab (funding status, tokens remaining, spending rate); Creation wizards for each bond type |
+| `RailHealthIndicator` | `src/components/payments/RailHealthIndicator.tsx` | Per-rail status row: NWC (connection, last payment, latency), Cashu (per-mint balance, proof count), LNbits (connection, balance, extension status), Boltz (swap availability, fee rates) |
 
 ---
 

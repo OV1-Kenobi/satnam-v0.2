@@ -207,6 +207,44 @@ Calls are only available to PoL-verified contacts. See [Voice and Video Calls](.
 
 ---
 
+## Advanced Payments
+
+### What is LNbits and why does Satnam support it?
+
+LNbits is a free, open-source Lightning wallet and accounts system you can self-host. Satnam supports it as a **third payment rail** alongside NWC Lightning and Cashu eCash. The primary reason is the **Boltz extension**: LNbits + Boltz enables on-chain Bitcoin ↔ Lightning atomic swaps (submarine and reverse swaps) — a capability not available through NWC alone. LNbits also provides LNURL-pay forwarding and multi-wallet administration. All LNbits API keys are stored encrypted in the OPFS Vault; never in localStorage or on any server. See [LNbits Integration](../user-guides/wallet/lnbits-integration.md).
+
+### How do payment cascades work?
+
+A payment cascade is a distribution tree that splits a single amount across multiple recipients automatically. You define the tree: each node has a recipient, a percentage (or fixed amount), a payment rail, and optional child nodes. When you execute a cascade for a given total, the `CascadeEngine` walks the tree and fires each payment — root nodes first, then their children. The engine validates that percentages at each level sum to ≤ 100% before saving or executing. Cascades can run in `parallel` (all nodes at the same depth simultaneously) or `sequential` (one at a time, depth-first) mode. Templates are saved encrypted in your OPFS Vault. See [Payment Cascades](../user-guides/wallet/payment-cascades.md).
+
+### What are Sig4Sats bonds?
+
+Sig4Sats is Satnam's cryptographic bond system. It uses **adaptor signatures** — a technique from Bitcoin cryptography that links a Cashu payment to a Nostr event signature atomically (either both happen or neither does). There are three bond types:
+
+- **Entitlement bonds:** Pay Cashu → receive a blinded capability token for a premium feature. The mint cannot link your payment to your token; the feature provider cannot link your token to your identity.
+- **Recovery bonds:** Guardians post Cashu collateral to authorize an account recovery (N-of-M threshold). If the recovery is fraudulent, they lose the bond — economic accountability for key decisions.
+- **Allowance bonds:** Guardians fund an offspring's or employee's spending with blinded Cashu tokens that enforce constraints (max single payment, daily limit, allowed rails, allowed mints). The Guardian sees aggregate spending but not individual transactions.
+
+See [Sig4Sats Bonds](../user-guides/wallet/sig4sats-bonds.md).
+
+### Can agents use scheduled payments?
+
+Yes. Agents with sufficient autonomy level can create and manage scheduled payments within their spend policy limits. An agent cannot create a scheduled payment whose `amount × estimated_executions` exceeds its remaining spend envelope — the NIP-AC credit lifecycle enforces this. The Governor receives a notification whenever an agent creates a new scheduled payment. Agents can be recipients of scheduled payments and allowance bonds, which lets operators automatically top up agent Cashu balances without manual intervention. See [Push Payments](../user-guides/wallet/push-payments.md).
+
+### How do atomic swaps work?
+
+Atomic swaps move value between payment rails without trusting an intermediary and without the risk of partial completion. Satnam supports five swap types: Cashu-to-Cashu (cross-mint via Lightning), Cashu-to-Lightning (melt at mint, receive on LN), Lightning-to-Cashu (pay LN invoice, mint at destination), on-chain-to-Lightning (Boltz submarine swap), and Lightning-to-on-chain (Boltz reverse swap). The swap engine tracks every step and attempts automatic rollback if a failure occurs mid-swap. Boltz swaps require a connected LNbits instance with the Boltz extension active. See [Atomic Swaps](../user-guides/wallet/atomic-swaps.md).
+
+### What is the difference between NWC Lightning and LNbits Lightning?
+
+NWC (Nostr Wallet Connect / NIP-47) is a protocol-standard way to connect any NIP-47-compliant Lightning wallet (Alby Hub, Phoenix, LND, CLN) to Satnam. NWC is the **primary** and recommended Lightning rail. LNbits Lightning is the balance in your LNbits instance — it is an additional wallet that can send and receive independently. The two coexist; you can use NWC for standard payments and LNbits for Boltz-powered swaps. The `auto` rail in the payment scheduler selects NWC Lightning by default and falls back to LNbits if NWC is unavailable.
+
+### Where are LNbits API keys stored?
+
+LNbits Admin and Invoice keys are stored encrypted in the OPFS Vault at `lnbits/{instance_hash}.admin`. They are never stored in `localStorage`, session storage, or any other browser-accessible storage. Browser requests to the LNbits API go through the existing `nwc-proxy` Netlify function, which reads the encrypted key from the vault payload and discards it immediately after forwarding — the key never persists on any server.
+
+---
+
 ## Migration
 
 ### Is there a migration from v1?

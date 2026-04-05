@@ -1,10 +1,10 @@
 /**
  * Satnam v2 — Home Page (Dashboard)
- * Phase 4: Dashboard overview + SystemStatusPanel
+ * Phase 5: Dashboard overview + SystemStatusPanel + Multi-rail balance summary
  *
  * Overview cards:
  * - Active agents count + status
- * - Wallet balance summary (Lightning + Cashu)
+ * - Multi-rail wallet balance summary (Lightning + Cashu + LNbits)  ← NEW
  * - Recent marketplace activity
  * - Group membership
  * - System status (Phase 4: full SystemStatusPanel)
@@ -33,6 +33,10 @@ import {
   ChevronRight,
   PenLine,
   Phone,
+  Coins,
+  Server,
+  ArrowLeftRight,
+  TrendingUp,
 } from 'lucide-react';
 
 import { useCircleOfTrust } from '../hooks/useCircleOfTrust.js';
@@ -46,6 +50,9 @@ import { useFrost } from '../hooks/useFrost.js';
 
 // Phase 4 — System status panel
 import SystemStatusPanel from '../components/dashboards/SystemStatusPanel.js';
+
+// Phase 5 — Rail health indicator (compact mode)
+import RailHealthIndicator from '../components/payments/RailHealthIndicator.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -103,6 +110,114 @@ function StatCard({
     return <Link to={href} aria-label={`Go to ${label}`}>{content}</Link>;
   }
   return content;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-rail balance summary card  ← NEW (Phase 5)
+// ---------------------------------------------------------------------------
+
+interface RailBalance {
+  label: string;
+  color: string;
+  icon: typeof Zap;
+  balanceSats: number;
+  subLabel: string;
+}
+
+function MultiRailBalanceSummary({ totalNwcMsats }: { totalNwcMsats: bigint }) {
+  const nwcSats = Math.floor(Number(totalNwcMsats) / 1000);
+
+  // Mock Cashu + LNbits balances (Phase 5: replace with real hooks when available)
+  const rails: RailBalance[] = [
+    {
+      label: 'Lightning',
+      color: '#f7931a',
+      icon: Zap,
+      balanceSats: nwcSats,
+      subLabel: 'NWC wallet',
+    },
+    {
+      label: 'Cashu',
+      color: '#a855f7',
+      icon: Coins,
+      balanceSats: 5030,
+      subLabel: '2 mints',
+    },
+    {
+      label: 'LNbits',
+      color: '#22c55e',
+      icon: Server,
+      balanceSats: 12500,
+      subLabel: 'LNbits wallet',
+    },
+  ];
+
+  const totalSats = rails.reduce((s, r) => s + r.balanceSats, 0);
+
+  return (
+    <Link
+      to="/wallet"
+      className="block card hover:border-[#f7931a]/40 transition-all duration-150 active:scale-[0.99] no-underline"
+      aria-label={`Financial summary: ${totalSats.toLocaleString()} sats total across all rails`}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={15} className="text-[#f7931a]" aria-hidden="true" />
+          <p className="text-xs text-[#555555] uppercase tracking-widest">Financial Health</p>
+        </div>
+        <ChevronRight size={14} className="text-[#555555]" aria-hidden="true" />
+      </div>
+
+      {/* Total */}
+      <div className="mb-4">
+        <p className="font-mono text-2xl font-bold text-[#f5f5f5]">
+          {totalSats.toLocaleString()}
+          <span className="text-sm text-[#555555] ml-2">sats</span>
+        </p>
+        <p className="text-xs text-[#555555] mt-0.5">
+          across {rails.length} rails · ≈ {(totalSats / 100_000_000).toFixed(6)} BTC
+        </p>
+      </div>
+
+      {/* Per-rail bars */}
+      <div className="space-y-2.5" role="list" aria-label="Balance by rail">
+        {rails.map((rail) => {
+          const pct = totalSats > 0 ? (rail.balanceSats / totalSats) * 100 : 0;
+          return (
+            <div key={rail.label} role="listitem">
+              <div className="flex items-center justify-between text-xs mb-1">
+                <div className="flex items-center gap-1.5">
+                  <rail.icon size={11} style={{ color: rail.color }} aria-hidden="true" />
+                  <span className="text-[#a0a0a0]">{rail.label}</span>
+                  <span className="text-[#555555]">({rail.subLabel})</span>
+                </div>
+                <span className="font-mono font-medium" style={{ color: rail.color }}>
+                  {rail.balanceSats.toLocaleString()}
+                </span>
+              </div>
+              <div className="h-1.5 bg-[#1a1a1a] rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-700"
+                  style={{
+                    width: `${Math.max(2, pct)}%`,
+                    backgroundColor: rail.color,
+                    opacity: 0.7,
+                  }}
+                  aria-label={`${rail.label}: ${pct.toFixed(1)}%`}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Rail health pills */}
+      <div className="mt-3 pt-3 border-t border-[#2a2a2a]">
+        <RailHealthIndicator compact />
+      </div>
+    </Link>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -239,11 +354,12 @@ export default function HomePage() {
   const { groups } = useFrost();
 
   // Derived stats
-  const activeAgents = agents.filter(a => a.status === 'active').length;
+  const activeAgents = agents.filter((a) => a.status === 'active').length;
   const totalAgents = agents.length;
-  const pendingJobs = activeJobs.filter(j => j.status === 'pending' || j.status === 'processing').length;
-  const activeEnvelopes = envelopes.filter(e => !['Settlement', 'Default'].includes(e.state)).length;
+  const pendingJobs = activeJobs.filter((j) => j.status === 'pending' || j.status === 'processing').length;
+  const activeEnvelopes = envelopes.filter((e) => !['Settlement', 'Default'].includes(e.state)).length;
   const balanceSats = balance ? Math.floor(Number(balance) / 1000) : 0;
+  const nwcMsats = balance ?? 84_000_000n; // fallback for display
 
   // Recent combined activity (mock until real event stream)
   const recentActivity = [
@@ -267,6 +383,16 @@ export default function HomePage() {
             <p className="text-sm text-[#555555] mt-1">Your sovereign identity at a glance</p>
           </div>
 
+          {/* ----------------------------------------------------------------
+              Phase 5 — Multi-rail balance summary card
+              Replaces the single Lightning balance card with a full
+              multi-rail financial health overview including Cashu + LNbits.
+          ---------------------------------------------------------------- */}
+          <section aria-label="Multi-rail financial summary">
+            <h2 className="text-xs font-medium text-[#555555] uppercase tracking-widest mb-3">Financial Health</h2>
+            <MultiRailBalanceSummary totalNwcMsats={nwcMsats} />
+          </section>
+
           {/* Overview stats */}
           <section aria-label="Overview statistics">
             <h2 className="text-xs font-medium text-[#555555] uppercase tracking-widest mb-3">Overview</h2>
@@ -279,16 +405,6 @@ export default function HomePage() {
                 sub={activeAgents > 0 ? `${activeAgents} active` : 'None active'}
                 href="/agents"
                 color="#f7931a"
-              />
-
-              {/* Wallet */}
-              <StatCard
-                icon={Wallet}
-                label="Lightning Balance"
-                value={`${balanceSats.toLocaleString()} sats`}
-                sub="NWC wallet"
-                href="/wallet"
-                color="#ffd700"
               />
 
               {/* Marketplace */}
@@ -348,6 +464,12 @@ export default function HomePage() {
                 label="Send Payment"
                 description="Pay via Lightning or Cashu"
                 onClick={() => navigate('/wallet')}
+              />
+              <QuickAction
+                icon={ArrowLeftRight}
+                label="Swap Rails"
+                description="Move sats between Lightning, Cashu, and LNbits"
+                onClick={() => navigate('/wallet?tab=swaps')}
               />
               <QuickAction
                 icon={Users}
