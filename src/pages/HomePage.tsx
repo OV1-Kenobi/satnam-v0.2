@@ -1,12 +1,13 @@
 /**
  * Satnam v2 — Home Page (Dashboard)
- * Phase 3: Dashboard overview with navigation cards
+ * Phase 4: Dashboard overview + SystemStatusPanel
  *
  * Overview cards:
  * - Active agents count + status
  * - Wallet balance summary (Lightning + Cashu)
  * - Recent marketplace activity
  * - Group membership
+ * - System status (Phase 4: full SystemStatusPanel)
  *
  * Quick action buttons:
  * - Create agent
@@ -37,6 +38,9 @@ import { useMarketplace } from '../hooks/useMarketplace.js';
 import { useCreditLifecycle } from '../hooks/useCreditLifecycle.js';
 import { useNwc } from '../hooks/useNwc.js';
 import { useFrost } from '../hooks/useFrost.js';
+
+// Phase 4 — System status panel
+import SystemStatusPanel from '../components/dashboards/SystemStatusPanel.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -79,7 +83,7 @@ function StatCard({
         className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
         style={{ backgroundColor: `${color}15`, borderColor: `${color}25`, border: '1px solid' }}
       >
-        <Icon size={22} style={{ color }} />
+        <Icon size={22} style={{ color }} aria-hidden="true" />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-xs text-[#555555] uppercase tracking-widest">{label}</p>
@@ -129,7 +133,7 @@ function QuickAction({
         'w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0',
         primary ? 'bg-[#f7931a]/20 text-[#f7931a]' : 'bg-slate-800 text-[#a0a0a0]',
       )}>
-        <Icon size={18} />
+        <Icon size={18} aria-hidden="true" />
       </div>
       <div>
         <p className={clsx('font-medium text-sm', primary ? 'text-[#f7931a]' : 'text-[#f5f5f5]')}>{label}</p>
@@ -158,7 +162,7 @@ function ActivityItem({
   return (
     <div className="flex items-center gap-3">
       <div className={clsx('w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center flex-shrink-0', color)}>
-        <Icon size={13} />
+        <Icon size={13} aria-hidden="true" />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm text-[#a0a0a0] truncate">{text}</p>
@@ -305,7 +309,7 @@ export default function HomePage() {
                 ))
               ) : (
                 <div className="text-center py-4">
-                  <Activity size={24} className="mx-auto text-[#555555] mb-2" />
+                  <Activity size={24} className="mx-auto text-[#555555] mb-2" aria-hidden="true" />
                   <p className="text-sm text-[#555555]">No recent activity</p>
                   <p className="text-xs text-[#555555] mt-0.5">Create an agent or submit a job to get started</p>
                 </div>
@@ -313,27 +317,13 @@ export default function HomePage() {
             </div>
           </section>
 
-          {/* System status */}
+          {/* ----------------------------------------------------------------
+              Phase 4: SystemStatusPanel — replaces the static inline status
+              section from Phase 3 with the full dynamic panel.
+          ---------------------------------------------------------------- */}
           <section aria-label="System status">
             <h2 className="text-xs font-medium text-[#555555] uppercase tracking-widest mb-3">System Status</h2>
-            <div className="card">
-              <div className="space-y-2">
-                {[
-                  { label: 'Vault', status: 'Unlocked', color: 'text-green-500', dot: 'bg-green-500' },
-                  { label: 'Relay Pool', status: agents.length > 0 ? 'Connected' : 'Connecting…', color: agents.length > 0 ? 'text-green-500' : 'text-yellow-500', dot: agents.length > 0 ? 'bg-green-500' : 'bg-yellow-500' },
-                  { label: 'NWC', status: balance !== undefined ? 'Connected' : 'Not connected', color: balance !== undefined ? 'text-green-500' : 'text-slate-500', dot: balance !== undefined ? 'bg-green-500' : 'bg-slate-600' },
-                  { label: 'FROST', status: groups.length > 0 ? `${groups.length} group${groups.length !== 1 ? 's' : ''} (${groups.map(g => g.metadata.name).join(', ').slice(0, 24)})` : 'No groups', color: groups.length > 0 ? 'text-green-500' : 'text-slate-500', dot: groups.length > 0 ? 'bg-green-500' : 'bg-slate-600' },
-                ].map(item => (
-                  <div key={item.label} className="flex items-center justify-between text-sm">
-                    <span className="text-[#555555]">{item.label}</span>
-                    <div className="flex items-center gap-1.5">
-                      <span className={clsx('w-2 h-2 rounded-full', item.dot)} aria-hidden="true" />
-                      <span className={clsx('font-medium', item.color)}>{item.status}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <SystemStatusPanel compact />
           </section>
         </div>
       </main>

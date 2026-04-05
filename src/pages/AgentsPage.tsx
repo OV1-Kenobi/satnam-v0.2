@@ -1,13 +1,14 @@
 /**
  * Satnam v2 — Agents Page
- * Phase 3: NIP-SA Agent management
+ * Phase 4: NIP-SA Agent management + Monitoring + Probe tabs
  *
- * Tab navigation: Agents | Skills | Credits
+ * Tab navigation: Agents | Skills | Credits | Monitoring | Probe
  *
  * - Agent list (grid of AgentCards)
  * - "Create Agent" button → AgentCreateFlow
  * - Agent detail view (when agent selected)
- * - Monitoring panel
+ * - Monitoring panel (DelegationHealthPanel + PerformanceReportPanel + SessionManagerPanel)
+ * - Probe tab (ProbeSessionPanel + ToolCallApproval + SessionDiffRenderer + ExecutionResultPanel)
  * - Skills management
  * - Credits/envelope overview
  */
@@ -22,6 +23,8 @@ import {
   Plus,
   Search,
   SlidersHorizontal,
+  Activity,
+  Terminal,
 } from 'lucide-react';
 
 import { useAgentProfile } from '../hooks/useAgentProfile.js';
@@ -37,6 +40,17 @@ import SkillRegistrationForm from '../components/skills/SkillRegistrationForm.js
 import SkillAttestationPanel from '../components/skills/SkillAttestationPanel.js';
 import CreditEnvelopePanel from '../components/marketplace/CreditEnvelopePanel.js';
 
+// Phase 4 — Dashboard components
+import DelegationHealthPanel from '../components/dashboards/DelegationHealthPanel.js';
+import PerformanceReportPanel from '../components/dashboards/PerformanceReportPanel.js';
+import SessionManagerPanel from '../components/dashboards/SessionManagerPanel.js';
+
+// Phase 4 — Probe components
+import ProbeSessionPanel from '../components/probe/ProbeSessionPanel.js';
+import ToolCallApproval from '../components/probe/ToolCallApproval.js';
+import SessionDiffRenderer from '../components/probe/SessionDiffRenderer.js';
+import ExecutionResultPanel from '../components/probe/ExecutionResultPanel.js';
+
 import type { AgentProfile } from '../hooks/useAgentProfile.js';
 import type { Skill } from '../hooks/useSkillManager.js';
 
@@ -44,12 +58,12 @@ import type { Skill } from '../hooks/useSkillManager.js';
 // Types
 // ---------------------------------------------------------------------------
 
-type MainTab = 'agents' | 'skills' | 'credits';
+type MainTab = 'agents' | 'skills' | 'credits' | 'monitoring' | 'probe';
 type AgentView = 'list' | 'create' | 'detail';
 type SkillView = 'list' | 'register' | 'attest';
 
 // ---------------------------------------------------------------------------
-// Tab navigation
+// Tab navigation — extended for Phase 4
 // ---------------------------------------------------------------------------
 
 function TabBar({
@@ -61,14 +75,26 @@ function TabBar({
   onChange: (t: MainTab) => void;
   counts: { agents: number; skills: number; credits: number };
 }) {
-  const tabs: Array<{ id: MainTab; label: string; Icon: typeof Bot; count: number }> = [
-    { id: 'agents', label: 'Agents', Icon: Bot, count: counts.agents },
-    { id: 'skills', label: 'Skills', Icon: BookOpen, count: counts.skills },
-    { id: 'credits', label: 'Credits', Icon: CreditCard, count: counts.credits },
+  const tabs: Array<{
+    id: MainTab;
+    label: string;
+    Icon: typeof Bot;
+    count?: number;
+    highlight?: boolean;
+  }> = [
+    { id: 'agents',     label: 'Agents',     Icon: Bot,        count: counts.agents  },
+    { id: 'skills',     label: 'Skills',     Icon: BookOpen,   count: counts.skills  },
+    { id: 'credits',    label: 'Credits',    Icon: CreditCard, count: counts.credits },
+    { id: 'monitoring', label: 'Monitoring', Icon: Activity,   highlight: true        },
+    { id: 'probe',      label: 'Probe',      Icon: Terminal,   highlight: true        },
   ];
 
   return (
-    <div className="flex gap-1 p-1 rounded-xl bg-slate-900 border border-[#2a2a2a]" role="tablist" aria-label="Agents page sections">
+    <div
+      className="flex gap-1 p-1 rounded-xl bg-slate-900 border border-[#2a2a2a] overflow-x-auto"
+      role="tablist"
+      aria-label="Agents page sections"
+    >
       {tabs.map(tab => {
         const isActive = active === tab.id;
         const { Icon } = tab;
@@ -81,15 +107,17 @@ function TabBar({
             aria-controls={`tabpanel-${tab.id}`}
             onClick={() => onChange(tab.id)}
             className={clsx(
-              'flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150',
+              'flex-1 flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 whitespace-nowrap min-w-fit',
               isActive
                 ? 'bg-[#f7931a] text-black'
-                : 'text-[#555555] hover:text-[#a0a0a0] hover:bg-slate-800',
+                : tab.highlight
+                  ? 'text-[#f7931a]/70 hover:text-[#f7931a] hover:bg-[#f7931a]/10'
+                  : 'text-[#555555] hover:text-[#a0a0a0] hover:bg-slate-800',
             )}
           >
-            <Icon size={14} />
+            <Icon size={14} aria-hidden="true" />
             <span className="hidden sm:inline">{tab.label}</span>
-            {tab.count > 0 && (
+            {tab.count != null && tab.count > 0 && (
               <span className={clsx(
                 'text-[10px] px-1.5 py-0.5 rounded-full',
                 isActive ? 'bg-black/20' : 'bg-slate-800',
@@ -112,7 +140,7 @@ function EmptyAgents({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="text-center py-16 space-y-6">
       <div className="w-20 h-20 mx-auto rounded-2xl bg-[#f7931a]/10 border border-[#f7931a]/20 flex items-center justify-center">
-        <Bot size={36} className="text-[#f7931a]" />
+        <Bot size={36} className="text-[#f7931a]" aria-hidden="true" />
       </div>
       <div>
         <h3 className="heading-display text-xl text-[#f5f5f5] mb-2">No Agents Yet</h3>
@@ -125,7 +153,7 @@ function EmptyAgents({ onCreate }: { onCreate: () => void }) {
         onClick={onCreate}
         className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#f7931a] text-black font-medium hover:bg-[#e8841a] active:scale-95 transition-all duration-150"
       >
-        <Plus size={18} />
+        <Plus size={18} aria-hidden="true" />
         Create First Agent
       </button>
     </div>
@@ -201,7 +229,7 @@ function AgentsTab() {
             onClick={() => setView('create')}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#f7931a] hover:bg-[#e8841a] text-black font-medium text-sm transition-colors"
           >
-            <Plus size={15} />
+            <Plus size={15} aria-hidden="true" />
             New Agent
           </button>
         )}
@@ -225,7 +253,7 @@ function AgentsTab() {
       {/* Loading */}
       {isLoading && (
         <div className="grid grid-cols-1 gap-4">
-          {[1, 2, 3].map(i => <div key={i} className="h-48 skeleton rounded-xl" />)}
+          {[1, 2, 3].map(i => <div key={i} className="h-48 skeleton rounded-xl" aria-hidden="true" />)}
         </div>
       )}
 
@@ -256,7 +284,7 @@ function AgentsTab() {
       {/* No search results */}
       {!isLoading && agents.length > 0 && filtered.length === 0 && (
         <div className="text-center py-8">
-          <Search size={24} className="mx-auto text-[#555555] mb-2" />
+          <Search size={24} className="mx-auto text-[#555555] mb-2" aria-hidden="true" />
           <p className="text-sm text-[#555555]">No agents match "{search}"</p>
         </div>
       )}
@@ -320,7 +348,7 @@ function SkillsTab() {
           onClick={() => setView('register')}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#f7931a] hover:bg-[#e8841a] text-black font-medium text-sm transition-colors"
         >
-          <Plus size={15} />
+          <Plus size={15} aria-hidden="true" />
           Register Skill
         </button>
       </div>
@@ -343,7 +371,7 @@ function SkillsTab() {
       {/* Loading */}
       {isLoading && (
         <div className="space-y-3">
-          {[1, 2, 3].map(i => <div key={i} className="h-36 skeleton rounded-xl" />)}
+          {[1, 2, 3].map(i => <div key={i} className="h-36 skeleton rounded-xl" aria-hidden="true" />)}
         </div>
       )}
 
@@ -351,7 +379,7 @@ function SkillsTab() {
       {!isLoading && skills.length === 0 && (
         <div className="text-center py-12 space-y-4">
           <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-600/10 border border-blue-600/20 flex items-center justify-center">
-            <BookOpen size={28} className="text-blue-400" />
+            <BookOpen size={28} className="text-blue-400" aria-hidden="true" />
           </div>
           <div>
             <h3 className="heading-display text-lg text-[#f5f5f5] mb-1">No Skills Registered</h3>
@@ -362,7 +390,7 @@ function SkillsTab() {
             onClick={() => setView('register')}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#f7931a] text-black font-medium hover:bg-[#e8841a] transition-colors"
           >
-            <Plus size={16} />
+            <Plus size={16} aria-hidden="true" />
             Register First Skill
           </button>
         </div>
@@ -432,6 +460,112 @@ function CreditsTab() {
 }
 
 // ---------------------------------------------------------------------------
+// Monitoring tab — Phase 4
+// ---------------------------------------------------------------------------
+
+function MonitoringTab() {
+  const { agents } = useAgentProfile();
+  const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>(
+    agents[0]?.id,
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Agent selector (if multiple agents) */}
+      {agents.length > 1 && (
+        <div>
+          <label
+            htmlFor="monitoring-agent-select"
+            className="block text-xs font-medium text-slate-500 mb-1.5"
+          >
+            Viewing agent
+          </label>
+          <select
+            id="monitoring-agent-select"
+            value={selectedAgentId}
+            onChange={e => setSelectedAgentId(e.target.value)}
+            className="bg-slate-900 border border-slate-800 text-slate-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-[#f7931a] transition-colors"
+            aria-label="Select agent to monitor"
+          >
+            {agents.map(a => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Delegation health */}
+      <section aria-label="Delegation health">
+        <DelegationHealthPanel />
+      </section>
+
+      {/* Performance report */}
+      <section aria-label="Performance report">
+        <PerformanceReportPanel agentId={selectedAgentId} />
+      </section>
+
+      {/* Session manager */}
+      <section aria-label="Session manager">
+        <SessionManagerPanel agentId={selectedAgentId} />
+      </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Probe tab — Phase 4
+// ---------------------------------------------------------------------------
+
+function ProbeTab() {
+  // Sample diff for demonstration when no session is active
+  const sampleDiff = null;
+  const sampleResult = null;
+
+  return (
+    <div className="space-y-6">
+      {/* Active probe sessions + trajectory */}
+      <section aria-label="Probe sessions">
+        <ProbeSessionPanel />
+      </section>
+
+      {/* Tool call approval queue */}
+      <section aria-label="Tool call approvals">
+        <ToolCallApproval showAutoApprove />
+      </section>
+
+      {/* Diff renderer — shown when a session has produced diffs */}
+      {sampleDiff !== null && (
+        <section aria-label="Session diff">
+          <SessionDiffRenderer files={[]} title="Latest Changes" />
+        </section>
+      )}
+
+      {/* Execution result — shown when a session completes */}
+      {sampleResult !== null && (
+        <section aria-label="Execution result">
+          <ExecutionResultPanel
+            result={{
+              exit_code: 0,
+              stdout: '',
+              stderr: '',
+            }}
+          />
+        </section>
+      )}
+
+      {/* Info: no active session */}
+      {sampleDiff === null && sampleResult === null && (
+        <div className="rounded-xl bg-slate-900 border border-slate-800 px-4 py-3">
+          <p className="text-xs text-slate-500">
+            Diffs and execution results will appear here once a Probe session completes a tool call.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Page
 // ---------------------------------------------------------------------------
 
@@ -459,7 +593,7 @@ export default function AgentsPage() {
           {/* Page header */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#f7931a]/10 border border-[#f7931a]/20 flex items-center justify-center">
-              <Bot size={20} className="text-[#f7931a]" />
+              <Bot size={20} className="text-[#f7931a]" aria-hidden="true" />
             </div>
             <div>
               <h1 className="heading-display text-2xl text-[#f7931a]">Agents</h1>
@@ -471,10 +605,17 @@ export default function AgentsPage() {
           <TabBar active={activeTab} onChange={setActiveTab} counts={counts} />
 
           {/* Tab content */}
-          <div id={`tabpanel-${activeTab}`} role="tabpanel" aria-label={activeTab}>
-            {activeTab === 'agents' && <AgentsTab />}
-            {activeTab === 'skills' && <SkillsTab />}
-            {activeTab === 'credits' && <CreditsTab />}
+          <div
+            id={`tabpanel-${activeTab}`}
+            role="tabpanel"
+            aria-label={activeTab}
+            tabIndex={0}
+          >
+            {activeTab === 'agents'     && <AgentsTab />}
+            {activeTab === 'skills'     && <SkillsTab />}
+            {activeTab === 'credits'    && <CreditsTab />}
+            {activeTab === 'monitoring' && <MonitoringTab />}
+            {activeTab === 'probe'      && <ProbeTab />}
           </div>
         </div>
       </main>
