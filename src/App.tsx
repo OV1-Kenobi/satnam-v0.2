@@ -40,6 +40,7 @@ const WalletPage         = lazy(() => import('./pages/WalletPage'));
 const AgentsPage         = lazy(() => import('./pages/AgentsPage'));
 const MarketplacePage    = lazy(() => import('./pages/MarketplacePage'));
 const CircleOfTrustPage  = lazy(() => import('./pages/CircleOfTrustPage'));
+const MessagesPage       = lazy(() => import('./pages/MessagesPage'));
 const NotFoundPage       = lazy(() => import('./pages/NotFoundPage'));
 
 // ── Loading fallback ──────────────────────────────────────────────────────────
@@ -101,6 +102,7 @@ function AppRouter() {
             <Route path="/wallet"      element={<WalletPage />} />
             <Route path="/agents"      element={<AgentsPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
+            <Route path="/messages"    element={<MessagesPage />} />
           </Route>
 
           {/* ── 404 ───────────────────────────────────────────────────── */}

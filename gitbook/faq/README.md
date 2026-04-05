@@ -245,6 +245,54 @@ LNbits Admin and Invoice keys are stored encrypted in the OPFS Vault at `lnbits/
 
 ---
 
+## Messaging
+
+### How are group messages encrypted?
+
+Satnam uses NIP-17 gift-wrap for all group messages. Each message is **individually gift-wrapped** (kind:1059) to every group member — there is no shared group encryption key. This means:
+- Compromising one member's key does not expose messages to other members
+- Relay operators cannot determine group membership (they see anonymous gift-wraps)
+- Sender identity is hidden inside the inner seal (kind:13) using a one-time random signing key
+
+For groups over ~50 members, message delivery involves one gift-wrap event per member per message, which can create relay overhead. See [Group Messaging](../user-guides/messaging/group-messaging.md).
+
+### How do ephemeral messages work?
+
+Ephemeral messages use NIP-40 `expiration` tags added to the inner seal (kind:13) of the gift-wrap. The expiration timestamp is set to `now + TTL`. Relays implementing NIP-40 (including Pylon) automatically refuse to serve expired events and garbage-collect them. Satnam's client also deletes expired messages from local storage and the UI every 30 seconds.
+
+**Burn After Read** is a separate mechanism: the message is flagged with `burnAfterRead: true`. When the recipient's client receives a read receipt event, it triggers a `kind:5` deletion request from the sender. Both clients delete the message from local storage.
+
+Neither mechanism guarantees the recipient cannot screenshot or copy the content before deletion. See [Ephemeral Messages](../user-guides/messaging/ephemeral-messages.md).
+
+### Will Satnam support MLS (Marmot Protocol) for group encryption?
+
+Yes, in Phase 2. MLS (Message Layer Security) provides full forward secrecy, post-compromise security, and O(log n) key operations per message — significantly more efficient than NIP-17's O(n) for large groups.
+
+In Phase 1 (current), Satnam already publishes `kind:443` MLS KeyPackage events so that MLS-capable clients (White Noise) can invite Satnam users to MLS groups. When Phase 2 ships, Satnam will be able to fully participate in MLS group conversations and migrate existing NIP-17 groups to MLS when all members support it.
+
+See [Protocol Reference: Messaging Protocols](../protocol-reference/messaging-protocols.md).
+
+### How do push notifications work for messages?
+
+Satnam follows the **0xchat push model** using `kind:22456` encrypted device registration events. When you enable push:
+
+1. Your device token (APNs/FCM) is encrypted with NIP-44 and published in a `kind:22456` event to the push server
+2. While you are online, your client sends periodic heartbeat signals — the push server does not forward messages
+3. When heartbeats stop (you close the app), the push server begins forwarding new gift-wrap events (kind:1059) to your device
+4. Your device receives a push notification saying "New encrypted message" — the actual content is decrypted client-side when you open the app
+
+The push server never sees message content. It only relays encrypted gift-wrap events it cannot decrypt. See [Notifications](../user-guides/messaging/notifications.md).
+
+### Can White Noise users message Satnam users?
+
+Partially in Phase 1, fully in Phase 2.
+
+- **NIP-17 DMs:** White Noise supports NIP-17 receive. A White Noise user can receive NIP-17 gift-wraps from Satnam.
+- **MLS group invites:** White Noise can see Satnam's `kind:443` KeyPackage and send a Welcome event. Satnam Phase 1 receives the Welcome but displays "MLS upgrade required." Phase 2 will process it fully.
+- **MLS groups:** Phase 2 will support full bidirectional MLS communication with White Noise.
+
+---
+
 ## Migration
 
 ### Is there a migration from v1?

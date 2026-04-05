@@ -34,6 +34,9 @@ A memory-hard password hashing algorithm used in Satnam to derive vault wrapping
 
 ## B
 
+**Burn After Read**
+An ephemeral message mode in which a message is automatically deleted the moment the recipient's client marks it as read. Implemented via: (1) sender marks message with `burnAfterRead` flag; (2) recipient's client publishes a read receipt upon display; (3) sender publishes a `kind:5` deletion event upon receipt. Both parties' local stores delete the message. See [Ephemeral Messages](../user-guides/messaging/ephemeral-messages.md).
+
 **Boltz**
 An open-source, non-custodial swap service enabling on-chain Bitcoin ↔ Lightning Network exchanges (submarine swaps and reverse swaps). Satnam accesses Boltz through the LNbits Boltz extension. See [Atomic Swaps](../user-guides/wallet/atomic-swaps.md) and [LNbits Integration](../user-guides/wallet/lnbits-integration.md).
 
@@ -97,6 +100,9 @@ A NIP-90 compute provider that accepts job requests (kind:5xxx), performs work, 
 **eCash**
 See **Cashu**.
 
+**Ephemeral Message**
+A message with a time-to-live (TTL) that self-destructs after the configured period. Implemented using NIP-40 `expiration` tags on the inner seal (kind:13) of a NIP-17 gift-wrapped message. Displayed with a dashed border and a countdown timer. When the timer reaches zero, the message is removed from local storage and the UI. Relay operators implementing NIP-40 also garbage-collect expired events. See [Ephemeral Messages](../user-guides/messaging/ephemeral-messages.md).
+
 **Entitlement Bond**
 A Sig4Sats bond type that grants access to a premium feature in exchange for a Cashu payment. The payment and capability token issuance are linked via an adaptor signature — the token is blinded, so neither the mint nor the feature provider can link payment to access. See [Sig4Sats Bonds: Entitlement Bonds](../user-guides/wallet/sig4sats-bonds.md#bond-type-1-entitlement-bonds).
 
@@ -110,6 +116,9 @@ The threshold signing scheme used in Satnam for group operations. FROST allows t
 ---
 
 ## G
+
+**Group Thread**
+A private multi-party messaging thread in Satnam. Group threads use NIP-17 gift-wrap to deliver each message individually to every member — there is no shared group encryption key. Group state (name, member list, admin list) is stored in a `kind:30078` app-specific data event with d-tag `satnam:group:{groupId}`, encrypted and stored in the sender's OPFS Vault. See [Group Messaging](../user-guides/messaging/group-messaging.md).
 
 **Governor**
 The human Principal (Guardian or Steward) who is responsible for an Agent. The Governor sets the agent's spend policy and can revoke the agent's delegation.
@@ -141,6 +150,9 @@ The opening event in the NIP-AC credit lifecycle. A Principal or Agent publishes
 
 ## K
 
+**KeyPackage (kind:443)**
+An MLS (Message Layer Security) pre-key material bundle published as a Nostr `kind:443` event. KeyPackages allow other MLS-capable clients to add you to MLS encrypted group chats without requiring you to be online at the time of group creation. Satnam publishes KeyPackages for forward compatibility with MLS clients (White Noise, future Marmot clients) even while operating in NIP-17 mode. Defined in MIP-00 of the Marmot protocol specification. See [Protocol Reference: Messaging Protocols](../protocol-reference/messaging-protocols.md#mip-00-keypackage-kind443).
+
 **kind**
 A Nostr event type number. All Nostr events have a `kind` field that identifies their purpose. Satnam uses kinds across a wide range — from standard Nostr kinds (1, 1985, 10002) through NIP-47 (23194/23195) to the custom NIP-SA/AC/SKL range (33400–39245).
 
@@ -164,6 +176,12 @@ A protocol for encoding Lightning payment flows as bech32-encoded URLs. LNURL-pa
 
 ## M
 
+**Marmot Protocol**
+The Nostr implementation of the IETF Message Layer Security (MLS) standard, defined in a series of Marmot Improvement Proposals (MIP-00 through MIP-05). Marmot provides full forward secrecy, post-compromise security, and O(log n) group key operations — significantly more efficient than NIP-17's O(n) per message for large groups. White Noise is the reference client. Satnam implements forward-compat stubs (kind:443 KeyPackage publication) in Phase 1 and plans full MLS support in Phase 2. See [Protocol Reference: Messaging Protocols](../protocol-reference/messaging-protocols.md#marmot-mls-message-layer-security-future-phase).
+
+**MLS (Message Layer Security)**
+The IETF cryptographic protocol (RFC 9420) underlying the Marmot Nostr messaging extension. MLS provides group key agreement with a ratchet tree structure, enabling efficient key rotation, forward secrecy, and post-compromise security for encrypted group chats. In the Nostr context, MLS group keys are published via `kind:443` KeyPackage events and group messages are encrypted as MLS MLSCiphertext objects. See **Marmot Protocol**.
+
 **Melt**
 The Cashu operation that converts eCash tokens back to Lightning sats by paying a BOLT-11 invoice. See [Cashu eCash](../user-guides/wallet/cashu-ecash.md).
 
@@ -179,6 +197,9 @@ The Cashu operation that converts Lightning sats to eCash tokens. See [Cashu eCa
 
 **NIP (Nostr Implementation Possibilities)**
 The specification documents that define Nostr protocol extensions. Satnam implements NIP-05, NIP-17, NIP-26, NIP-32, NIP-42, NIP-44, NIP-47, NIP-65, NIP-78, NIP-90, and the three custom NIPs (NIP-SA, NIP-AC, NIP-SKL).
+
+**NIP-40**
+The Nostr protocol for ephemeral message expiration. Events with a NIP-40 `expiration` tag (a Unix timestamp) are automatically garbage-collected by relays after the expiration time. In Satnam, the `expiration` tag is added to the inner seal (kind:13) of a NIP-17 gift-wrapped message — the outer gift-wrap does not expose the TTL to relay operators. See [Ephemeral Messages](../user-guides/messaging/ephemeral-messages.md#how-expiration-works-nip-40).
 
 **NIP-05**
 The Nostr protocol for mapping a human-readable identifier (`user@satnam.pub`) to a Nostr public key via a `.well-known/nostr.json` endpoint. Satnam provides NIP-05 registration at `satnam.pub`. See [Getting Started](../user-guides/getting-started/README.md).
@@ -265,6 +286,12 @@ The encrypted key storage module in Satnam. All sensitive material (nsec, FROST 
 ---
 
 ## P
+
+**Protocol Bridge**
+The Satnam component (`src/lib/messaging/protocol-bridge.ts`) that handles detection of peer messaging protocol capabilities and negotiation between NIP-17 and MLS. Checks if a peer has published a `kind:443` MLS KeyPackage (via `detectPeerProtocol()`), determines the best protocol for a conversation (`negotiateProtocol()`), and wraps/unwraps messages in the appropriate format. Also publishes Satnam's own `kind:443` KeyPackage for forward compatibility. See [Developer Reference: ProtocolBridge](../developer-reference/libraries/messaging.md#protocolbridge).
+
+**Push Notification (kind:22456)**
+A device registration event following the 0xchat push model. Published encrypted to a push server's pubkey, containing the device's push token (APNs/FCM), relay URLs to monitor, and event kinds to forward (`[1059]`). When the Satnam client goes offline (heartbeat stops), the push server forwards incoming gift-wrap events to the device's native push service. See [Notifications](../user-guides/messaging/notifications.md) and [Developer Reference: NotificationManager](../developer-reference/libraries/messaging.md#notificationmanager).
 
 **Payment Cascade**
 A distribution tree that splits a single payment amount across multiple recipients automatically. Nodes can have percentage or fixed-amount allocations and their own sub-nodes (multi-tier). The `CascadeEngine` validates that percentages at each level sum to ≤ 100% and executes the tree in sequential or parallel mode. See [Payment Cascades](../user-guides/wallet/payment-cascades.md).

@@ -62,6 +62,9 @@ Each NIP solves a specific problem. Together they form a complete, trustless sys
 | "How do I split payments?" | CascadeEngine (client-side) | Smart contract platforms |
 | "How do I call a contact?" | kind:25050 (NIP-44 encrypted signaling) + WebRTC | Traditional SIP/STUN servers |
 | "How do I prove a face-to-face meeting?" | kind:30078 + OTS block-height notarization | Centralized identity verification |
+| "How do I send a private message?" | NIP-17 (kind:1059 gift-wrap) | Cleartext messaging, TLS-only |
+| "How do I get push notifications for messages?" | kind:22456 (0xchat push model) | FCM/APNs direct registration |
+| "How do I interop with MLS clients?" | kind:443 MLS KeyPackage (MIP-00) | Proprietary group key exchange |
 
 **Request flow for an authenticated action:**
 
@@ -82,7 +85,8 @@ Each NIP solves a specific problem. Together they form a complete, trustless sys
 |---|---|---|
 | NIP-01 | 0, 1, 5 | Core protocol, profiles, text notes, deletion |
 | NIP-05 | — | Internet identifier (`user@satnam.pub`) |
-| NIP-17 | — | Gift-wrapped DMs (metadata protection) |
+| NIP-17 | 13, 14, 1059 | Gift-wrapped DMs (metadata protection). kind:14 = plaintext message; kind:13 = inner seal (NIP-44 encrypted, random sender key); kind:1059 = gift-wrap outer (NIP-44 encrypted to recipient). |
+| NIP-40 | — | Ephemeral message expiration (`expiration` tag on inner seal) |
 | NIP-26 | — | Delegation events (role authorization) |
 | NIP-32 | 1985 | Label events (skill attestation) |
 | NIP-42 | 22242 | Relay authentication (Pylon access) |
@@ -101,6 +105,9 @@ Each NIP solves a specific problem. Together they form a complete, trustless sys
 | NIP-AC | 39240–39245 | Agent Credit — intent, offer, envelope, spend auth, settlement |
 | NIP-SKL | 33400, 33401 | Skill Registry — manifests, attestations, version logs |
 | NIP-CA | — | Certificate Authority issuer registry (via `issuer-registry` function) |
+| Marmot MIP-00 | 443 | MLS KeyPackage (pre-key material for MLS group membership). Published for forward compatibility with White Noise and future MLS clients. |
+| Marmot MIP-01 | 30078 | MLS group state extension (extends kind:30078 with MLS ratchet tree metadata) |
+| 0xchat push | 22456 | Encrypted push notification device registration. Encrypted to push server pubkey; contains device token, relay URLs, and event kind filter. |
 
 ---
 
@@ -117,6 +124,9 @@ All event kinds used in Satnam v2, organized by range:
 | 22242 | Relay Auth | NIP-42 | Pylon NIP-42 authentication challenge response |
 | 27235 | HTTP Auth | NIP-98 | Per-request HTTP authentication (replaces JWT) |
 | 30078 | App-Specific Data | NIP-78 | Bilateral contact attestation events (`d: satnam:proof-of-life`). Published by each participant in a Proof of Life ceremony, with a `p` tag pointing to the other participant's pubkey and an `nfc-card-hash` tag containing the SHA-256 of the other participant's NFC card UID. |
+| 13 | Sealed Message | NIP-17 | Inner seal — NIP-44 encrypted to recipient; signed by random one-time key to hide sender |
+| 14 | Direct Message | NIP-17 | Plaintext message event (inside kind:13 seal; never published directly to relays) |
+| 443 | MLS KeyPackage | Marmot MIP-00 | Pre-key material bundle enabling MLS-capable clients (White Noise) to add Satnam users to MLS groups. Satnam publishes for forward compat in Phase 1; full MLS support in Phase 2. |
 | 1059 | Gift Wrap | NIP-17 | Outer wrapper for DMs (metadata protection) |
 | 25050 | Call Signaling | Custom | Ephemeral WebRTC signaling events (offer/answer/ICE/hangup). NIP-44 encrypted to recipient. Used exclusively for voice/video call setup between PoL-verified contacts. Ephemeral — relays are not required to persist. |
 | 1985 | Label | NIP-32 | Skill attestations (tier1–tier4) |
@@ -145,6 +155,7 @@ All event kinds used in Satnam v2, organized by range:
 | 39243 | Spend Authorization | NIP-AC | Signed spend within envelope limits |
 | 39244 | Settlement Receipt | NIP-AC | Completion proof, Cashu bond redemption |
 | 39245 | Default Notice | NIP-AC | Envelope expired without settlement |
+| 22456 | Push Registration | 0xchat push model | Encrypted device registration for push notifications. NIP-44 encrypted to push server pubkey. Contains device token (APNs/FCM), relay URLs to monitor, event kinds to forward (`[1059]`). Client sends heartbeats while online; goes silent when offline → push server forwards events. |
 
 ---
 
@@ -190,6 +201,7 @@ For standard Lightning operations (send/receive), use NWC. Reach for the LNbits 
 
 ## Protocol Reference Pages
 
+- [Messaging Protocols: NIP-17, NIP-40, MLS/Marmot](messaging-protocols.md)
 - [NIP-98: HTTP Authentication](nip-98/README.md)
 - [NIP-26: Delegation](nip-26/README.md)
 - [FROST: Threshold Signatures](frost/README.md)

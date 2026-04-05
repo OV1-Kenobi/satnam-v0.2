@@ -1,10 +1,35 @@
 # Components Overview
 
-Satnam v2 has **58 React components** organized by domain. Six new payment components were added in v2 for advanced payment features. All components are pure presentational-plus-hook consumers — they do not perform cryptographic operations directly or access the vault. All state comes from hooks.
+Satnam v2 has **65 React components** organized by domain. Seven new messaging components were added for the complete private messaging infrastructure. Six new payment components were added in v2 for advanced payment features. All components are pure presentational-plus-hook consumers — they do not perform cryptographic operations directly or access the vault. All state comes from hooks.
 
 ---
 
 ## Component Tree by Domain
+
+### Messaging (7 components)
+
+```
+MessagesPage
+├── ThreadList              — All threads (DM + group + self) with search, unread badges, flame/group overlays
+├── ChatView                — Full chat: message list, compose bar, ephemeral controls, read receipts
+│   ├── GroupChatHeader     — Group name, stacked member avatars, member count, settings gear, protocol badge
+│   ├── GroupSettingsPanel  — Member list with roles, add/remove, name/avatar edit, notifications, leave
+│   ├── EphemeralControls   — TTL dropdown (5m/1h/24h/7d/custom), burn-after-read toggle, TimerBadge
+│   ├── ProtocolIndicator   — NIP-17 (blue) / MLS (green) pill badge with details popover
+│   └── NotificationCenter  — Bell + badge count, thread-grouped notification list, mark all read
+```
+
+| Component | File | Description |
+|---|---|---|
+| `ThreadList` | `src/components/messaging/ThreadList.tsx` | All DM, group, and self threads. Search bar. Group icon overlay (people icon, bottom-right of avatar). Flame icon for ephemeral threads. Sort by last activity. Unread count badges (orange pill, min-w-5). |
+| `ChatView` | `src/components/messaging/ChatView.tsx` | Full chat view for DM and group. Message list (chronological, date headers). Sent bubbles (right, bg-[#f7931a]/20). Received bubbles (left, bg-slate-800). Ephemeral dashed border + flame + countdown. Read receipts (✓✓ Signal-style). Compose bar (textarea + send + ephemeral toggle). Scrolls to latest message. |
+| `GroupChatHeader` | `src/components/messaging/GroupChatHeader.tsx` | Group name, stacked member avatars (max 4 + overflow badge), member count, settings gear button, NIP-17/MLS protocol badge. Mobile back button. |
+| `GroupSettingsPanel` | `src/components/messaging/GroupSettingsPanel.tsx` | Member list with role badges (crown for admin), PoL trust score display, add/remove member inputs, group name edit, notification preference selector (all/mentions/muted), admin transfer, leave group (red destructive button). |
+| `EphemeralControls` | `src/components/messaging/EphemeralControls.tsx` | TTL selector dropdown (Off/5m/1h/24h/7d/custom). Burn-after-read toggle with pill switch. `TimerBadge` sub-component: real-time countdown (updates every 1s), urgent red + pulse animation when < 60s. |
+| `ProtocolIndicator` | `src/components/messaging/ProtocolIndicator.tsx` | Small pill badge: NIP-17 (bg-blue-600) or MLS (bg-green-600) with shield icon. Tap/click expands popover showing forward secrecy status, peer protocol support (kind:443 KeyPackage detection), key rotation info. |
+| `NotificationCenter` | `src/components/messaging/NotificationCenter.tsx` | Bell icon with orange badge count. Dropdown panel: notifications grouped by thread (message previews, sender name, timestamp). Mark all read button. Per-thread mark-read. Push registration status footer. |
+
+---
 
 ### Groups (3 components)
 

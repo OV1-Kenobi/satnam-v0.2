@@ -40,6 +40,10 @@
 * [Circle of Trust](user-guides/circle-of-trust/README.md)
   * [Trust Scoring](user-guides/circle-of-trust/trust-scoring.md)
 * [Note to Self](user-guides/note-to-self.md)
+* [Messaging](user-guides/messaging/README.md)
+  * [Group Messaging](user-guides/messaging/group-messaging.md)
+  * [Ephemeral Messages](user-guides/messaging/ephemeral-messages.md)
+  * [Notifications](user-guides/messaging/notifications.md)
 * [Calls](user-guides/calls/README.md)
 
 ---
@@ -60,6 +64,7 @@
   * [Circle of Trust](developer-reference/libraries/circle-of-trust.md)
   * [Note to Self](developer-reference/libraries/note-to-self.md)
   * [Calls](developer-reference/libraries/calls.md)
+  * [Messaging](developer-reference/libraries/messaging.md)
 * [Hooks](developer-reference/hooks/README.md)
   * [useVault](developer-reference/hooks/use-vault.md)
   * [useFrost](developer-reference/hooks/use-frost.md)
@@ -77,6 +82,8 @@
   * [useCircleOfTrust](developer-reference/hooks/use-circle-of-trust.md)
   * [useNoteToSelf](developer-reference/hooks/use-note-to-self.md)
   * [useCalls](developer-reference/hooks/use-calls.md)
+  * [useMessaging](developer-reference/hooks/use-messaging.md)
+  * [useNotifications](developer-reference/hooks/use-notifications.md)
 * [Components](developer-reference/components/README.md)
 * [Functions](developer-reference/functions/README.md)
 * [Configuration](developer-reference/configuration/README.md)
@@ -87,6 +94,7 @@
 ## Protocol Reference
 
 * [Protocol Overview](protocol-reference/README.md)
+* [Messaging Protocols](protocol-reference/messaging-protocols.md)
 * [NIP-98: HTTP Authentication](protocol-reference/nip-98/README.md)
 * [NIP-26: Delegation](protocol-reference/nip-26/README.md)
 * [FROST: Threshold Signatures](protocol-reference/frost/README.md)
@@ -110,6 +118,7 @@
 
 * [Tutorials Index](tutorials/README.md)
 * [Create Your First Group](tutorials/first-group.md)
+* [Setting Up Your First Group Chat](tutorials/group-messaging.md)
 * [Deploy Your First Agent](tutorials/deploy-agent.md)
 * [Setting Up NFC Cards](tutorials/nfc-setup.md)
 * [Building Your Circle of Trust](tutorials/circle-of-trust.md)
