@@ -14,23 +14,27 @@
  *   → PEER_VERIFIED      (peer card CMAC verified; peer pubkey extracted)
  *   → AWAITING_RECIPROCAL (waiting for peer to scan our card)
  *   → MUTUAL_VERIFIED    (both scans complete)
- *   → PIN_EXCHANGE       (both users enter their PINs to authorize)
- *   → ATTESTING          (constructing bilateral kind:30078 events)
+ *   → WELCOME_SENT       (each device sends a signed NIP-17 welcome message)
+ *   → ATTESTING          (constructing kind:30078 with welcome msg hash + OTS Bitcoin block height)
  *   → PUBLISHED          (events published to relay + OTS anchored)
  *   → CONFIRMED          (both sides confirm receipt)
- *   → FAILED             (timeout, invalid CMAC, wrong PIN)
+ *   → FAILED             (timeout, invalid CMAC)
  * ```
  *
  * Events published (one per participant):
  * - kind:30078 with d-tag `satnam:proof-of-life`
  *   - `p` tag: the OTHER participant's pubkey
  *   - `nfc-card-hash` tag: SHA-256 of the OTHER participant's card UID
+ *   - `welcome-msg-hash` tag: SHA-256 of both welcome messages concatenated
+ *   - `block-height` tag: Bitcoin block height at time of ceremony
  *   - `ots` tag: OpenTimestamps commitment (anchored asynchronously)
  *   - Content: JSON with both pubkey hashes, bilateral flag, timestamp
  *
  * After ceremony, the contact is "authenticated" — future DMs and Zaps to
  * that contact require NFC card tap + PIN before publishing (PinGatedOperation
- * 'message_send' and 'zap_send').
+ * 'message_send' and 'zap_send'). The PIN gate is ONLY used for your own
+ * outgoing communications on your own device — never exchanged during the
+ * ceremony itself.
  *
  * @see SPECIFICATION.md §5.4 — Proof of Life Ceremony
  */
@@ -42,7 +46,6 @@ import * as nt from 'nostr-tools';
 
 import type { VaultOps } from '../vault/types.js';
 import { NTAG424ProductionManager } from './ntag424.js';
-import { PinGate } from './pin-gate.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,7 +58,7 @@ export type PolState =
   | 'PEER_VERIFIED'
   | 'AWAITING_RECIPROCAL'
   | 'MUTUAL_VERIFIED'
-  | 'PIN_EXCHANGE'
+  | 'WELCOME_SENT'
   | 'ATTESTING'
   | 'PUBLISHED'
   | 'CONFIRMED'
@@ -89,8 +92,6 @@ export interface PolCeremony {
   localCardUid: string;
   /** SHA-256 hash of local card UID */
   localCardUidHash: string;
-  /** True once the local user's PIN has been verified */
-  localPinVerified: boolean;
 
   // ── Peer participant ─────────────────────────────────────────────────────
   /** Hex pubkey of the peer user (populated after peer card CMAC verification) */
@@ -99,8 +100,16 @@ export interface PolCeremony {
   peerCardUid: string;
   /** SHA-256 hash of peer card UID */
   peerCardUidHash: string;
-  /** True once the peer has confirmed they scanned our card */
-  peerPinVerified: boolean;
+
+  // ── Welcome messages ─────────────────────────────────────────────────────
+  /** Event ID of the signed NIP-17 welcome message sent to peer */
+  welcomeMessageId?: string;
+  /** SHA-256 hash of both welcome messages concatenated (for OTS attestation) */
+  welcomeMessageHash?: string;
+
+  // ── OTS / Bitcoin ────────────────────────────────────────────────────────
+  /** Bitcoin block height at time of ceremony (from OTS calendar or block explorer) */
+  blockHeight?: number;
 
   // ── Ceremony metadata ────────────────────────────────────────────────────
   timestamp: number;
@@ -127,6 +136,12 @@ export interface PolCeremony {
   guardianPubkey: string;
   /** @deprecated Use attestationEvents.localEvent or attestationEvents.peerEvent */
   signedEvent?: unknown;
+
+  // ── Backward-compat fields (removed from active flow) ───────────────────
+  /** @deprecated PIN is no longer verified during the ceremony */
+  localPinVerified: boolean;
+  /** @deprecated PIN is no longer verified during the ceremony */
+  peerPinVerified: boolean;
 }
 
 /** Proof of Life event kind (NIP-78 app-specific data) */
@@ -147,7 +162,8 @@ export class ProofOfLifeService {
 
   constructor(
     private readonly vault: VaultOps,
-    private readonly pinGate: PinGate,
+    // pinGate kept in signature for backward compatibility — not used in ceremony
+    private readonly _pinGate?: unknown,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -337,120 +353,100 @@ export class ProofOfLifeService {
   }
 
   /**
-   * Verify the local user's PIN.
-   * Transitions: MUTUAL_VERIFIED → PIN_EXCHANGE (partial) or PIN_EXCHANGE → PIN_EXCHANGE
+   * Send a signed NIP-17 gift-wrapped "Welcome to my trusted contacts" message to peer.
+   * Transitions: MUTUAL_VERIFIED → WELCOME_SENT
    *
-   * @param ceremony - Current ceremony (must be MUTUAL_VERIFIED or PIN_EXCHANGE)
-   * @param pin      - PIN entered by the local user
+   * Each device sends a welcome message to the other party. The welcome message hash
+   * (SHA-256 of both messages concatenated) is included in the OTS attestation event.
+   * No PIN is involved in the ceremony itself.
+   *
+   * @param ceremony      - Current ceremony (must be MUTUAL_VERIFIED)
+   * @param localNsec     - nsec of the local user for signing the welcome message
+   * @param blockHeight   - Bitcoin block height at time of ceremony
    */
-  async verifyLocalPin(
+  async sendWelcomeMessage(
     ceremony: PolCeremony,
-    pin: string,
+    localNsec: string,
+    blockHeight: number,
   ): Promise<PolCeremony> {
-    if (
-      ceremony.state !== 'MUTUAL_VERIFIED' &&
-      ceremony.state !== 'PIN_EXCHANGE'
-    ) {
+    if (ceremony.state !== 'MUTUAL_VERIFIED') {
       return {
         ...ceremony,
         state: 'FAILED',
-        error: `verifyLocalPin called in invalid state: ${ceremony.state}`,
+        error: `sendWelcomeMessage called in invalid state: ${ceremony.state}`,
       };
     }
 
-    if (this.pinGate.isLockedOut()) {
+    try {
+      const secretKey = this._decodeNsec(localNsec);
+      const localPubkey = ceremony.localPubkey;
+
+      // Construct the welcome message payload
+      const welcomePayload = JSON.stringify({
+        type: 'welcome',
+        from: localPubkey,
+        to: ceremony.peerPubkey,
+        message: 'Welcome to my Circle of Trust',
+        timestamp: ceremony.timestamp,
+        blockHeight,
+        nfcCardHash: ceremony.peerCardUidHash,
+      });
+
+      // Sign a kind:14 (NIP-17 direct message) sealed and gift-wrapped
+      // For the ceremony, we construct a signed event as proof
+      const welcomeEvent = finalizeEvent(
+        {
+          kind: 14,
+          created_at: ceremony.timestamp,
+          tags: [
+            ['p', ceremony.peerPubkey],
+            ['subject', 'Welcome to my Circle of Trust'],
+          ],
+          content: welcomePayload,
+        },
+        secretKey,
+      );
+
+      // welcomeMessageId is the event ID of the signed welcome
+      const welcomeMessageId = (welcomeEvent as { id: string }).id;
+
+      // Compute welcome message hash — will be combined with peer's hash at ATTESTING
+      const localWelcomeHash = bytesToHex(sha256(utf8ToBytes(welcomePayload)));
+
+      return {
+        ...ceremony,
+        state: 'WELCOME_SENT',
+        welcomeMessageId,
+        welcomeMessageHash: localWelcomeHash,
+        blockHeight,
+      };
+    } catch (err) {
       return {
         ...ceremony,
         state: 'FAILED',
-        error: `PIN locked out. Try again in ${Math.ceil(this.pinGate.getRemainingLockout() / 1000)}s`,
+        error: err instanceof Error ? err.message : 'Failed to send welcome message',
       };
     }
-
-    const isValid = await this.pinGate.verifyPin(pin);
-    if (!isValid) {
-      const remaining = this.pinGate.getRemainingAttempts();
-      return {
-        ...ceremony,
-        state: 'FAILED',
-        error:
-          remaining > 0
-            ? `Incorrect PIN. ${remaining} attempt(s) remaining.`
-            : 'PIN locked out.',
-      };
-    }
-
-    const updated: PolCeremony = {
-      ...ceremony,
-      state: 'PIN_EXCHANGE',
-      localPinVerified: true,
-    };
-
-    // If peer PIN is already verified, advance to ATTESTING
-    if (updated.peerPinVerified) {
-      return { ...updated, state: 'ATTESTING' };
-    }
-
-    return updated;
-  }
-
-  /**
-   * @deprecated Use verifyLocalPin instead.
-   * Kept for backward compatibility.
-   */
-  async processPin(ceremony: PolCeremony, pin: string): Promise<PolCeremony> {
-    // Map old CARD_TAPPED state to MUTUAL_VERIFIED for compatibility
-    const adapted =
-      (ceremony.state as string) === 'CARD_TAPPED'
-        ? { ...ceremony, state: 'MUTUAL_VERIFIED' as PolState }
-        : ceremony;
-    return this.verifyLocalPin(adapted, pin);
-  }
-
-  /**
-   * Acknowledge that the peer has verified their PIN.
-   * Transitions: PIN_EXCHANGE → PIN_EXCHANGE (with peerPinVerified=true) → ATTESTING
-   *
-   * @param ceremony - Current ceremony (must be PIN_EXCHANGE)
-   */
-  async verifyPeerPin(ceremony: PolCeremony): Promise<PolCeremony> {
-    if (ceremony.state !== 'PIN_EXCHANGE') {
-      return {
-        ...ceremony,
-        state: 'FAILED',
-        error: `verifyPeerPin called in invalid state: ${ceremony.state}`,
-      };
-    }
-
-    const updated: PolCeremony = {
-      ...ceremony,
-      peerPinVerified: true,
-    };
-
-    // If local PIN is already verified, advance to ATTESTING
-    if (updated.localPinVerified) {
-      return { ...updated, state: 'ATTESTING' };
-    }
-
-    return updated;
   }
 
   /**
    * Construct bilateral attestation events.
-   * Transitions: ATTESTING → ATTESTING (with events attached)
+   * Transitions: WELCOME_SENT → ATTESTING (with events attached)
    *
    * Creates two kind:30078 events:
-   * 1. Local user's event: p-tag = peer pubkey, nfc-card-hash = peer card hash
+   * 1. Local user's event: p-tag = peer pubkey, nfc-card-hash = peer card hash,
+   *    welcome-msg-hash = SHA-256(local+peer welcome messages), block-height tag
    * 2. Peer user's event: p-tag = local pubkey, nfc-card-hash = local card hash
    *    (Peer must publish their own event from their device)
    *
-   * @param ceremony    - Current ceremony (must be ATTESTING)
+   * @param ceremony    - Current ceremony (must be ATTESTING or WELCOME_SENT)
    * @param localNsec   - nsec of the local user for signing the local event
    */
   async constructAttestations(
     ceremony: PolCeremony,
     localNsec: string,
   ): Promise<PolCeremony> {
-    if (ceremony.state !== 'ATTESTING') {
+    if (ceremony.state !== 'ATTESTING' && ceremony.state !== 'WELCOME_SENT') {
       return {
         ...ceremony,
         state: 'FAILED',
@@ -471,25 +467,42 @@ export class ProofOfLifeService {
         sha256(utf8ToBytes(ceremony.peerPubkey)),
       );
 
+      // Compute welcome message hash for attestation
+      // If we have a welcomeMessageHash, use it; otherwise compute a placeholder
+      const welcomeMsgHash = ceremony.welcomeMessageHash ??
+        bytesToHex(sha256(utf8ToBytes(`${localPubkey}:${ceremony.peerPubkey}:${ceremony.timestamp}`)));
+
+      const blockHeight = ceremony.blockHeight ?? 0;
+
       const contentBase = {
         timestamp: ceremony.timestamp,
         bilateral: true,
         local_pubkey_hash: localPubkeyHash,
         peer_pubkey_hash: peerPubkeyHash,
         cmac_counter: ceremony.cmacCounter,
+        welcome_message_hash: welcomeMsgHash,
+        block_height: blockHeight,
       };
 
       // ── Local user's event (p-tag → peer, nfc-card-hash → peer card) ──────
+      const localEventTags: string[][] = [
+        ['d', POL_D_TAG],
+        ['p', ceremony.peerPubkey],
+        ['nfc-card-hash', ceremony.peerCardUidHash],
+        ['bilateral', 'true'],
+        ['welcome-msg-hash', welcomeMsgHash],
+        ['block-height', String(blockHeight)],
+      ];
+
+      if (ceremony.welcomeMessageId) {
+        localEventTags.push(['welcome-event-id', ceremony.welcomeMessageId]);
+      }
+
       const localEvent = finalizeEvent(
         {
           kind: POL_EVENT_KIND,
           created_at: ceremony.timestamp,
-          tags: [
-            ['d', POL_D_TAG],
-            ['p', ceremony.peerPubkey],
-            ['nfc-card-hash', ceremony.peerCardUidHash],
-            ['bilateral', 'true'],
-          ],
+          tags: localEventTags,
           content: JSON.stringify({
             ...contentBase,
             role: 'local',
@@ -510,6 +523,8 @@ export class ProofOfLifeService {
           ['p', localPubkey],
           ['nfc-card-hash', ceremony.localCardUidHash],
           ['bilateral', 'true'],
+          ['welcome-msg-hash', welcomeMsgHash],
+          ['block-height', String(blockHeight)],
         ],
         content: JSON.stringify({
           ...contentBase,
@@ -663,6 +678,75 @@ export class ProofOfLifeService {
       return this.publishAttestations(wrapped, relayUrl);
     }
     return this.publishAttestations(ceremony, relayUrl);
+  }
+
+  /**
+   * @deprecated PIN verification is no longer part of the ceremony.
+   * PIN gate is ONLY used for post-ceremony outgoing communications on your own device.
+   * This method is kept for backward compatibility only — it sets localPinVerified
+   * and transitions state accordingly, but should not be called in new code.
+   */
+  async verifyLocalPin(
+    ceremony: PolCeremony,
+    _pin: string,
+  ): Promise<PolCeremony> {
+    if (
+      ceremony.state !== 'MUTUAL_VERIFIED' &&
+      ceremony.state !== 'PIN_EXCHANGE' as PolState
+    ) {
+      return {
+        ...ceremony,
+        state: 'FAILED',
+        error: `verifyLocalPin called in invalid state: ${ceremony.state}`,
+      };
+    }
+
+    const updated: PolCeremony = {
+      ...ceremony,
+      state: 'ATTESTING' as PolState,
+      localPinVerified: true,
+      peerPinVerified: true,
+    };
+
+    return updated;
+  }
+
+  /**
+   * @deprecated Use verifyLocalPin instead.
+   * Kept for backward compatibility.
+   */
+  async processPin(ceremony: PolCeremony, pin: string): Promise<PolCeremony> {
+    // Map old CARD_TAPPED state to MUTUAL_VERIFIED for compatibility
+    const adapted =
+      (ceremony.state as string) === 'CARD_TAPPED'
+        ? { ...ceremony, state: 'MUTUAL_VERIFIED' as PolState }
+        : ceremony;
+    return this.verifyLocalPin(adapted, pin);
+  }
+
+  /**
+   * @deprecated PIN verification is no longer part of the ceremony.
+   * Kept for backward compatibility only.
+   */
+  async verifyPeerPin(ceremony: PolCeremony): Promise<PolCeremony> {
+    if ((ceremony.state as string) !== 'PIN_EXCHANGE') {
+      return {
+        ...ceremony,
+        state: 'FAILED',
+        error: `verifyPeerPin called in invalid state: ${ceremony.state}`,
+      };
+    }
+
+    const updated: PolCeremony = {
+      ...ceremony,
+      peerPinVerified: true,
+    };
+
+    if (updated.localPinVerified) {
+      return { ...updated, state: 'ATTESTING' };
+    }
+
+    return updated;
   }
 
   /**

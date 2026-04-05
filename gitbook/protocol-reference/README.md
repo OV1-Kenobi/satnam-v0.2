@@ -20,8 +20,9 @@ Satnam v2 is built entirely on open, cryptographically verifiable protocols. The
 │  NIP-AC Agent Credit (39240–39245)                              │
 │  NIP-SKL Skill Registry (33400–33401)                           │
 ├─────────────────────────────────────────────────────────────────┤
-│  Layer 5 — Physical Verification                                 │
+│  Layer 5 — Physical Verification & Trust                         │
 │  NTAG424 NFC cards  ·  AES-128-CMAC  ·  Client-side only       │
+│  Circle of Trust  ·  Block-height notarized PoL  ·  OTS         │
 ├─────────────────────────────────────────────────────────────────┤
 │  Layer 4 — Payments                                              │
 │  NWC / NIP-47 (Lightning)  ·  Cashu eCash (blind tokens)       │
@@ -56,6 +57,8 @@ Each NIP solves a specific problem. Together they form a complete, trustless sys
 | "What can an agent do?" | NIP-SKL (skill manifests + attestations) | Capability flags in DB |
 | "How do I buy/sell compute?" | NIP-90 DVM (5xxx/6xxx events) | REST marketplace APIs |
 | "How does Lightning work?" | NWC / NIP-47 (wallet connect) | Direct daemon APIs |
+| "How do I call a contact?" | kind:25050 (NIP-44 encrypted signaling) + WebRTC | Traditional SIP/STUN servers |
+| "How do I prove a face-to-face meeting?" | kind:30078 + OTS block-height notarization | Centralized identity verification |
 
 **Request flow for an authenticated action:**
 
@@ -112,6 +115,7 @@ All event kinds used in Satnam v2, organized by range:
 | 27235 | HTTP Auth | NIP-98 | Per-request HTTP authentication (replaces JWT) |
 | 30078 | App-Specific Data | NIP-78 | Bilateral contact attestation events (`d: satnam:proof-of-life`). Published by each participant in a Proof of Life ceremony, with a `p` tag pointing to the other participant's pubkey and an `nfc-card-hash` tag containing the SHA-256 of the other participant's NFC card UID. |
 | 1059 | Gift Wrap | NIP-17 | Outer wrapper for DMs (metadata protection) |
+| 25050 | Call Signaling | Custom | Ephemeral WebRTC signaling events (offer/answer/ICE/hangup). NIP-44 encrypted to recipient. Used exclusively for voice/video call setup between PoL-verified contacts. Ephemeral — relays are not required to persist. |
 | 1985 | Label | NIP-32 | Skill attestations (tier1–tier4) |
 | 5000–5999 | Job Request | NIP-90 | DVM job requests (5100 = text gen, etc.) |
 | 6000–6999 | Job Result | NIP-90 | DVM job results (6xxx = 5xxx + 1000) |

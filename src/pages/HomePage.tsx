@@ -31,7 +31,12 @@ import {
   Activity,
   Shield,
   ChevronRight,
+  PenLine,
+  Phone,
 } from 'lucide-react';
+
+import { useCircleOfTrust } from '../hooks/useCircleOfTrust.js';
+import NoteToSelfPanel from '../components/note-to-self/NoteToSelfPanel.js';
 
 import { useAgentProfile } from '../hooks/useAgentProfile.js';
 import { useMarketplace } from '../hooks/useMarketplace.js';
@@ -173,6 +178,53 @@ function ActivityItem({
 }
 
 // ---------------------------------------------------------------------------
+// Circle of Trust summary card
+// ---------------------------------------------------------------------------
+
+function CircleOfTrustSummaryCard() {
+  const { contacts, stats } = useCircleOfTrust();
+
+  return (
+    <div>
+      <h2 className="text-xs font-medium text-[#555555] uppercase tracking-widest mb-3">Circle of Trust</h2>
+      <Link
+        to="/circle"
+        className="card flex items-center gap-4 hover:border-[#ffd700]/40 transition-all duration-150 active:scale-[0.99] no-underline"
+        aria-label="Go to Circle of Trust"
+      >
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#ffd70015', border: '1px solid #ffd70025' }}>
+          <Shield size={22} style={{ color: '#ffd700' }} aria-hidden="true" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2">
+            <p className="font-mono text-xl font-bold text-[#f5f5f5]">{stats.totalContacts}</p>
+            <span className="text-xs text-[#555555]">
+              {stats.highTrustContacts > 0 && (
+                <span className="text-[#ffd700]">{stats.highTrustContacts} high</span>
+              )}
+              {stats.mediumTrustContacts > 0 && (
+                <span className="text-[#f7931a]"> {stats.mediumTrustContacts} medium</span>
+              )}
+              {stats.newContacts > 0 && (
+                <span className="text-[#3b82f6]"> {stats.newContacts} new</span>
+              )}
+              {stats.totalContacts === 0 && <span>No contacts yet</span>}
+            </span>
+          </div>
+          <p className="text-xs text-[#555555] mt-0.5">
+            {stats.totalContacts === 0
+              ? 'Complete a PoL ceremony to add trusted contacts'
+              : `${stats.totalMeetings} PoL meetings · avg score ${Math.round(stats.avgTrustScore)}`
+            }
+          </p>
+        </div>
+        <ChevronRight size={16} className="text-[#555555] flex-shrink-0" aria-hidden="true" />
+      </Link>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Page
 // ---------------------------------------------------------------------------
 
@@ -258,6 +310,19 @@ export default function HomePage() {
                 href="/groups"
                 color="#22c55e"
               />
+            </div>
+          </section>
+
+          {/* Circle of Trust summary card */}
+          <section aria-label="Circle of Trust summary">
+            <CircleOfTrustSummaryCard />
+          </section>
+
+          {/* Note to Self quick access */}
+          <section aria-label="Note to self">
+            <h2 className="text-xs font-medium text-[#555555] uppercase tracking-widest mb-3">Note to Self</h2>
+            <div className="card">
+              <NoteToSelfPanel compact />
             </div>
           </section>
 

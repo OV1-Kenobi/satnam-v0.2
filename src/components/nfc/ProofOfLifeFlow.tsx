@@ -4,12 +4,15 @@
  *
  * Follows the corrected PoL state machine:
  * IDLE → INITIATED → SCANNING_PEER → PEER_VERIFIED → AWAITING_RECIPROCAL
- *      → MUTUAL_VERIFIED → PIN_EXCHANGE → ATTESTING → PUBLISHED → CONFIRMED
+ *      → MUTUAL_VERIFIED → WELCOME_SENT → ATTESTING → PUBLISHED → CONFIRMED
  *      → FAILED
  *
  * Two users scan EACH OTHER's NFC "Name Tag" cards to establish a bilateral
  * contact attestation. This proves physical co-presence and creates an
  * OTS-anchored Nostr event for each participant.
+ *
+ * No PIN is exchanged during the ceremony. The PIN gate is only for
+ * post-ceremony outgoing messages and zaps on the user's own device.
  *
  * Design: dark theme (bg-slate-950), btc-orange accents (#F7931A), Cinzel headings.
  * Optimized for mobile — full-screen modal, step-by-step progression.
@@ -22,7 +25,6 @@ import type {
   PeerScanResult,
 } from '../../lib/nfc/proof-of-life.js';
 import NfcTapHandler from './NfcTapHandler.js';
-import PinEntry from './PinEntry.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,8 +54,11 @@ interface ProofOfLifeFlowProps {
       ceremony: PolCeremony,
       peerScanResult: PeerScanResult,
     ) => Promise<PolCeremony>;
-    verifyLocalPin: (ceremony: PolCeremony, pin: string) => Promise<PolCeremony>;
-    verifyPeerPin: (ceremony: PolCeremony) => Promise<PolCeremony>;
+    sendWelcomeMessage: (
+      ceremony: PolCeremony,
+      localNsec: string,
+      blockHeight: number,
+    ) => Promise<PolCeremony>;
     constructAttestations: (
       ceremony: PolCeremony,
       localNsec: string,
@@ -79,7 +84,7 @@ const STATE_CONFIG: Record<
   PEER_VERIFIED:       { icon: '✓',   label: 'Contact Found',        color: 'text-green-500' },
   AWAITING_RECIPROCAL: { icon: '⏳',  label: 'Waiting for Scan…',   color: 'text-[#FFD700]' },
   MUTUAL_VERIFIED:     { icon: '🤝',  label: 'Mutual Verified',      color: 'text-green-500' },
-  PIN_EXCHANGE:        { icon: '🔐',  label: 'Authorizing…',         color: 'text-[#F7931A]' },
+  WELCOME_SENT:        { icon: '💌',  label: 'Welcome Sent',         color: 'text-[#F7931A]' },
   ATTESTING:           { icon: '✍',   label: 'Building Trust…',      color: 'text-[#F7931A]' },
   PUBLISHED:           { icon: '📡',  label: 'Publishing…',          color: 'text-[#F7931A]' },
   CONFIRMED:           { icon: '✅',  label: 'Contact Added',        color: 'text-green-500' },
@@ -96,7 +101,7 @@ const STATE_ORDER: PolState[] = [
   'PEER_VERIFIED',
   'AWAITING_RECIPROCAL',
   'MUTUAL_VERIFIED',
-  'PIN_EXCHANGE',
+  'WELCOME_SENT',
   'ATTESTING',
   'PUBLISHED',
   'CONFIRMED',
@@ -320,43 +325,23 @@ function StepAwaitingReciprocal({
 }
 
 // ---------------------------------------------------------------------------
-// Step 5 — Enter your PIN (PIN_EXCHANGE)
+// Step 5 — Sending welcome message (MUTUAL_VERIFIED → WELCOME_SENT)
 // ---------------------------------------------------------------------------
 
-function StepPinExchange({
-  onPinSubmit,
-  isLoading,
-  pinError,
-  peerPinVerified,
-}: {
-  onPinSubmit: (pin: string) => void;
-  isLoading: boolean;
-  pinError?: string;
-  peerPinVerified: boolean;
-}) {
+function StepSendingWelcome({ isLoading }: { isLoading: boolean }) {
   return (
-    <div className="space-y-6">
-      <div className="p-3 rounded-lg bg-[#0f172a] border border-[#1e293b] text-sm space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[#7c8fa6]">Your PIN</span>
-          <span className="text-yellow-400 text-xs">Required</span>
+    <div className="space-y-6 text-center">
+      <div className="flex justify-center">
+        <div className="w-20 h-20 rounded-full bg-[#F7931A]/10 border border-[#F7931A]/30 flex items-center justify-center">
+          {isLoading ? <Spinner size="md" /> : <span className="text-4xl">💌</span>}
         </div>
-        {peerPinVerified && (
-          <div className="flex items-center gap-2 text-green-400 text-xs">
-            <span>✓</span>
-            <span>Contact has authorized</span>
-          </div>
-        )}
       </div>
-
-      <PinEntry
-        title="Enter Your PIN"
-        description="Authorize the Proof of Life ceremony"
-        mode="verify"
-        onSubmit={onPinSubmit}
-        isLoading={isLoading}
-        error={pinError}
-      />
+      <div>
+        <p className="text-[#f5f5f5] font-medium">Sending welcome…</p>
+        <p className="text-[#7c8fa6] text-sm mt-1">
+          Sending a signed welcome message to your new contact
+        </p>
+      </div>
     </div>
   );
 }
@@ -380,7 +365,7 @@ function StepAttesting({ state }: { state: PolState }) {
         <p className="text-[#7c8fa6] text-sm mt-1">
           {state === 'PUBLISHED'
             ? 'Sending attestation to Nostr relay'
-            : 'Constructing bilateral attestation events'}
+            : 'Constructing bilateral attestation events with block height proof'}
         </p>
       </div>
     </div>
@@ -414,7 +399,7 @@ function StepConfirmed({
 
       <div className="text-center">
         <h3 className="font-display text-xl text-green-500 mb-1">
-          Contact Added
+          Contact added to your Circle of Trust
         </h3>
         <p className="text-sm text-[#7c8fa6]">
           Mutual Proof of Life established
@@ -432,6 +417,14 @@ function StepConfirmed({
             {ceremony.peerCardUidHash.slice(0, 16)}…
           </span>
         </div>
+        {ceremony.blockHeight && (
+          <div className="flex justify-between">
+            <span className="text-[#7c8fa6]">Block Height</span>
+            <span className="font-mono text-xs text-[#F7931A]">
+              #{ceremony.blockHeight.toLocaleString()}
+            </span>
+          </div>
+        )}
         <div className="flex justify-between">
           <span className="text-[#7c8fa6]">Time</span>
           <span className="text-[#7c8fa6]">
@@ -449,7 +442,7 @@ function StepConfirmed({
       </div>
 
       <div className="w-full p-3 rounded-lg bg-[#0f172a] border border-[#1e293b] text-xs text-[#7c8fa6] text-center">
-        Future DMs and Zaps to this contact require your NFC card + PIN
+        Future DMs and Zaps to this contact require your NFC card + PIN on your own device
       </div>
 
       <button
@@ -508,16 +501,67 @@ export default function ProofOfLifeFlow({
 }: ProofOfLifeFlowProps) {
   const [ceremony, setCeremony] = useState<PolCeremony | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [pinError, setPinError] = useState<string | undefined>();
   const [relayUrl] = useState(initialRelay);
 
   // Ref to track whether we've already auto-advanced after attestation build
   const attestationBuilt = useRef(false);
+  // Ref to track whether we've already sent the welcome message
+  const welcomeSent = useRef(false);
 
   // ── Initiate ceremony on mount ─────────────────────────────────────────
   useEffect(() => {
     service.initiateCeremony(localPubkey).then(setCeremony);
   }, [localPubkey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-advance: when MUTUAL_VERIFIED, send welcome message ──────────
+  useEffect(() => {
+    if (
+      !ceremony ||
+      ceremony.state !== 'MUTUAL_VERIFIED' ||
+      welcomeSent.current
+    )
+      return;
+    welcomeSent.current = true;
+
+    if (!initialNsec) return; // Can't send without nsec
+
+    setIsLoading(true);
+    // Fetch a block height (in production, this would query a block explorer or OTS calendar)
+    const blockHeight = Math.floor(Date.now() / 600_000) + 870000; // approximate height
+    service
+      .sendWelcomeMessage(ceremony, initialNsec, blockHeight)
+      .then((updated) => {
+        setCeremony(updated);
+      })
+      .finally(() => setIsLoading(false));
+  }, [ceremony, initialNsec, service]);
+
+  // ── Auto-advance: when WELCOME_SENT, construct attestations ──────────
+  useEffect(() => {
+    if (
+      !ceremony ||
+      ceremony.state !== 'WELCOME_SENT' ||
+      attestationBuilt.current
+    )
+      return;
+    if (!initialNsec) return;
+
+    attestationBuilt.current = true;
+    setIsLoading(true);
+    service
+      .constructAttestations(ceremony, initialNsec)
+      .then((withAttestations) => {
+        if (withAttestations.state === 'ATTESTING') {
+          return service.publishAttestations(withAttestations, relayUrl);
+        }
+        return withAttestations;
+      })
+      .then((updated) => {
+        setCeremony(updated);
+        if (updated.state === 'CONFIRMED') onComplete?.(updated);
+      })
+      .finally(() => setIsLoading(false));
+  }, [ceremony, relayUrl, service, onComplete, initialNsec]);
 
   // ── Auto-advance: when ATTESTING + events built, publish automatically ─
   useEffect(() => {
@@ -577,39 +621,9 @@ export default function ProofOfLifeFlow({
     setIsLoading(false);
   }, [ceremony, service, localPubkey]);
 
-  const handlePin = useCallback(
-    async (pin: string) => {
-      if (!ceremony) return;
-      setIsLoading(true);
-      setPinError(undefined);
-      const afterPin = await service.verifyLocalPin(ceremony, pin);
-      if (afterPin.state === 'FAILED') {
-        setPinError(afterPin.error);
-        setCeremony(afterPin);
-        setIsLoading(false);
-        return;
-      }
-      // Also acknowledge peer PIN verification (in co-present scenario they
-      // confirm verbally, or via a Nostr ephemeral message)
-      const afterPeerPin = await service.verifyPeerPin(afterPin);
-      if (afterPeerPin.state === 'ATTESTING' && initialNsec) {
-        // Immediately construct attestations
-        const withAttestations = await service.constructAttestations(
-          afterPeerPin,
-          initialNsec,
-        );
-        setCeremony(withAttestations);
-      } else {
-        setCeremony(afterPeerPin);
-      }
-      setIsLoading(false);
-    },
-    [ceremony, service, initialNsec],
-  );
-
   const handleRetry = useCallback(() => {
     attestationBuilt.current = false;
-    setPinError(undefined);
+    welcomeSent.current = false;
     service.initiateCeremony(localPubkey).then(setCeremony);
   }, [localPubkey, service]);
 
@@ -684,23 +698,22 @@ export default function ProofOfLifeFlow({
         />
       )}
 
-      {/* Step 5: PIN entry (MUTUAL_VERIFIED or PIN_EXCHANGE) */}
-      {(ceremony.state === 'MUTUAL_VERIFIED' ||
-        ceremony.state === 'PIN_EXCHANGE') && (
-        <StepPinExchange
-          onPinSubmit={handlePin}
-          isLoading={isLoading}
-          pinError={pinError}
-          peerPinVerified={ceremony.peerPinVerified}
-        />
+      {/* Step 5: Sending welcome message */}
+      {ceremony.state === 'MUTUAL_VERIFIED' && (
+        <StepSendingWelcome isLoading={isLoading} />
       )}
 
-      {/* Step 6: Attesting / Publishing */}
+      {/* Step 6: Welcome sent — attesting / publishing auto-advances */}
+      {ceremony.state === 'WELCOME_SENT' && (
+        <StepAttesting state={ceremony.state} />
+      )}
+
+      {/* Step 7: Attesting / Publishing */}
       {(ceremony.state === 'ATTESTING' || ceremony.state === 'PUBLISHED') && (
         <StepAttesting state={ceremony.state} />
       )}
 
-      {/* Step 7: Confirmed */}
+      {/* Step 8: Confirmed */}
       {ceremony.state === 'CONFIRMED' && (
         <StepConfirmed
           ceremony={ceremony}

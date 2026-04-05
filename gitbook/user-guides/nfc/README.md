@@ -86,7 +86,7 @@ With TapSigner, critical Nostr events can be signed by a hardware key that never
 
 ### 3. PIN Gate Security
 
-Every NFC-triggered operation that modifies identity state requires PIN confirmation. The PIN is verified against an argon2id-derived verifier stored in the OPFS Vault — it is never sent to any server. See [Proof of Life](./proof-of-life.md#pin-gate).
+Every NFC-triggered operation that modifies identity state requires PIN confirmation on **your own device**. The PIN gate is only for outgoing communications — when you send a DM or Zap to a PoL-verified contact, you tap your own card and enter your own PIN. The PIN is verified against an argon2id-derived verifier stored in the OPFS Vault — it is never sent to any server. See [Proof of Life](./proof-of-life.md#the-pin-gate).
 
 ---
 
@@ -135,6 +135,36 @@ After provisioning, set a PIN for the card:
 2. Enter a 4–8 digit PIN.
 3. Satnam derives `argon2id(pin, card_uid, params)` → PIN verifier.
 4. The verifier is stored in your OPFS Vault (not the PIN itself).
+
+---
+
+## Circle of Trust Integration
+
+Proof of Life ceremonies feed directly into your **Circle of Trust** — Satnam's encrypted Web of Trust built through physical meetings.
+
+### What Happens After a PoL Ceremony
+
+1. **Contact added to Circle of Trust** — the contact appears in your Circle with an initial Trust Score reflecting one meeting.
+2. **Handshake Ledger entry created** — an encrypted chronological record of the ceremony (block height, attestation event ID, welcome message hash) is stored in your OPFS Vault.
+3. **Trust Score computed** — the four-factor Trust Score (Meeting Depth, Time Consistency, Mutual Contacts, Financial Trust) is calculated locally.
+4. **PIN gate activated for outgoing comms** — sending DMs or Zaps to this contact now requires your card tap + PIN on your device.
+
+### Deepening Trust Through Repeated Ceremonies
+
+Each additional PoL ceremony with the same contact adds a new attestation with a different block height, increasing their Trust Depth and improving their Trust Score. A contact you have met 5 times across 6 months will have a substantially higher Trust Score than a contact you met once.
+
+```
+Block 870,145 → First meeting  (Trust Depth: 1, Score: ~12)
+Block 889,774 → Second meeting (Trust Depth: 2, Score: ~32)
+Block 910,004 → Third meeting  (Trust Depth: 3, Score: ~42)
+```
+
+### Name Tags as Identity Anchors
+
+Your NFC Name Tag (NTAG424 card) serves as the physical anchor for your Nostr identity in every PoL ceremony. The `nfc-card-hash` in each attestation event cryptographically links your npub to your physical card. If you provision a new card, you will need to redo PoL ceremonies with your existing contacts to update the card hash in their records.
+
+See [Circle of Trust](../circle-of-trust/README.md) for the complete Web of Trust documentation.
+
 
 ---
 

@@ -1,6 +1,6 @@
 # Components Overview
 
-Satnam v2 has **35 React components** organized by domain. All components are pure presentational-plus-hook consumers — they do not perform cryptographic operations directly or access the vault. All state comes from hooks.
+Satnam v2 has **52 React components** organized by domain. All components are pure presentational-plus-hook consumers — they do not perform cryptographic operations directly or access the vault. All state comes from hooks.
 
 ---
 
@@ -58,7 +58,7 @@ NfcTapHandler               — Continuous Web NFC scan; iOS Universal Link hand
 |---|---|---|
 | `NfcTapHandler` | `src/components/nfc/NfcTapHandler.tsx` | Manages NFC reader lifecycle; calls `nfc.processTap()` |
 | `PinEntry` | `src/components/nfc/PinEntry.tsx` | Masked PIN input, shows lockout timer if locked |
-| `ProofOfLifeFlow` | `src/components/nfc/ProofOfLifeFlow.tsx` | Full mutual Proof of Life ceremony with 10-state progress indicator: IDLE → INITIATED → SCANNING_PEER → PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED → PIN_EXCHANGE → ATTESTING → PUBLISHED → CONFIRMED |
+| `ProofOfLifeFlow` | `src/components/nfc/ProofOfLifeFlow.tsx` | Full mutual Proof of Life ceremony with 10-state progress indicator: IDLE → INITIATED → SCANNING_PEER → PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED → WELCOME_SENT → ATTESTING → PUBLISHED → CONFIRMED |
 
 ---
 
@@ -116,6 +116,59 @@ AgentDetailPanel (Probe tab)
 ├── SessionDiffRenderer     — Syntax-highlighted file diffs with line numbers
 └── ExecutionResultPanel    — Stdout/stderr, file change summary, test results
 ```
+
+---
+
+### Circle of Trust (6 components)
+
+```
+CircleOfTrustPage
+├── TrustOverviewPanel         — Concentric ring visualization; stats bar
+├── ContactTrustCard           — Per-contact trust display with score gauge and ledger preview
+├── HandshakeLedger            — Encrypted timeline of meetings, messages, payments, attestations
+├── IdentityTrustPanel         — Your trust profile as others see it
+├── FinancialTrustPanel        — Payment history, credit envelope settlement, Sig4Sats bonds
+└── SkillsTrustPanel           — Skills attested by PoL-verified contacts
+```
+
+| Component | File | Description |
+|---|---|---|
+| `TrustOverviewPanel` | `src/components/circle-of-trust/TrustOverviewPanel.tsx` | Concentric ring visualization (inner: high trust ≥70, middle: medium 30–69, outer: new <30) with total-contacts/avg-score/total-meetings stats bar |
+| `ContactTrustCard` | `src/components/circle-of-trust/ContactTrustCard.tsx` | Contact name/npub/NIP-05, trust score gauge (colored arc 0–100), meeting count + dates, 4-factor breakdown bars, handshake ledger preview, quick actions |
+| `HandshakeLedger` | `src/components/circle-of-trust/HandshakeLedger.tsx` | Chronological timeline with block-height markers, "Verified Handshake" badges for PoL meetings, exportable proof option |
+| `IdentityTrustPanel` | `src/components/circle-of-trust/IdentityTrustPanel.tsx` | Verification count, trust chain depth, skill attestations from trusted contacts, financial reputation |
+| `FinancialTrustPanel` | `src/components/circle-of-trust/FinancialTrustPanel.tsx` | Payment history with contacts, credit envelope settlement rate, reputation deltas, Sig4Sats bond history |
+| `SkillsTrustPanel` | `src/components/circle-of-trust/SkillsTrustPanel.tsx` | Skills attested by PoL-verified contacts, attestation tier breakdown, skill growth over time |
+
+---
+
+### Note to Self (2 components)
+
+```
+NoteToSelfPanel
+└── NoteToSelfComposer         — Compose and send an encrypted self-note
+```
+
+| Component | File | Description |
+|---|---|---|
+| `NoteToSelfPanel` | `src/components/note-to-self/NoteToSelfPanel.tsx` | Markdown-capable compose area, reverse-chronological notes list, category/tag filter, search |
+| `NoteToSelfComposer` | `src/components/note-to-self/NoteToSelfComposer.tsx` | Text input, category selector, tag input, save button — calls `useNoteToSelf().sendNote()` |
+
+---
+
+### Calls (3 components)
+
+```
+CallInitiator               — Voice/video call button on contact profiles
+IncomingCallOverlay         — Incoming call notification with accept/reject
+ActiveCallPanel             — Active call UI: video feeds, controls, duration timer
+```
+
+| Component | File | Description |
+|---|---|---|
+| `CallInitiator` | `src/components/calls/CallInitiator.tsx` | Voice/video toggle buttons on contact profile; calls `useCalls().initiateCall()` |
+| `IncomingCallOverlay` | `src/components/calls/IncomingCallOverlay.tsx` | Full-screen overlay: caller info, accept (green) / decline (red) buttons; calls `answerCall()` or `declineCall()` |
+| `ActiveCallPanel` | `src/components/calls/ActiveCallPanel.tsx` | Video feeds (remote full-screen, local inset), mute/video-toggle/end-call controls, duration timer |
 
 ---
 

@@ -59,7 +59,7 @@ interface NfcTapResult {
 ```
 
 `ProofOfLifeState` follows the corrected mutual ceremony state machine:
-`'IDLE' | 'INITIATED' | 'SCANNING_PEER' | 'PEER_VERIFIED' | 'AWAITING_RECIPROCAL' | 'MUTUAL_VERIFIED' | 'PIN_EXCHANGE' | 'ATTESTING' | 'PUBLISHED' | 'CONFIRMED' | 'FAILED'`
+`'IDLE' | 'INITIATED' | 'SCANNING_PEER' | 'PEER_VERIFIED' | 'AWAITING_RECIPROCAL' | 'MUTUAL_VERIFIED' | 'WELCOME_SENT' | 'ATTESTING' | 'PUBLISHED' | 'CONFIRMED' | 'FAILED'`
 
 ---
 
@@ -119,8 +119,8 @@ function NfcTapHandler() {
 
 ### Proof of Life Ceremony
 
-The Proof of Life ceremony is mutual — both users must scan each other's card. The state machine follows:
-`IDLE → INITIATED → SCANNING_PEER → PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED → PIN_EXCHANGE → ATTESTING → PUBLISHED → CONFIRMED`
+The Proof of Life ceremony is mutual — both users scan each other's NFC Name Tags on their own devices. Each device sends a signed NIP-17 welcome message to the other; the welcome message hashes and Bitcoin block height are included in the OTS attestation. The state machine follows:
+`IDLE → INITIATED → SCANNING_PEER → PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED → WELCOME_SENT → ATTESTING → PUBLISHED → CONFIRMED`
 
 ```tsx
 import { useNfc } from '@hooks/useNfc';
@@ -142,23 +142,24 @@ function ProofOfLifeFlow() {
     // State: PEER_VERIFIED → AWAITING_RECIPROCAL → MUTUAL_VERIFIED
   }
 
-  async function submitPins(myPin: string, peerPin: string) {
-    await proofOfLife.exchangePins(myPin, peerPin);
-    // State: MUTUAL_VERIFIED → PIN_EXCHANGE → ATTESTING
+
+  // Welcome messages are sent automatically after MUTUAL_VERIFIED.
+  // publish() handles attestation construction, OTS, and Circle of Trust entry.
+  async function handlePublish() {
+    // State: WELCOME_SENT → ATTESTING → PUBLISHED → CONFIRMED
     const [myEventId, peerEventId] = await proofOfLife.publish();
     console.log('Bilateral PoL published:', myEventId, peerEventId);
-    // State: PUBLISHED → CONFIRMED
   }
 
   const stateMessages: Record<string, string> = {
     IDLE: 'Ready to start.',
-    INITIATED: 'Tap your contact’s Name Tag...',
-    SCANNING_PEER: 'Reading contact’s card...',
-    PEER_VERIFIED: 'Card verified. Have your contact scan your card.',
+    INITIATED: "Tap your contact's Name Tag...",
+    SCANNING_PEER: "Reading contact's card...",
+    PEER_VERIFIED: 'Card verified. Have your contact scan your card on their device.',
     AWAITING_RECIPROCAL: 'Waiting for your contact to tap your card...',
-    MUTUAL_VERIFIED: 'Both scans complete. Enter your PINs.',
-    PIN_EXCHANGE: 'Authorizing...',
-    ATTESTING: 'Constructing attestation...',
+    MUTUAL_VERIFIED: 'Both scans complete. Exchanging welcome messages...',
+    WELCOME_SENT: 'Welcome messages sent. Constructing Bitcoin block-height attestation...',
+    ATTESTING: 'Constructing OTS attestation...',
     PUBLISHED: 'Waiting for relay confirmation...',
     CONFIRMED: 'Contact added ✓ Proof of Life recorded',
     FAILED: 'Ceremony failed.',
@@ -170,9 +171,7 @@ function ProofOfLifeFlow() {
       {activeProofState === 'IDLE' && (
         <button onClick={start}>Begin Ceremony</button>
       )}
-      {activeProofState === 'MUTUAL_VERIFIED' && (
-        <DualPinEntry onSubmit={submitPins} />
-      )}
+      {/* No PIN entry during ceremony — welcome messages are sent automatically */}
     </div>
   );
 }

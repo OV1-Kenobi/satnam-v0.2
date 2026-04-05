@@ -33,13 +33,14 @@ import { VaultProvider, useVault } from './hooks/useVault';
 // Each page is a separate code-split chunk. Vite automatically splits on
 // dynamic imports. Pages are stub placeholders until Phase 1 implementation.
 
-const HomePage        = lazy(() => import('./pages/HomePage'));
-const AuthPage        = lazy(() => import('./pages/AuthPage'));
-const GroupsPage      = lazy(() => import('./pages/GroupsPage'));
-const WalletPage      = lazy(() => import('./pages/WalletPage'));
-const AgentsPage      = lazy(() => import('./pages/AgentsPage'));
-const MarketplacePage = lazy(() => import('./pages/MarketplacePage'));
-const NotFoundPage    = lazy(() => import('./pages/NotFoundPage'));
+const HomePage           = lazy(() => import('./pages/HomePage'));
+const AuthPage           = lazy(() => import('./pages/AuthPage'));
+const GroupsPage         = lazy(() => import('./pages/GroupsPage'));
+const WalletPage         = lazy(() => import('./pages/WalletPage'));
+const AgentsPage         = lazy(() => import('./pages/AgentsPage'));
+const MarketplacePage    = lazy(() => import('./pages/MarketplacePage'));
+const CircleOfTrustPage  = lazy(() => import('./pages/CircleOfTrustPage'));
+const NotFoundPage       = lazy(() => import('./pages/NotFoundPage'));
 
 // ── Loading fallback ──────────────────────────────────────────────────────────
 
@@ -95,6 +96,7 @@ function AppRouter() {
           {/* All require an unlocked OPFS vault */}
           <Route element={<ProtectedLayout />}>
             <Route path="/"            element={<HomePage />} />
+            <Route path="/circle"      element={<CircleOfTrustPage />} />
             <Route path="/groups"      element={<GroupsPage />} />
             <Route path="/wallet"      element={<WalletPage />} />
             <Route path="/agents"      element={<AgentsPage />} />

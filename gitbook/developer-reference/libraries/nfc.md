@@ -171,25 +171,25 @@ INITIATED ───────────────────────�
 SCANNING_PEER (User A scans User B's card) ──────────────────────► FAILED (invalid CMAC)
   │                                                                     ▲
   ▼                                                                     │
-PEER_VERIFIED (User B's card CMAC verified) ─────────────────────► FAILED (timeout)
+PEER_VERIFIED (User B's card CMAC verified, credentials extracted) ──► FAILED (timeout)
   │                                                                     ▲
   ▼                                                                     │
-AWAITING_RECIPROCAL (User B scans User A's card) ────────────────► FAILED (invalid CMAC)
+AWAITING_RECIPROCAL (User B scans User A's card on their device) ─► FAILED (invalid CMAC)
   │                                                                     ▲
   ▼                                                                     │
-MUTUAL_VERIFIED (both scans complete) ───────────────────────────► FAILED (timeout)
-  │                                                                     ▲
-  ▼                                                                     │
-PIN_EXCHANGE (both users enter their PINs) ──────────────────────► FAILED (wrong PIN / lockout)
+MUTUAL_VERIFIED (both scans confirmed via relay) ─────────────────► FAILED (timeout)
   │
   ▼
-ATTESTING (bilateral kind:30078 events constructed)
+WELCOME_SENT (each device sends a signed NIP-17 gift-wrapped welcome message to the other)
+  │
+  ▼
+ATTESTING (construct kind:30078 with welcome hash + Bitcoin block height + OTS)
   │
   ▼
 PUBLISHED (events published to Pylon via CEPS + OTS committed)
   │
   ▼
-CONFIRMED (relay ACK received by both sides)
+CONFIRMED (relay ACK received; contact added to Circle of Trust)
 ```
 
 ### `ProofOfLifeService` Class
@@ -202,18 +202,20 @@ type ProofOfLifeState =
   | 'PEER_VERIFIED'
   | 'AWAITING_RECIPROCAL'
   | 'MUTUAL_VERIFIED'
-  | 'PIN_EXCHANGE'
+  | 'WELCOME_SENT'
   | 'ATTESTING'
   | 'PUBLISHED'
   | 'CONFIRMED'
   | 'FAILED';
 
 interface ProofOfLifeAttestation {
-  timestamp: number;         // Unix timestamp of ceremony
-  peerPubkey: string;        // The OTHER participant's pubkey (the new contact)
-  peerCardUidHash: string;   // SHA-256 of the OTHER participant's card UID
-  otsCommitment: string;     // OpenTimestamps commitment hash
-  bilateral: true;           // Always true — solo attestation is not supported
+  timestamp: number;           // Unix timestamp of ceremony
+  peerPubkey: string;          // The OTHER participant's pubkey (the new contact)
+  peerCardUidHash: string;     // SHA-256 of the OTHER participant's card UID
+  welcomeMessageHash: string;  // SHA-256 of both welcome messages concatenated
+  bitcoinBlockHeight: number;  // Bitcoin block height at time of ceremony
+  otsCommitment: string;       // OpenTimestamps commitment hash
+  bilateral: true;             // Always true — solo attestation is not supported
 }
 
 class ProofOfLifeService {
@@ -240,16 +242,19 @@ class ProofOfLifeService {
   processReciprocal(cardUid: string, piccDataHex: string, cmacHex: string): Promise<void>;
 
   /**
-   * Verify both PINs and advance to PIN_EXCHANGE → ATTESTING.
-   * @param myPin - The local user's PIN
-   * @param peerPin - The peer's PIN (entered on their device; passed here for bilateral auth)
+   * Send a signed NIP-17 gift-wrapped welcome message to the peer.
+   * Called automatically after MUTUAL_VERIFIED.
+   * Both parties send their welcome; hashes are exchanged via relay.
+   * State: MUTUAL_VERIFIED → WELCOME_SENT.
    */
-  exchangePins(myPin: string, peerPin: string): Promise<void>;
+  sendWelcomeMessage(): Promise<string>; // Returns welcome event ID
 
   /**
    * Construct and publish bilateral kind:30078 events.
+   * Includes welcome message hash + Bitcoin block height in OTS attestation.
    * Submits OTS commitment via simpleproof-anchor.
    * Updates contact list (kind:3 or kind:30000).
+   * Adds contact to Circle of Trust (TrustStore).
    * Returns array of published event IDs [myEventId, peerEventId].
    */
   publish(opts?: { includeLocation?: boolean }): Promise<[string, string]>;
@@ -261,17 +266,17 @@ class ProofOfLifeService {
 
 ### PIN-Gated Operations Added After Ceremony
 
-The Proof of Life ceremony establishes `message_send` and `zap_send` as PIN-gated operations for the attested contact:
+The Proof of Life ceremony activates `message_send` and `zap_send` as PIN-gated **outgoing** operations on the user's own device. The PIN gate is a local security measure — the user taps their own card and enters their own PIN before their DM or Zap publishes. No PIN is ever entered on another person's device.
 
 ```typescript
 type PinGatedOperation =
-  | 'proof_of_life'        // The ceremony itself
+  | 'proof_of_life'        // The ceremony itself (own card tap to initiate)
   | 'contact_modify'       // Add/remove contact
   | 'payment_above_threshold'
   | 'group_membership'
   | 'agent_delegation'
-  | 'message_send'         // NIP-17 DM to a PoL-verified contact
-  | 'zap_send';            // Zap payment to a PoL-verified contact
+  | 'message_send'         // NIP-17 DM to a PoL-verified contact (own card + own PIN)
+  | 'zap_send';            // Zap payment to a PoL-verified contact (own card + own PIN)
 ```
 
 ### Bilateral kind:30078 Event Structure
@@ -287,6 +292,8 @@ Each participant publishes one event, pointing to the OTHER participant:
     ["d", "satnam:proof-of-life"],
     ["p", "<participant_B_pubkey>"],
     ["nfc-card-hash", "<sha256_of_participant_B_card_uid>"],
+    ["welcome-hash", "<sha256_of_both_welcome_messages_concatenated>"],
+    ["block-height", "<bitcoin_block_height_at_ceremony>"],
     ["ots", "<opentimestamps_commitment>"],
     ["bilateral", "true"]
   ],

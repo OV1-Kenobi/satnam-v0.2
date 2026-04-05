@@ -170,6 +170,43 @@ Static assets (HTML, CSS, JS, fonts, icons) use cache-first strategy — they lo
 
 ---
 
+## Circle of Trust
+
+### What is Circle of Trust?
+
+Circle of Trust is Satnam's encrypted Web of Trust — a set of contacts you have physically verified through Proof of Life ceremonies. Every person in your Circle has met you face-to-face, scanned your NFC Name Tag (or had theirs scanned by you), and exchanged signed NIP-17 welcome messages. Each ceremony is anchored to a Bitcoin block height via OpenTimestamps, creating a tamper-evident, publicly verifiable record of real-world meetings. See [Circle of Trust](../user-guides/circle-of-trust/README.md).
+
+### How does trust scoring work?
+
+Each Circle of Trust contact receives a composite 0–100 Trust Score, computed locally from four weighted factors:
+
+- **Meeting Depth (0–30):** Number of PoL ceremonies — logarithmic scale, so early meetings contribute more than later ones.
+- **Time Consistency (0–30):** Days from first to last meeting — rewards long-term sustained relationships over rapid-fire meetings.
+- **Mutual Contacts (0–20):** Shared PoL-verified contacts — each additional mutual contact adds 4 points (capped at 5 shared contacts).
+- **Financial Trust (0–20):** Ratio of successful Lightning/Cashu interactions to total interactions.
+
+The score tiers are: High Trust (≥70, sovereign gold), Medium Trust (30–69, bitcoin orange), New Contact (<30, vault blue). See [Trust Scoring](../user-guides/circle-of-trust/trust-scoring.md).
+
+### Can others see my trust connections?
+
+Not your Circle — but they can verify the existence of specific meetings. Your list of trusted contacts is stored encrypted in your OPFS Vault and never published. However, the `kind:30078` PoL attestation events **are** public — they prove that two specific npubs completed a ceremony at a specific Bitcoin block height. A third party can verify that you and another person have met without knowing when or where. Your Trust Scores, Handshake Ledger contents, and the full list of your Circle of Trust contacts remain entirely private.
+
+### What is Note to Self?
+
+Note to Self is an encrypted private notebook in Satnam. Notes use the NIP-17 gift-wrap protocol (kind:1059) with a self-addressing pattern: you send the encrypted note to your own npub. Only your nsec can decrypt it. Notes support categories (journal, todo, reference, contact, financial, general) and free-form tags, and are stored on Nostr relays — not in Satnam's database. See [Note to Self](../user-guides/note-to-self.md).
+
+### How are voice and video calls encrypted?
+
+Calls use two encryption layers:
+
+1. **Signaling layer (NIP-44):** The WebRTC offer, answer, and ICE candidates are exchanged as `kind:25050` ephemeral Nostr events encrypted with NIP-44 v2 (ChaCha20-Poly1305 + HKDF). Only the two parties can read the signaling content — not the relay operator.
+
+2. **Media layer (DTLS-SRTP):** Once the WebRTC connection is established, audio and video travel directly between the two devices encrypted with DTLS-SRTP — the standard mandated by all WebRTC implementations. Satnam servers are not involved in the media path.
+
+Calls are only available to PoL-verified contacts. See [Voice and Video Calls](../user-guides/calls/README.md).
+
+---
+
 ## Migration
 
 ### Is there a migration from v1?

@@ -34,6 +34,9 @@ A FROSTR v2 data structure containing an individual participant's FROST secret s
 **bfonboard**
 A FROSTR v2 data structure used to deliver a new participant's bfshare during the DKG (Distributed Key Generation) ceremony. It is an encrypted onboarding payload sent from the ceremony initiator to the new participant.
 
+**Block Height Notarization**
+The practice of anchoring a Proof of Life attestation to a specific Bitcoin block height via OpenTimestamps. The SHA-256 hash of both welcome messages from a PoL ceremony is committed alongside the current block height, creating a tamper-evident record of the face-to-face meeting that can be verified against the Bitcoin blockchain. See [Proof of Life](../user-guides/nfc/proof-of-life.md#bitcoin-block-height-notarization).
+
 **BOLT-11**
 The Lightning Network invoice format. A base-58 encoded string beginning with `lnbc` that specifies a payment amount, description hash, expiry, and routing hints. Used for all Lightning send operations in Satnam. See [Lightning Payments](../user-guides/wallet/lightning-payments.md).
 
@@ -49,6 +52,9 @@ The relay abstraction layer responsible for constructing, signing, and publishin
 
 **CMAC (Cipher-based Message Authentication Code)**
 AES-128-CMAC, used by NTAG424 DNA cards for SUN (Secure Unique NFC) authentication. In Satnam v2, CMAC verification is performed entirely client-side. The server never sees a CMAC value. See [NFC Operations](../user-guides/nfc/README.md).
+
+**Circle of Trust**
+An encrypted Web of Trust infrastructure built through Proof of Life ceremonies. Every contact in your Circle of Trust has been physically co-present with you — their identity is anchored to an NFC Name Tag and their meetings with you are Bitcoin block-height notarized via OpenTimestamps. The Circle of Trust provides four-factor Trust Scores (0–100) and a private Handshake Ledger for each contact. See [Circle of Trust](../user-guides/circle-of-trust/README.md).
 
 **Content Security Policy (CSP)**
 The HTTP security header that controls what the browser is permitted to load. Satnam's CSP includes `'wasm-unsafe-eval'` (required for FROST's WASM bridge), `font-src 'self'` (no external font CDNs), and explicitly disallows `'unsafe-eval'` (Security Invariant S12).
@@ -99,6 +105,9 @@ The Trust Protector — the highest-authority role in a Satnam group. The Guardi
 ---
 
 ## H
+
+**Handshake Ledger**
+An encrypted, chronological record of all interactions with a specific Circle of Trust contact — meetings (PoL ceremonies with block heights), messages (NIP-17 DMs), payments (Lightning zaps and Cashu transfers), and attestations (skills endorsed). The Handshake Ledger is stored in your OPFS Vault and is never published. You can optionally authorize third parties to verify specific entries. See [Circle of Trust: The Handshake Ledger](../user-guides/circle-of-trust/README.md#the-handshake-ledger).
 
 **Heartbeat**
 A periodic status event (kind:39202, NIP-SA agent schedule) published by an agent to indicate it is alive and operating normally. Satnam's monitoring dashboard tracks heartbeat intervals and alerts when an agent misses its expected heartbeat. See [Monitoring Agents](../user-guides/agents/monitoring-agents.md).
@@ -175,7 +184,7 @@ See **NWC**.
 The relay list specification. kind:10002 events declare a Principal's preferred read/write relays. Satnam uses NIP-65 for relay discovery and fallback routing via CEPS.
 
 **Name Tag**
-The NFC card (NTAG424 DNA) carried by a Satnam user as a physical identity token. The Name Tag is presented to another user during the Proof of Life ceremony. After the ceremony, the Name Tag acts as a smart card — authenticating all DMs and Zaps its owner sends to that contact by requiring a card tap and PIN before the event publishes.
+The NFC card (NTAG424 DNA) carried by a Satnam user as a physical identity token. The Name Tag is presented during a Proof of Life ceremony — both parties scan each other's Name Tags. The `nfc-card-hash` in each attestation event cryptographically links the owner's npub to their specific card. After the ceremony, the Name Tag acts as a PIN gate for outgoing communications: the owner must tap their own Name Tag and enter their own PIN before sending DMs or Zaps to PoL-verified contacts. See [NFC Operations](../user-guides/nfc/README.md).
 
 **NIP-78**
 Application-specific data (kind:30078). Used for Satnam's Proof of Life ceremony events tagged with `d: satnam:proof-of-life`. Each event is bilateral: it attests to the npub↔NFC card connection of BOTH participants, with a `p` tag pointing to the contact being added and an `nfc-card-hash` tag containing the SHA-256 of that contact's card UID. See [Proof of Life](../user-guides/nfc/proof-of-life.md).
@@ -191,6 +200,9 @@ See **Agent Credit (NIP-AC)**.
 
 **NIP-SA**
 See **Sovereign Agent (NIP-SA)**.
+
+**Note to Self**
+A NIP-17 gift-wrapped encrypted message addressed to your own npub. Note to Self uses the standard NIP-17 gift-wrap mechanism (kind:1059) with sender = recipient = your own public key, so only your nsec can decrypt it. Used as a private, relay-stored encrypted notebook with categories and tags. See [Note to Self](../user-guides/note-to-self.md).
 
 **NIP-SKL**
 See **Skill Registry (NIP-SKL)**.
@@ -295,6 +307,12 @@ The NTAG424 feature that generates a cryptographically authenticated URL on ever
 ---
 
 ## T
+
+**Trust Depth**
+The number of unique Proof of Life ceremonies completed with a specific Circle of Trust contact. Trust Depth = 1 after the first ceremony; it increases by 1 with each subsequent ceremony at a different block height. Higher trust depth contributes to a higher Trust Score via the Meeting Depth factor. See [Trust Scoring](../user-guides/circle-of-trust/trust-scoring.md).
+
+**Trust Score**
+A composite 0–100 score computed locally for each Circle of Trust contact. Derived from four weighted factors: Meeting Depth (0–30), Time Consistency (0–30), Mutual Contacts (0–20), and Financial Trust (0–20). Scores above 70 are High Trust (sovereign gold); 30–69 are Medium Trust (bitcoin orange); below 30 are New Contacts (vault blue). See [Trust Scoring](../user-guides/circle-of-trust/trust-scoring.md).
 
 **TapSigner**
 A hardware NFC signer using the CKTAP protocol. In Satnam, TapSigner acts as a Nostr signer adapter — it signs Nostr events on-card without exposing the private key to the host device.
