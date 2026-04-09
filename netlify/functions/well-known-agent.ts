@@ -16,10 +16,9 @@
  * 4. Parse agent profile content and tags
  * 5. Return discovery format compatible with NIP-SA agent discovery
  *
- * Auth: None (public discovery endpoint, like NIP-05).
- * NIP-98 not required — public agent discovery endpoint (S10 invariant: this
- * endpoint is intentionally unauthenticated so external clients can discover
- * agents without credentials, analogous to NIP-05 resolution).
+ * Auth: None (public discovery endpoint, like NIP-05 — no authentication required).
+ * This endpoint is intentionally unauthenticated so external clients can discover
+ * agents without credentials, analogous to NIP-05 resolution.
  *
  * Rate limiting: IP-based in-memory, 30 req/min.
  *
@@ -88,7 +87,7 @@ function checkRateLimit(ip: string): boolean {
 
 function getClientIP(headers: Record<string, string | undefined>): string {
   return (
-    (headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+    ((headers['x-forwarded-for'] || '').split(',')[0] ?? '').trim() ||
     (headers['x-real-ip'] ?? 'unknown')
   );
 }
@@ -438,3 +437,4 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(500, 'Internal server error', requestOrigin);
   }
 };
+
