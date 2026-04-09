@@ -67,7 +67,7 @@ function corsHeaders(origin?: string): Record<string, string> {
   ];
   const isAllowed = origin && allowedOrigins.some((o) => origin.startsWith(o));
   return {
-    'Access-Control-Allow-Origin': isAllowed && origin ? origin : allowedOrigins[0],
+    'Access-Control-Allow-Origin': (isAllowed && origin) ? (origin as string) : allowedOrigins[0],
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'X-Content-Type-Options': 'nosniff',
@@ -108,7 +108,7 @@ function checkRateLimit(ip: string): boolean {
 
 function getClientIP(headers: Record<string, string | undefined>): string {
   return (
-    (headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+    ((headers['x-forwarded-for'] || '').split(',')[0] ?? '').trim() ||
     (headers['x-real-ip'] ?? 'unknown')
   );
 }
@@ -363,3 +363,4 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(500, 'Internal server error', requestOrigin);
   }
 };
+
