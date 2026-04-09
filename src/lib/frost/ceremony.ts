@@ -45,7 +45,7 @@ import {
   type GroupMetadata,
   type FrostConfig,
   type DkgInitPayload,
-  type type type SigningRequestPayload,
+  type SigningRequestPayload,
   type PartialSigPayload,
   type FrostCoordinatorPayload,
   DEFAULT_FROST_CONFIG,
@@ -1127,4 +1127,5 @@ export type {
   GroupMetadata,
   FrostConfig,
 };
+
 

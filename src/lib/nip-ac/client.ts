@@ -575,7 +575,8 @@ export class CreditLifecycleManager {
   };
 
   constructor(
-    ceps: CepsClient: { loadAgentNsec(agentNpub: string): Promise<string> }
+    ceps: CepsClient,
+    vault: { loadAgentNsec(agentNpub: string): Promise<string> }
   ) {
     this.ceps = ceps;
     this.vault = vault;
@@ -810,4 +811,5 @@ export class CreditLifecycleManager {
       .filter((e): e is CreditEnvelope => e !== null && e.expiresAt > now);
   }
 }
+
 

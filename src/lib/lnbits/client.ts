@@ -518,7 +518,8 @@ export class LNbitsClient {
   private async request<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
     path: string,
-    apiKey: string?: unknown,
+    apiKey: string,
+    body?: unknown,
   ): Promise<T> {
     this.requireConnected();
 
@@ -582,7 +583,7 @@ export class LNbitsClient {
    */
   private buildProxyUrl(
     path: string,
-    method: string?: unknown,
+    method: string,
   ): string {
     const targetUrl = encodeURIComponent(`${this.instanceUrl}${path}`);
     const proxyUrl = `${NWC_PROXY_URL}?target=${targetUrl}&method=${method}`;
@@ -653,4 +654,5 @@ declare module '../vault/vault.js' {
     // ignore — key may not exist
   }
 };
+
 
