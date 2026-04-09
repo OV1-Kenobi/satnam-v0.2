@@ -14,7 +14,7 @@
  * @see SPECIFICATION.md §8.1 — NIP-90 DVM Marketplace (Autopilot)
  */
 
-import { finalizeEvent } from "nostr-tools";
+import { finalizeEvent, nip19 } from "nostr-tools";
 import { hexToBytes } from "@noble/hashes/utils";
 
 import type { DvmJobRequest, DvmJobResult, DvmProvider, DvmFeedbackStatus, PaymentInfo } from "./types.js";
@@ -383,7 +383,7 @@ export class DvmMarketplace {
         requestEventId: requestId,
         resultEventId: result.id,
         providerPubkey: result.providerPubkey,
-        status: paymentResult ? "success" : "success",
+        status: paymentResult ? "success" : "partial",
         amountMsats: paymentResult ? result.payment?.amountMsats : undefined,
         signerNsec,
       });
@@ -431,7 +431,6 @@ export class DvmMarketplace {
     }
     // Attempt bech32 decode (nsec1...)
     try {
-      const { nip19 } = require("nostr-tools");
       const decoded = nip19.decode(nsec);
       if (decoded.type === "nsec") {
         const bytes = decoded.data as Uint8Array;
@@ -471,3 +470,4 @@ export class DvmMarketplace {
 
 // Re-export constructJobFeedback so callers of this module don't need two imports
 export { constructJobFeedback } from "./construct.js";
+
