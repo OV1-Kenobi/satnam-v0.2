@@ -85,11 +85,14 @@ const DEFAULT_RELAYS = [
 ];
 
 const DEFAULT_SPEND_POLICY: SpendPolicy = {
-  max_single_spend_msats: 10_000_000, // 10,000 sats
-  daily_limit_msats: 100_000_000,     // 100,000 sats
-  requires_approval_above_msats: 50_000_000, // 50,000 sats
+  max_single_spend_msats: 10_000_000n, // 10,000 sats
+  daily_limit_msats: 100_000_000n,     // 100,000 sats
+  requires_approval_above_msats: 50_000_000n, // 50,000 sats
   preferred_spend_rail: 'auto',
   allowed_mints: [],
+  sweep_threshold_msats: 500_000_000n, // 500,000 sats
+  sweep_destination: '',
+  sweep_rail: 'cashu' as const,
 };
 
 const STEPS = [
@@ -106,8 +109,8 @@ const STEPS = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatSats(msats: number): string {
-  return Math.floor(msats / 1000).toLocaleString();
+function formatSats(msats: bigint): string {
+  return (msats / 1000n).toLocaleString();
 }
 
 // ---------------------------------------------------------------------------
@@ -675,7 +678,7 @@ export default function AgentCreateFlow({ onComplete, onCancel }: AgentCreateFlo
 
       {/* Step label */}
       <p className="text-xs text-[#555555] uppercase tracking-widest">
-        Step {step} of {STEPS.length} — {STEPS[step - 1].label}
+        Step {step} of {STEPS.length} — {(STEPS[step - 1] ?? STEPS[0]).label}
       </p>
 
       {/* Step content */}
