@@ -16,7 +16,7 @@
  * Rate limiting: IP-based via Supabase rate_limits table.
  */
 
-import type { Handler } from "@netlify/functions";
+import type { Handler, HandlerResponse } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 
 // ============================================================================
@@ -51,7 +51,7 @@ function errorResponse(
   statusCode: number,
   message: string,
   origin?: string
-): ReturnType<Handler> {
+): HandlerResponse {
   return {
     statusCode,
     headers: corsHeaders(origin),
@@ -82,8 +82,7 @@ function checkRateLimit(ip: string): boolean {
 function getClientIP(headers: Record<string, string | undefined>): string {
   return (
     (headers["x-forwarded-for"] || "").split(",")[0].trim() ||
-    headers["x-real-ip"] ||
-    "unknown"
+    (headers["x-real-ip"] ?? "unknown")
   );
 }
 
@@ -103,7 +102,7 @@ function parseNip05(nip05: string): { username: string; domain: string } {
 // Handler
 // ============================================================================
 
-export const handler: Handler = async (event) => {
+export const handler: Handler = async (event): Promise<HandlerResponse> => {
   const requestOrigin = event.headers?.origin || event.headers?.Origin;
   const clientIP = getClientIP(event.headers as Record<string, string | undefined>);
 
