@@ -75,7 +75,8 @@ export type VaultDirectory =
   | 'nfc'
   | 'nip46'
   | 'agents'
-  | 'cashu';
+  | 'cashu'
+  | 'sig4sats';
 
 // ---------------------------------------------------------------------------
 // NIP-46 Pairing State
@@ -485,6 +486,27 @@ export interface VaultOps {
    * @throws {VaultError.IdentityNotFound} if no proofs found for this mint
    */
   getCashuProofs(mintUrlHash: string): Promise<CashuProof[]>;
+
+  // -------------------------------------------------------------------------
+  // Sig4Sats
+  // -------------------------------------------------------------------------
+
+  /**
+   * Store all Sig4Sats bonds, encrypted under the master key.
+   * Stored at vault/sig4sats/bonds.json.
+   *
+   * @param bondsJson - JSON-serialized bond map (array of {id, bond} entries)
+   * @throws {VaultError.VaultLocked} if vault is locked
+   */
+  storeSig4SatsBonds(bondsJson: string): Promise<void>;
+
+  /**
+   * Retrieve and decrypt the Sig4Sats bond store.
+   *
+   * @returns JSON-serialized bond map, or null if no bonds are stored yet
+   * @throws {VaultError.VaultLocked} if vault is locked
+   */
+  getSig4SatsBonds(): Promise<string | null>;
 
   // -------------------------------------------------------------------------
   // Backup
