@@ -1,3 +1,4 @@
+SHA: 8c5702383f388c36746f89474047ead6165c8524
 /**
  * @module hooks/useSkillManager
  * @description React hook wrapping {@link SkillManager} for NIP-SKL skill lifecycle
@@ -127,6 +128,12 @@ export interface UseSkillManagerReturn {
   ) => Promise<SkillWithAttestations>;
 
   /**
+   * All skills loaded by the most recent listSkills() call.
+   * Read-only state; populated by calling listSkills().
+   */
+  skills: SkillWithAttestations[];
+
+  /**
    * Clear the last error.
    */
   clearError: () => void;
@@ -148,6 +155,7 @@ export interface UseSkillManagerReturn {
 export function useSkillManager(): UseSkillManagerReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [skills, setSkills] = useState<SkillWithAttestations[]>([]);
 
   /** Stable ref to the lazy-initialised SkillManager instance. */
   const managerRef = useRef<SkillManager | null>(null);
@@ -190,7 +198,7 @@ export function useSkillManager(): UseSkillManagerReturn {
    * @internal
    */
   const withState = useCallback(
-    async <T,>(operation: (manager: SkillManager) => Promise<T>): Promise<T> => {
+    async <T>(operation: (manager: SkillManager) => Promise<T>): Promise<T> => {
       setIsLoading(true);
       setError(null);
       try {
@@ -236,8 +244,18 @@ export function useSkillManager(): UseSkillManagerReturn {
   );
 
   const listSkills = useCallback(
-    (publisherPubkey: string, relayUrl: string) =>
-      withState((m) => m.listSkills(publisherPubkey, relayUrl)),
+    async (publisherPubkey: string, relayUrl: string) => {
+      const manifests = await withState((m) => m.listSkills(publisherPubkey, relayUrl));
+      // Note: listSkills returns SkillManifest[], not SkillWithAttestations[]
+      // Wrap into SkillWithAttestations shape for UI consumers
+      const wrapped: SkillWithAttestations[] = manifests.map((m) => ({
+        manifest: m,
+        attestationResult: { valid: false, reason: 'not verified' },
+        attestations: m.attestations ?? [],
+      }));
+      setSkills(wrapped);
+      return manifests;
+    },
     [withState]
   );
 
@@ -253,6 +271,7 @@ export function useSkillManager(): UseSkillManagerReturn {
     () => ({
       isLoading,
       error,
+      skills,
       registerSkill,
       attestSkill,
       updateSkillVersion,
@@ -264,6 +283,7 @@ export function useSkillManager(): UseSkillManagerReturn {
     [
       isLoading,
       error,
+      skills,
       registerSkill,
       attestSkill,
       updateSkillVersion,
