@@ -25,7 +25,7 @@
  * @see https://github.com/nostr-protocol/nips/blob/master/17.md
  */
 
-import type { Handler } from '@netlify/functions';
+import type { Handler, HandlerResponse } from "@netlify/functions";
 import { verifyNip98 } from '../../src/lib/nip98/verify';
 
 // ============================================================================
@@ -85,7 +85,7 @@ function corsHeaders(origin?: string): Record<string, string> {
   ];
   const isAllowed = origin && allowedOrigins.some((o) => origin.startsWith(o));
   return {
-    'Access-Control-Allow-Origin': isAllowed ? origin! : allowedOrigins[0],
+    'Access-Control-Allow-Origin': isAllowed && origin ? origin : allowedOrigins[0],
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'X-Content-Type-Options': 'nosniff',
@@ -98,7 +98,7 @@ function errorResponse(
   statusCode: number,
   message: string,
   origin?: string
-): ReturnType<Handler> {
+): HandlerResponse {
   return {
     statusCode,
     headers: corsHeaders(origin),
@@ -127,8 +127,7 @@ function checkRateLimit(ip: string): boolean {
 function getClientIP(headers: Record<string, string | undefined>): string {
   return (
     (headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-    headers['x-real-ip'] ||
-    'unknown'
+    (headers['x-real-ip'] ?? 'unknown')
   );
 }
 
@@ -269,7 +268,7 @@ async function publishToRelays(giftWrapEvent: NostrEvent): Promise<number> {
 // Handler
 // ============================================================================
 
-export const handler: Handler = async (event) => {
+export const handler: Handler = async (event): Promise<HandlerResponse> => {
   const requestOrigin = event.headers?.origin || event.headers?.Origin;
   const clientIP = getClientIP(event.headers as Record<string, string | undefined>);
 
