@@ -26,7 +26,7 @@
  * @see phase3-spec-sections.md §7.1 — Agent Profile (kind:39200)
  */
 
-import type { Handler } from '@netlify/functions';
+import type { Handler, HandlerResponse } from "@netlify/functions";
 
 // ============================================================================
 // Constants
@@ -89,8 +89,7 @@ function checkRateLimit(ip: string): boolean {
 function getClientIP(headers: Record<string, string | undefined>): string {
   return (
     (headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-    headers['x-real-ip'] ||
-    'unknown'
+    (headers['x-real-ip'] ?? 'unknown')
   );
 }
 
@@ -149,7 +148,7 @@ function errorResponse(
   statusCode: number,
   message: string,
   origin?: string
-): ReturnType<Handler> {
+): HandlerResponse {
   return {
     statusCode,
     headers: corsHeaders(origin),
@@ -268,7 +267,7 @@ async function queryRelay(
             event.tags
               .filter((t) => t[0] === tagName)
               .map((t) => t[1])
-              .filter(Boolean);
+              .filter((v): v is string => Boolean(v));
 
           const enabledSkillsTag = event.tags.find(
             (t) => t[0] === 'enabled_skills'
@@ -324,7 +323,7 @@ async function queryRelay(
       }
     };
 
-    ws.onerror = (err: Event) => {
+    ws.onerror = (_err: Event) => {
       if (!resolved) {
         resolved = true;
         clearTimeout(timeout);
@@ -346,7 +345,7 @@ async function queryRelay(
 // Handler
 // ============================================================================
 
-export const handler: Handler = async (event) => {
+export const handler: Handler = async (event): Promise<HandlerResponse> => {
   const requestOrigin = event.headers?.origin || event.headers?.Origin;
   const clientIP = getClientIP(
     event.headers as Record<string, string | undefined>
