@@ -23,14 +23,14 @@ import {
   Zap,
   BookOpen,
 } from 'lucide-react';
-import type { AgentProfile } from '../../hooks/useAgentProfile.js';
+import type { AgentViewModel } from '../../hooks/useAgentProfile.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 interface AgentCardProps {
-  agent: AgentProfile;
+  agent: AgentViewModel;
   onSelect?: () => void;
   onPause?: (id: string) => void;
   onEdit?: (id: string) => void;
@@ -54,7 +54,7 @@ function formatHeartbeat(timestamp?: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-function statusBadgeClass(status: AgentProfile['status']): string {
+function statusBadgeClass(status: AgentViewModel['status']): string {
   switch (status) {
     case 'active': return 'bg-green-600 text-white';
     case 'paused': return 'bg-yellow-600 text-white';
@@ -64,7 +64,7 @@ function statusBadgeClass(status: AgentProfile['status']): string {
   }
 }
 
-function statusDotClass(status: AgentProfile['status']): string {
+function statusDotClass(status: AgentViewModel['status']): string {
   switch (status) {
     case 'active': return 'bg-green-500';
     case 'paused': return 'bg-yellow-500';
@@ -74,7 +74,7 @@ function statusDotClass(status: AgentProfile['status']): string {
   }
 }
 
-function autonomyBadgeClass(autonomy: AgentProfile['autonomy']): string {
+function autonomyBadgeClass(autonomy: AgentViewModel['autonomy']): string {
   switch (autonomy) {
     case 'autonomous': return 'bg-yellow-600/20 text-yellow-400 border-yellow-600/30';
     case 'supervised': return 'bg-[#f7931a]/20 text-[#f7931a] border-[#f7931a]/30';
