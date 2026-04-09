@@ -12,7 +12,7 @@
  * Resolves NIP-05 identifiers to Nostr pubkeys via the v2 Supabase
  * nip05_identifiers table (public read — no auth required).
  *
- * Auth: None (public endpoint). NIP-98 not required (read-only public data).
+ * Auth: None (public endpoint — no authentication required; read-only public data).
  * Rate limiting: IP-based via Supabase rate_limits table.
  */
 
@@ -81,7 +81,7 @@ function checkRateLimit(ip: string): boolean {
 
 function getClientIP(headers: Record<string, string | undefined>): string {
   return (
-    (headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+    ((headers["x-forwarded-for"] || "").split(",")[0] ?? "").trim() ||
     (headers["x-real-ip"] ?? "unknown")
   );
 }
@@ -203,3 +203,4 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(500, "Internal server error", requestOrigin);
   }
 };
+
