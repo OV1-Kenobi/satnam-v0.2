@@ -2,11 +2,30 @@
  * Calls — NostrSignaling
  * Spec: circle-of-trust-spec.md § calls/signaling.ts
  *
- * WebRTC signaling over Nostr NIP-44 encrypted messages.
- * Uses ephemeral kind:25050 events for offer/answer/ICE/hangup.
+ * WebRTC signaling over Nostr NIP-17 sealed GiftWrap (kind:1059).
+ * Uses NIP-17 gift-wrapped messages to route offer/answer/ICE/hangup between
+ * callers over the Nostr relay network via the CEPS event publishing service.
  *
- * Phase 1: simulated relay (event emitter).
- * Phase 2: replace emitEvent / subscribeRelay with real relay pool.
+ * ## Privacy model
+ * All signaling messages (SDP offers, answers, ICE candidates, hangup) are
+ * sent as NIP-17 gift-wrapped events:
+ *   - Outer wrapper: kind:1059 (gift wrap) — encrypted NIP-44 to recipient
+ *   - Inner seal: kind:13 (seal) — signed by sender's ephemeral key
+ *   - Innermost rumor: the actual signaling payload (JSON-encoded SignalingMessage)
+ *
+ * Call setup metadata (who is calling whom, SDP details, ICE candidates) is
+ * NOT visible on the relay. Only the recipient's pubkey tag leaks.
+ *
+ * ## Session initialisation
+ * The caller must first create a CEPS session for the nsec (via
+ * SatnamPrivacyFirstCommunications.createFromVault) before constructing
+ * NostrSignaling. The sessionId returned by CEPS identifies the authenticated
+ * session used to sign and publish events.
+ *
+ * ## Subscription (Phase 2)
+ * Incoming GiftWrap events are received through CEPS subscriptions. The current
+ * implementation provides a hook point for the subscription callback; wiring
+ * to the CEPS subscription API is delegated to the useCalls hook.
  */
 
 import type {
@@ -15,6 +34,10 @@ import type {
   CallType,
 } from './types.js';
 import { SIGNALING_KIND } from './types.js';
+import {
+  SatnamPrivacyFirstCommunications,
+  type GiftwrappedMessageConfig,
+} from '../nip17/index.js';
 
 type SignalingCallback = (msg: SignalingMessage, fromPubkey: string) => void;
 
@@ -24,33 +47,40 @@ type SignalingCallback = (msg: SignalingMessage, fromPubkey: string) => void;
 
 export class NostrSignaling {
   private readonly selfPubkey: string;
+  private readonly messaging: SatnamPrivacyFirstCommunications;
   private readonly listeners: SignalingCallback[] = [];
-  private simulatedSub: ReturnType<typeof setInterval> | null = null;
 
-  constructor(selfPubkey: string) {
+  /**
+   * @param selfPubkey - Hex-encoded public key of this participant
+   * @param cepsSessionId - Active CEPS session ID (from SatnamPrivacyFirstCommunications.createFromVault)
+   */
+  constructor(selfPubkey: string, cepsSessionId: string) {
     this.selfPubkey = selfPubkey;
+    this.messaging = new SatnamPrivacyFirstCommunications(cepsSessionId);
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────
 
   /**
-   * Publish a NIP-44 encrypted kind:25050 event.
-   * Phase 1: stored in sessionStorage for same-tab testing.
-   * Phase 2: publish via relay pool.
+   * Publish a NIP-17 sealed GiftWrap event carrying the signaling payload.
+   *
+   * The SignalingMessage is JSON-encoded and sent as the gift-wrap content.
+   * The CEPS layer handles ephemeral key generation, NIP-44 encryption,
+   * and relay publishing.
    */
   private async emitEvent(toPubkey: string, msg: SignalingMessage): Promise<void> {
-    const event = {
-      kind: SIGNALING_KIND,
-      created_at: Math.floor(Date.now() / 1000),
-      pubkey: this.selfPubkey,
-      tags: [['p', toPubkey]],
-      content: JSON.stringify(msg), // Phase 2: NIP-44 encrypted
+    const config: GiftwrappedMessageConfig = {
+      content: JSON.stringify(msg),
+      recipient: toPubkey,
+      sender: this.selfPubkey,
+      encryptionLevel: 'maximum',
+      communicationType: 'individual',
+      messageType: 'direct',
     };
 
-    // Phase 1 simulation: push to a shared in-memory bus
-    const bus = (window as any).__satnamSignalingBus as SignalingEvent[] | undefined;
-    if (bus) {
-      bus.push({ from: this.selfPubkey, to: toPubkey, msg });
+    const result = await this.messaging.sendGiftwrappedMessage(config);
+    if (!result.success) {
+      console.warn('[signaling] emitEvent failed:', result.error);
     }
   }
 
@@ -81,53 +111,47 @@ export class NostrSignaling {
   }
 
   /**
-   * Subscribe to incoming signaling events.
-   * Returns an unsubscribe function.
+   * Register a callback for incoming signaling messages.
+   *
+   * Phase 2 implementation: This registers the callback for delivery
+   * by the useCalls hook when it decrypts incoming NIP-17 gift-wrap events
+   * from the CEPS subscription.
+   *
+   * @param callback - Called with (msg, fromPubkey) for each incoming signal
+   * @returns Unsubscribe function
    */
   subscribe(callback: SignalingCallback): () => void {
     this.listeners.push(callback);
-
-    // Phase 1: poll the in-memory bus
-    if (!(window as any).__satnamSignalingBus) {
-      (window as any).__satnamSignalingBus = [];
-    }
-
-    const interval = setInterval(() => {
-      const bus = (window as any).__satnamSignalingBus as SignalingEvent[];
-      const pending = bus.filter(e => e.to === this.selfPubkey && !e.delivered);
-      for (const event of pending) {
-        event.delivered = true;
-        for (const listener of this.listeners) {
-          listener(event.msg, event.from);
-        }
-      }
-    }, 500);
-
-    this.simulatedSub = interval;
-
     return () => {
-      clearInterval(interval);
       const idx = this.listeners.indexOf(callback);
       if (idx >= 0) this.listeners.splice(idx, 1);
     };
   }
 
-  /** Cleanup */
-  destroy(): void {
-    if (this.simulatedSub !== null) {
-      clearInterval(this.simulatedSub);
+  /**
+   * Deliver an incoming decrypted signaling message to all registered callbacks.
+   *
+   * Called by the useCalls hook after it decrypts an incoming NIP-17 event
+   * and confirms the payload is a SignalingMessage.
+   *
+   * @param rawContent - Decrypted gift-wrap content string (JSON-encoded SignalingMessage)
+   * @param fromPubkey - Hex-encoded pubkey of the sender
+   */
+  deliver(rawContent: string, fromPubkey: string): void {
+    try {
+      const msg = JSON.parse(rawContent) as SignalingMessage;
+      if (msg && typeof msg.type === 'string' && typeof msg.callId === 'string') {
+        for (const listener of this.listeners) {
+          listener(msg, fromPubkey);
+        }
+      }
+    } catch {
+      // Not a valid signaling message — ignore
     }
+  }
+
+  /** Cleanup — clear all listeners */
+  destroy(): void {
     this.listeners.length = 0;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Internal simulation type
-// ---------------------------------------------------------------------------
-
-interface SignalingEvent {
-  from: string;
-  to: string;
-  msg: SignalingMessage;
-  delivered?: boolean;
 }
