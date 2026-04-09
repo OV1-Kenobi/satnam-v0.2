@@ -20,14 +20,14 @@ import {
   RefreshCw,
   Clock,
 } from 'lucide-react';
-import type { AgentProfile } from '../../hooks/useAgentProfile.js';
+import type { AgentViewModel } from '../../hooks/useAgentProfile.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 interface AgentMonitoringPanelProps {
-  agent: AgentProfile;
+  agent: AgentViewModel;
   onRefresh?: () => void;
 }
 
