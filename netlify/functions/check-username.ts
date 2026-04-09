@@ -8,9 +8,8 @@
  * Checks whether a NIP-05 username is available for registration.
  * Queries both nip05_identifiers and username_reservations tables.
  *
- * Auth: None (public endpoint).
- * NIP-98 not required — public availability check. Username availability
- * is not sensitive data; any user needs to query this before registering.
+ * Auth: None (public endpoint — no authentication required).
+ * Availability check is public data; no auth required before registering.
  *
  * Rate limiting: IP-based in-memory, 30 req/min.
  */
@@ -97,7 +96,7 @@ function checkRateLimit(ip: string): boolean {
 
 function getClientIP(headers: Record<string, string | undefined>): string {
   return (
-    (headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+    ((headers['x-forwarded-for'] || '').split(',')[0] ?? '').trim() ||
     (headers['x-real-ip'] ?? 'unknown')
   );
 }
@@ -247,3 +246,4 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(500, 'Internal server error', requestOrigin);
   }
 };
+
