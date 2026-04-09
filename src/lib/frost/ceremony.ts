@@ -31,7 +31,7 @@
  * @see SPECIFICATION.md §4.3 — FROST Threshold Signatures
  */
 
-import { bytesToHex, hexToBytes, utf8ToBytes, bytesToUtf8, randomBytes } from '@noble/hashes/utils';
+import { bytesToHex, hexToBytes, utf8ToBytes, randomBytes } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
 import { schnorr, secp256k1 } from '@noble/curves/secp256k1';
 
@@ -45,9 +45,7 @@ import {
   type GroupMetadata,
   type FrostConfig,
   type DkgInitPayload,
-  type DkgRound1Payload,
-  type DkgRound2Payload,
-  type SigningRequestPayload,
+  type type type SigningRequestPayload,
   type PartialSigPayload,
   type FrostCoordinatorPayload,
   DEFAULT_FROST_CONFIG,
@@ -57,7 +55,6 @@ import {
 import {
   storeBfProfileAndRegister,
   storeBfShare,
-  retrieveBfShare,
   generateSessionId,
   computeEventId,
 } from './vault-storage.js';
@@ -140,8 +137,7 @@ async function loadBifrost(): Promise<{
     // not a round-based interactive DKG. The BifrostDkg interface abstracts
     // over this: generateRound1Package delegates to generate_dealer_pkg,
     // while round 2 distributes the resulting shares via NIP-17 messages.
-    const lib = await import('@frostr/bifrost');
-    const libLib = await import('@frostr/bifrost/lib');
+      const libLib = await import('@frostr/bifrost/lib');
 
     // Adapter: map bifrost dealer API to our BifrostDkg interface
     const dkgAdapter: BifrostDkg = {
@@ -150,8 +146,7 @@ async function loadBifrost(): Promise<{
         // The calling node acts as the trusted dealer in the first round.
         const { group, shares } = libLib.generate_dealer_pkg(threshold, totalShares);
         // Serialize group as commitments bytes and this participant's secret
-        const encoder = new TextEncoder();
-        const commitments = encoder.encode(libLib.encode_group_pkg(group));
+              const commitments = encoder.encode(libLib.encode_group_pkg(group));
         const secretPackage = encoder.encode(libLib.encode_share_pkg(shares[participantIndex]));
         return { commitments, secretPackage };
       },
@@ -160,8 +155,7 @@ async function loadBifrost(): Promise<{
         // In the dealer model, the dealer's secret package already encodes all
         // share assignments. We forward each participant their share package
         // as an encrypted share in the round-2 output.
-        const encoder = new TextEncoder();
-        const sharePackages = round1Packages.map((pkg) => ({
+              const sharePackages = round1Packages.map((pkg) => ({
           index: pkg.index,
           encryptedShare: pkg.commitments, // commitments carry the full share for non-dealer participants
         }));
@@ -174,8 +168,7 @@ async function loadBifrost(): Promise<{
         const decoder = new TextDecoder();
         const groupPkgStr = decoder.decode(round2Packages[0]?.encryptedShare ?? mySecretPackage);
         // Extract group pubkey as bytes (first 33 bytes of group package represent group pubkey)
-        const encoder = new TextEncoder();
-        const groupPubkey = encoder.encode(groupPkgStr.slice(0, 64)); // hex group pubkey
+              const groupPubkey = encoder.encode(groupPkgStr.slice(0, 64)); // hex group pubkey
         return {
           secretShare: mySecretPackage,
           publicShare: round2Packages[0]?.encryptedShare ?? new Uint8Array(32),
@@ -1134,3 +1127,4 @@ export type {
   GroupMetadata,
   FrostConfig,
 };
+

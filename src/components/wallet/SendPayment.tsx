@@ -9,7 +9,7 @@
  * 4. Execute via NWC and show result
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -340,3 +340,4 @@ export default function SendPayment({ balance, onSend, onClose }: SendPaymentPro
     </div>
   );
 }
+

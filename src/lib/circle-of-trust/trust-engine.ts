@@ -393,3 +393,23 @@ export function createTrustEngine(
   );
   return new TrustEngine(contactMap, ledger);
 }
+
+
+// ---------------------------------------------------------------------------
+// Standalone helper — convenience wrapper around TrustEngine.calculateTrustScore
+// ---------------------------------------------------------------------------
+
+/**
+ * Calculate the composite trust score for a single contact without constructing
+ * a full TrustEngine. Useful for one-off calculations in components like
+ * CircleOfTrustPage.
+ *
+ * @param contact - The TrustedContact to score
+ * @returns Numeric score in range 0–100
+ */
+export function calculateTrustScore(contact: TrustedContact): number {
+  const engine = new TrustEngine(
+    new Map([[contact.pubkey, contact]]),
+  );
+  return engine.calculateTrustScore(contact);
+}

@@ -19,7 +19,7 @@
  * ```
  */
 
-import React, { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { handleError, reportError, SatnamError, type VaultLockedError } from '../../lib/errors';
 
 // ============================================================================
@@ -296,3 +296,4 @@ export function InlineError({
 }
 
 export default ErrorBoundary;
+

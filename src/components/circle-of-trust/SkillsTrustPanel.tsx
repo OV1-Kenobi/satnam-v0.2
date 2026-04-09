@@ -7,7 +7,6 @@
  * - Skill growth over time (CSS bars)
  */
 
-import React from 'react';
 import clsx from 'clsx';
 import {
   BookOpen,
@@ -255,3 +254,4 @@ export default function SkillsTrustPanel({
     </section>
   );
 }
+

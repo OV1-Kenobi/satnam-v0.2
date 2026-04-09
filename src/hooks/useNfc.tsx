@@ -18,12 +18,11 @@
  * ```
  */
 
-import React, {
+import {
   useState,
   useCallback,
   useRef,
-  type ReactNode,
-} from 'react';
+  type } from 'react';
 
 import { PinGate, createPinGate } from '../lib/nfc/pin-gate.js';
 import { ProofOfLifeService } from '../lib/nfc/proof-of-life.js';
@@ -31,8 +30,7 @@ import {
   getNfcMethod,
   isIos,
   isWebNfcAvailable,
-  type NfcUrlParams,
-} from '../lib/nfc/ios-fallback.js';
+  type } from '../lib/nfc/ios-fallback.js';
 import type {
   PolCeremony,
   PeerScanResult,
@@ -125,7 +123,7 @@ interface UseNfcReturn {
 // ---------------------------------------------------------------------------
 
 export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
-  const { vault, cardUid, guardianPubkey, onTap } = options;
+  const { vault, cardUid } = options;
 
   // ── Platform detection ─────────────────────────────────────────────────────
   const isWebNfcSupported = isWebNfcAvailable();
@@ -430,3 +428,4 @@ export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
 }
 
 export default useNfc;
+

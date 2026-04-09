@@ -10,12 +10,9 @@
  * CSS-only charts — no chart library.
  */
 
-import React from 'react';
 import clsx from 'clsx';
 import {
   Zap,
-  TrendingUp,
-  TrendingDown,
   CheckCircle2,
   XCircle,
   Clock,
@@ -309,3 +306,4 @@ export default function FinancialTrustPanel({
     </section>
   );
 }
+

@@ -28,7 +28,7 @@ import type {
   SpendResult,
   AllowanceConstraints,
 } from './types.js';
-import { createAdaptorSignature, generateAdaptorPoint, hashMessage } from './adaptor.js';
+import { generateAdaptorPoint } from './adaptor.js';
 
 // ============================================================================
 // Storage helpers
@@ -648,3 +648,4 @@ export function getBondManager(vault: Vault): BondManager {
   }
   return _bondManagerInstance;
 }
+

@@ -10,7 +10,7 @@
  *   isLoading
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { NoteToSelfClient } from '../lib/note-to-self/client.js';
 import type { SelfNote, NoteCategory } from '../lib/note-to-self/types.js';
 
@@ -90,3 +90,4 @@ export function useNoteToSelf(selfPubkey?: string) {
 }
 
 export default useNoteToSelf;
+

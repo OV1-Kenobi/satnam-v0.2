@@ -6,7 +6,7 @@
  * and provides Guardian/Steward actions (assign role, revoke).
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import type { DelegationEvent } from '../../lib/nip26/types.js';
 import { RoleType } from '../../lib/nip26/types.js';
 
@@ -304,3 +304,4 @@ export default function GroupMemberList({
     </div>
   );
 }
+

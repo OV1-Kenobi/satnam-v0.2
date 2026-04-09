@@ -9,7 +9,7 @@
  * - Result preview
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import clsx from 'clsx';
 import {
   Briefcase,
@@ -365,3 +365,4 @@ export default function ActiveJobsList({ onSelectJob }: ActiveJobsListProps) {
     </div>
   );
 }
+

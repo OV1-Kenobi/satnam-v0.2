@@ -12,7 +12,7 @@
  * CSS-only visualization — no chart library.
  */
 
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import clsx from 'clsx';
 import { Users, Shield, Clock, TrendingUp } from 'lucide-react';
 import type { TrustedContact, CircleOfTrustStats } from '../../lib/circle-of-trust/types.js';
@@ -309,3 +309,4 @@ export default function TrustOverviewPanel({
     </section>
   );
 }
+

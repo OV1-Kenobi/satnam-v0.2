@@ -22,7 +22,7 @@
 import argon2 from 'argon2-browser';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils';
+import { utf8ToBytes } from '@noble/hashes/utils';
 
 import type { VaultOps } from '../vault/types.js';
 
@@ -357,3 +357,4 @@ export function createPinGate(vault: VaultOps, cardUid: string): PinGate {
     lockoutDuration: 5 * 60 * 1000, // 5 minutes
   });
 }
+

@@ -34,7 +34,7 @@ function mockWrap(content: string): string {
 }
 
 /** Simulate kind:1059 unwrapping.  Returns the content unchanged. */
-function mockUnwrap(eventId: string, content: string): string {
+function mockUnwrap(eventId: string: string): string {
   return content;
 }
 
@@ -77,11 +77,9 @@ export class NoteToSelfClient {
   ): Promise<SelfNote> {
     const note: SelfNote = {
       id:        generateId(),
-      content,
-      category,
+          category,
       tags,
-      createdAt: Math.floor(Date.now() / 1000),
-      eventId:   mockWrap(content),
+      createdAt: Math.floor(Date.now() / 1000):   mockWrap(content),
     };
 
     const notes = readNotes();
@@ -132,3 +130,4 @@ export class NoteToSelfClient {
     return notes[idx];
   }
 }
+

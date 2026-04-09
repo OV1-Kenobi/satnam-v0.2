@@ -33,7 +33,6 @@ import type {
   SignalingMessageType,
   CallType,
 } from './types.js';
-import { SIGNALING_KIND } from './types.js';
 import {
   SatnamPrivacyFirstCommunications,
   type GiftwrappedMessageConfig,
@@ -155,3 +154,4 @@ export class NostrSignaling {
     this.listeners.length = 0;
   }
 }
+

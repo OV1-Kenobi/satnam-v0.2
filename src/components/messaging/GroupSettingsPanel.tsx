@@ -12,12 +12,10 @@
  *   - Leave group (red, destructive)
  */
 
-import React, { useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 import clsx from 'clsx';
 import {
   X,
-  Plus,
-  Trash2,
   Crown,
   Shield,
   Edit2,
@@ -27,7 +25,6 @@ import {
   LogOut,
   UserMinus,
   UserPlus,
-  Camera,
   Check,
 } from 'lucide-react';
 import type { MessageThread } from '../../hooks/useMessaging.js';
@@ -350,3 +347,4 @@ export default function GroupSettingsPanel({
     </div>
   );
 }
+

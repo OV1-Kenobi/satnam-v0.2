@@ -10,11 +10,10 @@
  * - Settlement/default actions
  */
 
-import React from 'react';
 import clsx from 'clsx';
 import {
   FileText,
-  Handshake,
+  Users2,
   Package,
   CreditCard,
   CheckCircle2,
@@ -60,7 +59,7 @@ const STATES: Array<{
     id: 'Offer',
     label: 'Offer',
     description: 'Provider offered terms',
-    Icon: Handshake,
+    Icon: Users2,
     color: 'bg-blue-600',
     textColor: 'text-blue-400',
   },
@@ -400,3 +399,4 @@ export default function CreditEnvelopePanel({ agentId, jobId }: CreditEnvelopePa
     </div>
   );
 }
+

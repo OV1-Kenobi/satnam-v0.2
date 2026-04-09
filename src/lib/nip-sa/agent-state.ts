@@ -14,7 +14,7 @@
  * @see phase3-spec-sections.md §7.1 — NIP-SA kinds 39201, 39202
  */
 
-import { finalizeEvent, getPublicKey, nip19, nip44 } from 'nostr-tools';
+import { finalizeEvent, nip19, nip44 } from 'nostr-tools';
 import { hexToBytes } from '@noble/hashes/utils';
 import type { CepsClient } from '../ceps/ceps-client.js';
 
@@ -318,3 +318,4 @@ export async function publishAgentSchedule(
 
   return ceps.publishEvent(signed as any);
 }
+

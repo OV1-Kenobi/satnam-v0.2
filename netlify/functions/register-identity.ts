@@ -61,9 +61,11 @@ function corsHeaders(origin?: string): Record<string, string> {
     'http://localhost:5173',
     'http://localhost:8888',
   ];
-  const isAllowed = origin && allowedOrigins.some((o) => origin.startsWith(o));
+  const resolvedOrigin = (origin && allowedOrigins.some((o) => origin.startsWith(o)))
+    ? origin
+    : allowedOrigins[0];
   return {
-    'Access-Control-Allow-Origin': (isAllowed && origin) ? (origin as string) : allowedOrigins[0],
+    'Access-Control-Allow-Origin': resolvedOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'X-Content-Type-Options': 'nosniff',
@@ -358,4 +360,5 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     }),
   };
 };
+
 

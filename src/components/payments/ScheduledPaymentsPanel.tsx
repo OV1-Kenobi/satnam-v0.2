@@ -9,7 +9,7 @@
  * - Pause/resume/cancel actions
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   Calendar,
@@ -22,7 +22,6 @@ import {
   Clock,
   Zap,
   Coins,
-  ChevronDown,
   AlertCircle,
   Repeat,
 } from 'lucide-react';
@@ -635,3 +634,4 @@ export default function ScheduledPaymentsPanel({ className }: ScheduledPaymentsP
     </div>
   );
 }
+

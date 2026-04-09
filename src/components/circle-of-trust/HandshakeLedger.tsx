@@ -11,7 +11,7 @@
 import React from 'react';
 import clsx from 'clsx';
 import {
-  Handshake,
+  Users2,
   MessageSquare,
   Zap,
   ShieldCheck,
@@ -37,7 +37,7 @@ interface HandshakeLedgerProps {
 
 const ENTRY_CONFIG = {
   meeting: {
-    icon: Handshake,
+    icon: Users2,
     label: 'PoL Meeting',
     color: '#ffd700',
     badge: true,
@@ -214,7 +214,7 @@ export default function HandshakeLedger({
         </div>
       ) : sorted.length === 0 ? (
         <div className="text-center py-8 space-y-2">
-          <Handshake size={28} className="mx-auto text-[#555555]" aria-hidden="true" />
+          <Users2 size={28} className="mx-auto text-[#555555]" aria-hidden="true" />
           <p className="text-sm text-[#555555]">No handshake history yet</p>
           <p className="text-xs text-[#555555]">Complete a PoL ceremony to create your first entry</p>
         </div>
@@ -239,3 +239,4 @@ export default function HandshakeLedger({
     </section>
   );
 }
+

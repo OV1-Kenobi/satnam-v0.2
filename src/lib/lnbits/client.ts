@@ -226,8 +226,7 @@ export class LNbitsClient {
       'POST',
       '/api/v1/payments',
       key,
-      body,
-    );
+        );
     return raw.payment_request ?? '';
   }
 
@@ -242,13 +241,11 @@ export class LNbitsClient {
    */
   async payInvoice(bolt11: string): Promise<LNbitsPayment> {
     const key = await this.getApiKey('admin');
-    const body = { out: true, bolt11 };
-    const raw = await this.request<LNbitsPaymentApiResponse>(
+      const raw = await this.request<LNbitsPaymentApiResponse>(
       'POST',
       '/api/v1/payments',
       key,
-      body,
-    );
+        );
     return mapPayment(raw);
   }
 
@@ -314,7 +311,7 @@ export class LNbitsClient {
       min: number;
       max: number;
       lnurl: string;
-    }>('POST', '/lnurlp/api/v1/links', key, body);
+    }>('POST', '/lnurlp/api/v1/links', key);
 
     return {
       description: raw.description ?? '',
@@ -365,8 +362,7 @@ export class LNbitsClient {
       'POST',
       endpoint,
       key,
-      body,
-    );
+        );
 
     return {
       id: raw.id ?? '',
@@ -522,13 +518,12 @@ export class LNbitsClient {
   private async request<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
     path: string,
-    apiKey: string,
-    body?: unknown,
+    apiKey: string?: unknown,
   ): Promise<T> {
     this.requireConnected();
 
     const url = IS_BROWSER
-      ? this.buildProxyUrl(path, method, body)
+      ? this.buildProxyUrl(path, method)
       : `${this.instanceUrl}${path}`;
 
     const headers: Record<string, string> = {
@@ -587,8 +582,7 @@ export class LNbitsClient {
    */
   private buildProxyUrl(
     path: string,
-    method: string,
-    body?: unknown,
+    method: string?: unknown,
   ): string {
     const targetUrl = encodeURIComponent(`${this.instanceUrl}${path}`);
     const proxyUrl = `${NWC_PROXY_URL}?target=${targetUrl}&method=${method}`;
@@ -659,3 +653,4 @@ declare module '../vault/vault.js' {
     // ignore — key may not exist
   }
 };
+

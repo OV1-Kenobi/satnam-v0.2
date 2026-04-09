@@ -10,7 +10,7 @@
  * - Performance metrics bar chart (CSS only)
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import clsx from 'clsx';
 import {
   Heart,
@@ -187,7 +187,7 @@ export default function AgentMonitoringPanel({ agent, onRefresh }: AgentMonitori
   };
 
   // Mock metrics (in production these come from relay events)
-  const dailyLimitSats = Math.floor(agent.spendPolicy.daily_limit_msats / 1000);
+  const dailyLimitSats = Number(agent.spendPolicy.daily_limit_msats) / 1000;
   const spendRateHour = Math.round(agent.dailySpendSats / 24);
 
   const taskBars: MetricBar[] = [
@@ -283,3 +283,4 @@ export default function AgentMonitoringPanel({ agent, onRefresh }: AgentMonitori
     </div>
   );
 }
+

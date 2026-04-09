@@ -48,11 +48,25 @@ import type {
   SkillVersionUpdateParams,
   SkillWithAttestations,
 } from '../lib/nip-skl/skill-registration.js';
-import type { SkillManifest, VerificationTier } from '../lib/nip-skl/types.js';
+import type { SkillManifest, VerificationTier, GuardianAttestation } from '../lib/nip-skl/types.js';
 
 // ---------------------------------------------------------------------------
 // Return type
 // ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
+// Re-exported types for component consumers
+// ---------------------------------------------------------------------------
+
+/** Skill manifest with all attestations. Alias for SkillManifest from nip-skl/types. */
+export type Skill = SkillManifest;
+
+/** Single guardian attestation on a skill. Alias for GuardianAttestation from nip-skl/types. */
+export type SkillAttestation = GuardianAttestation;
+
+/** Attestation verification tier. Alias for VerificationTier from nip-skl/types. */
+export type AttestationTier = VerificationTier;
 
 export interface UseSkillManagerReturn {
   /** True while any async skill operation is in progress. */
@@ -293,4 +307,5 @@ export function useSkillManager(): UseSkillManagerReturn {
     ]
   );
 }
+
 

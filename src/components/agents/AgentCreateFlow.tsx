@@ -12,7 +12,7 @@
  *   7. Review + create (publishes kind:39200 via CEPS)
  */
 
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   User,
@@ -644,12 +644,13 @@ export default function AgentCreateFlow({ onComplete, onCancel }: AgentCreateFlo
           name: form.name,
           about: form.about,
           picture: form.picture,
-          autonomy: form.autonomy,
-          status: 'idle',
+          autonomyLevel: form.autonomy,
           capabilities: form.capabilities,
-          skills: form.selectedSkills,
-          spendPolicy: form.spendPolicy,
-          relays: form.relays,
+          enabledSkills: form.selectedSkills,
+          walletPolicy: form.spendPolicy,
+          coordinationRelays: form.relays,
+          // governorPubkey is resolved by the hook from the active vault session
+          governorPubkey: '',
         });
         onComplete(agentId);
       } catch (err) {
@@ -678,7 +679,7 @@ export default function AgentCreateFlow({ onComplete, onCancel }: AgentCreateFlo
 
       {/* Step label */}
       <p className="text-xs text-[#555555] uppercase tracking-widest">
-        Step {step} of {STEPS.length} — {(STEPS[step - 1] ?? STEPS[0]).label}
+        Step {step} of {STEPS.length} — {STEPS[step - 1]?.label ?? STEPS[0]?.label ?? ''}
       </p>
 
       {/* Step content */}
@@ -742,3 +743,4 @@ export default function AgentCreateFlow({ onComplete, onCancel }: AgentCreateFlo
     </div>
   );
 }
+

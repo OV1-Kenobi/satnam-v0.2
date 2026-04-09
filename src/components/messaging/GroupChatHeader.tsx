@@ -10,7 +10,6 @@
  *   - Protocol indicator badge (NIP-17 / MLS)
  */
 
-import React from 'react';
 import clsx from 'clsx';
 import { Settings, ChevronLeft, Users } from 'lucide-react';
 import type { MessageThread } from '../../hooks/useMessaging.js';
@@ -152,3 +151,4 @@ export default function GroupChatHeader({
     </header>
   );
 }
+

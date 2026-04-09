@@ -9,7 +9,7 @@
  * - Each note: content, category badge, timestamp, delete action
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import clsx from 'clsx';
 import {
   Send,
@@ -399,3 +399,4 @@ export default function NoteToSelfPanel({
     </section>
   );
 }
+

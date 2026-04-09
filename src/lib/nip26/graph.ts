@@ -22,7 +22,7 @@ import { sha256 } from '@noble/hashes/sha256';
 
 import type { DelegationEvent, DelegationChain } from './types.js';
 import { RoleType } from './types.js';
-import { verifyDelegation, verifyDelegationChainAt, isDelegationCurrentlyValid } from './verify.js';
+import { verifyDelegationChainAt, isDelegationCurrentlyValid } from './verify.js';
 import type { VaultOps } from '../vault/types.js';
 
 // ---------------------------------------------------------------------------
@@ -359,8 +359,7 @@ export class DelegationGraph {
       const ws = new WebSocket(relayUrl);
       const subId = `nip26-sync-${Date.now()}`;
       let resolved = false;
-      const eose = new Set<string>();
-
+    
       const timeout = setTimeout(() => {
         if (!resolved) {
           resolved = true;
@@ -615,3 +614,4 @@ export class DelegationGraph {
     return Array.from(pubkeys);
   }
 }
+

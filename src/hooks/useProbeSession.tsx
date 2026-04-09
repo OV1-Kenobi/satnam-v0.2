@@ -135,7 +135,7 @@ export interface ProbeSessionState {
  * @param client - ProbeSessionClient instance (memoized — do not recreate on every render)
  * @returns ProbeSessionState
  */
-export function useProbeSession(client: ProbeSessionClient): ProbeSessionState {
+export function useProbeSession(client?: ProbeSessionClient | null): ProbeSessionState {
   const [sessions, setSessions] = useState<TrajectorySession[]>([]);
   const [trajectory, setTrajectory] = useState<TrajectoryEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -146,7 +146,7 @@ export function useProbeSession(client: ProbeSessionClient): ProbeSessionState {
 
   // Stable client ref
   const clientRef = useRef(client);
-  clientRef.current = client;
+  clientRef.current = client ?? null;
 
   // ── Derived state ──────────────────────────────────────────────────────────
 
@@ -269,3 +269,4 @@ export function useProbeSession(client: ProbeSessionClient): ProbeSessionState {
     refresh,
   };
 }
+

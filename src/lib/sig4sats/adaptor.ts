@@ -17,7 +17,7 @@
  * @see https://github.com/t-bast/lightning-docs/blob/master/adaptor-sigs.md
  */
 
-import { secp256k1, schnorr } from '@noble/curves/secp256k1';
+import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes, utf8ToBytes, randomBytes } from '@noble/hashes/utils';
 import type { AdaptorSignature, ExtractedSecret } from './types.js';
@@ -333,3 +333,4 @@ export function hashMessage(message: string): string {
   input.set(msgBytes, tagHash.length * 2);
   return bytesToHex(sha256(input));
 }
+

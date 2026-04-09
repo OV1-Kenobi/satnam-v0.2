@@ -27,7 +27,7 @@
  * @see phase4-spec-sections-8-9.md §8.3
  */
 
-import { finalizeEvent, getPublicKey, nip19 } from 'nostr-tools';
+import { finalizeEvent, nip19 } from 'nostr-tools';
 import { hexToBytes } from '@noble/hashes/utils';
 import type { Event as NostrEvent } from 'nostr-tools';
 import type { Vault } from '../vault/vault.js';
@@ -369,3 +369,4 @@ export class PylonAuth {
     return () => this.listeners.delete(listener);
   }
 }
+

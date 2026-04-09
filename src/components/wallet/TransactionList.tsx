@@ -8,7 +8,7 @@
  * - Relative timestamps and formatted amounts
  */
 
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -294,3 +294,4 @@ export default function TransactionList({
     </div>
   );
 }
+

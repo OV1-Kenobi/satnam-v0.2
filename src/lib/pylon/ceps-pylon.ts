@@ -169,9 +169,8 @@ export class PylonCepsClient {
     filter: NostrFilter,
     callback: (event: NostrEvent) => void
   ): () => void {
-    const relays = [PYLON_RELAY_URL, ...this.fallbackRelays];
-
-    const sub = this.pool.subscribeMany(relays, filter as any, {
+  
+    const sub = this.pool.subscribeMany(filter as any, {
       onevent(event: NostrEvent) {
         callback(event);
       },
@@ -196,9 +195,8 @@ export class PylonCepsClient {
     filters: NostrFilter[],
     relayOverride?: string[]
   ): Promise<NostrEvent[]> {
-    const relays = relayOverride ?? [PYLON_RELAY_URL, ...this.fallbackRelays];
-    // querySync accepts maxWait (in ms) as the timeout parameter
-    return this.pool.querySync(relays, (filters[0] ?? {}) as any, {
+      // querySync accepts maxWait (in ms) as the timeout parameter
+    return this.pool.querySync((filters[0] ?? {}) as any, {
       maxWait: LIST_EOSE_TIMEOUT_MS,
     }) as Promise<NostrEvent[]>;
   }
@@ -269,13 +267,12 @@ export class PylonCepsClient {
    * @internal
    */
   private async _publishToRelays(
-    event: NostrEvent,
-    relays: string[]
+    event: NostrEvent: string[]
   ): Promise<void> {
     if (relays.length === 0) return;
 
     // pool.publish() returns an array of promises (one per relay)
-    const promises = this.pool.publish(relays, event);
+    const promises = this.pool.publish(event);
     const results = await Promise.allSettled(promises);
 
     const errors = results
@@ -369,3 +366,4 @@ export class PylonCepsClient {
     );
   }
 }
+

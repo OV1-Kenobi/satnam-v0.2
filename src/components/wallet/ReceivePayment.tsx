@@ -9,7 +9,7 @@
  * 4. Poll for payment confirmation
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -369,3 +369,4 @@ export default function ReceivePayment({
     </div>
   );
 }
+

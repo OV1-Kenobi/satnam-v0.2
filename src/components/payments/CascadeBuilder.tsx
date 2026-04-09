@@ -12,7 +12,7 @@
  * Save as template for recurring use.
  */
 
-import React, { useState, useCallback, useId } from 'react';
+import { useState, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   Plus,
@@ -22,12 +22,9 @@ import {
   AlertCircle,
   Save,
   Play,
-  ChevronDown,
   Zap,
   Coins,
   Server,
-  Edit2,
-  Copy,
   X,
 } from 'lucide-react';
 
@@ -643,3 +640,4 @@ export default function CascadeBuilder({ onExecute, className }: CascadeBuilderP
     </div>
   );
 }
+

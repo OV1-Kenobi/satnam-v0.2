@@ -10,7 +10,7 @@
  * - Quick actions: Message, Zap, Call, View Profile
  */
 
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import clsx from 'clsx';
 import {
   MessageSquare,
@@ -53,7 +53,6 @@ function TrustGauge({ score }: { score: number }) {
   // Arc from -180° to 0° (left to right, semicircle at bottom)
   // Parametric: start = 180°, end based on score
   const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const startAngle = 180;
   const endAngle = 180 - (score / 100) * 180;
 
   function arcPath(start: number, end: number, r: number) {
@@ -328,3 +327,4 @@ export default function ContactTrustCard({
     </article>
   );
 }
+

@@ -8,7 +8,6 @@
  * - Reputation score
  */
 
-import React from 'react';
 import clsx from 'clsx';
 import {
   ShieldCheck,
@@ -306,3 +305,4 @@ export default function IdentityTrustPanel({
     </section>
   );
 }
+

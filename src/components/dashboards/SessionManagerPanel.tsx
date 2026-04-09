@@ -11,7 +11,7 @@
  * Data from Nostr kind:39230/39231 events via hooks.
  */
 
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   Layers,
@@ -23,19 +23,12 @@ import {
   MessageSquare,
   Wrench,
   Activity,
-  Filter,
   ChevronDown,
   ChevronUp,
   Radio,
   Wifi,
   Globe,
   Terminal,
-  AlertTriangle,
-  CheckCircle2,
-  XCircle,
-  RefreshCw,
-  SwitchCamera,
-  Info,
 } from 'lucide-react';
 
 import type {
@@ -153,7 +146,7 @@ function HorizontalTimeline({
       <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-slate-800" aria-hidden="true" />
 
       {/* Event dots */}
-      {events.map((event, idx) => {
+      {events.map((event) => {
         const eventMs = new Date(event.created_at).getTime();
         const leftPct = Math.min(98, Math.max(1, ((eventMs - startMs) / spanMs) * 100));
         const dotCls  = EVENT_COLORS[event.event_type] ?? 'bg-slate-500';
@@ -192,7 +185,7 @@ function SessionCard({
 }: {
   session: ActiveSessionSummary;
   events: SessionEventTimeline[];
-  onAction: (sessionId: string, action: 'pause' | 'resume' | 'terminate') => Promise<void>;
+  onAction: (sessionId: string: 'pause' | 'resume' | 'terminate') => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
@@ -203,7 +196,7 @@ function SessionCard({
   const handleAction = useCallback(async (action: 'pause' | 'resume' | 'terminate') => {
     setActing(action);
     try {
-      await onAction(session.session_id, action);
+      await onAction(session.session_id);
     } finally {
       setActing(null);
     }
@@ -371,10 +364,9 @@ export interface SessionManagerPanelProps {
 }
 
 export default function SessionManagerPanel({
-  agentId,
   className,
 }: SessionManagerPanelProps) {
-  const { sessions, trajectory, subscribeSession, respondToToolCall } = useProbeSession();
+  const { sessions, trajectory, subscribeSession } = useProbeSession();
   const [filterType, setFilterType] = useState<SessionEventType | 'ALL'>('ALL');
   const [showLog, setShowLog] = useState(false);
 
@@ -406,8 +398,7 @@ export default function SessionManagerPanel({
     : allEvents.filter(e => e.event_type === filterType);
 
   const handleAction = useCallback(async (
-    sessionId: string,
-    action: 'pause' | 'resume' | 'terminate',
+    sessionId: string: 'pause' | 'resume' | 'terminate',
   ) => {
     // In production, dispatch NIP-17 encrypted DM to agent with action
     // For now: subscribe to get latest state
@@ -561,3 +552,4 @@ export default function SessionManagerPanel({
     </div>
   );
 }
+

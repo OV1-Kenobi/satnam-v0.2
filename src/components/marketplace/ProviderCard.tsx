@@ -11,7 +11,6 @@
  * - "Submit Job" button
  */
 
-import React from 'react';
 import clsx from 'clsx';
 import { Server, Star, Shield, Zap, ArrowRight } from 'lucide-react';
 import type { DVMProvider } from '../../hooks/useMarketplace.js';
@@ -212,3 +211,4 @@ export default function ProviderCard({
     </article>
   );
 }
+

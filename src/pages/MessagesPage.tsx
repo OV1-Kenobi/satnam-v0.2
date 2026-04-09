@@ -13,7 +13,7 @@
  * Empty state when no thread is selected (desktop only).
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import clsx from 'clsx';
 import { MessageSquare, Users, Plus } from 'lucide-react';
@@ -182,3 +182,4 @@ export default function MessagesPage() {
     </NotificationsProvider>
   );
 }
+

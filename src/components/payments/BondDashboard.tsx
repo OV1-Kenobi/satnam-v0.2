@@ -8,23 +8,18 @@
  * 3. Allowance bonds — funding status, tokens remaining, spending rate
  */
 
-import React, { useState, useCallback } from 'react';
+import { useState } from 'react';
 import clsx from 'clsx';
 import {
   Shield,
   Key,
   Gift,
   Plus,
-  CheckCircle2,
   Clock,
-  XCircle,
   Users,
-  Coins,
   ChevronDown,
   ChevronUp,
   AlertCircle,
-  Zap,
-  BarChart3,
   X,
 } from 'lucide-react';
 import { useSig4Sats } from '../../hooks/useSig4Sats.js';
@@ -567,3 +562,4 @@ export default function BondDashboard({ className }: BondDashboardProps) {
     </div>
   );
 }
+

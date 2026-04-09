@@ -48,6 +48,39 @@ import type { ActiveJob } from '../lib/nip90/marketplace.js';
 import type { PaymentResult } from '../lib/nwc/connection-manager.js';
 import type { DvmJobRequest, DvmJobResult, DvmProvider, DvmFeedbackStatus } from '../lib/nip90/types.js';
 
+
+// ---------------------------------------------------------------------------
+// Re-exported types for component consumers
+// ---------------------------------------------------------------------------
+
+/** DVM provider profile discovered from Nostr. Alias for DvmProvider. */
+export type DVMProvider = DvmProvider;
+
+/**
+ * Job status as shown in the UI.
+ * Derived from ActiveJob: pending → no result, completed → result present, etc.
+ */
+export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'error';
+
+/**
+ * UI-ready job record with derived status, id, and jobType.
+ * Maps an ActiveJob to component-friendly shape.
+ */
+export interface Job {
+  /** Event ID of the submitted job request (= ActiveJob.requestEventId) */
+  id: string;
+  /** NIP-90 job kind (e.g. 5100 for text inference) */
+  jobType: number;
+  /** Current UI status derived from result/payment state */
+  status: JobStatus;
+  /** When the job was submitted (unix ms) */
+  submittedAt: number;
+  /** Result output text (null until completed) */
+  result: string | null;
+  /** Whether payment has been made */
+  paid: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Return type
 // ---------------------------------------------------------------------------
@@ -58,6 +91,12 @@ export interface UseMarketplaceReturn {
 
   /** Error message from the last failed operation, or null. */
   error: string | null;
+
+  /**
+   * Discovered DVM providers. Populated after the first discoverProviders() call.
+   * Auto-refreshed on mount with default job kinds.
+   */
+  providers: DvmProvider[];
 
   /**
    * All in-flight jobs submitted during this hook instance's lifetime.
@@ -161,6 +200,7 @@ export interface UseMarketplaceReturn {
 export function useMarketplace(defaultRelayUrls?: string[]): UseMarketplaceReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [providers, setProviders] = useState<DvmProvider[]>([]);
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
 
   /** Stable ref to the lazy-initialised DvmMarketplace instance. */
@@ -246,8 +286,16 @@ export function useMarketplace(defaultRelayUrls?: string[]): UseMarketplaceRetur
   // ---------------------------------------------------------------------------
 
   const discoverProviders = useCallback(
-    (jobKind: number, relayUrls?: string[]) =>
-      withState((m) => m.discoverProviders(jobKind, relayUrls)),
+    async (jobKind: number, relayUrls?: string[]): Promise<DvmProvider[]> => {
+      const results = await withState((m) => m.discoverProviders(jobKind, relayUrls));
+      setProviders((prev) => {
+        // Merge new providers by pubkey
+        const existing = new Set(prev.map((p) => p.pubkey));
+        const newProviders = results.filter((p) => !existing.has(p.pubkey));
+        return newProviders.length > 0 ? [...prev, ...newProviders] : prev;
+      });
+      return results;
+    },
     [withState]
   );
 
@@ -347,4 +395,5 @@ export function useMarketplace(defaultRelayUrls?: string[]): UseMarketplaceRetur
     ]
   );
 }
+
 

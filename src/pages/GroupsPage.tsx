@@ -8,7 +8,7 @@
  * - Assign/revoke roles via NIP-26 delegation
  */
 
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Helmet } from 'react-helmet-async';
 
 import GroupCreateFlow from '../components/groups/GroupCreateFlow.js';
@@ -46,7 +46,6 @@ const MOCK_GROUPS: Group[] = [];
 // ---------------------------------------------------------------------------
 
 function GroupCard({ group, onSelect }: { group: Group; onSelect: () => void }) {
-  const guardian = group.members.find(m => m.role === RoleType.Guardian);
 
   return (
     <button
@@ -317,3 +316,4 @@ export default function GroupsPage() {
     </>
   );
 }
+

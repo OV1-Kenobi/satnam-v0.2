@@ -64,6 +64,8 @@ export interface UseMessagingReturn {
   messages: Message[];
   /** Send a message to the active thread */
   sendMessage: (content: string, ephemeralConfig?: EphemeralConfig) => Promise<void>;
+  /** True while sendMessage is in flight */
+  isSending: boolean;
   /** Create a new group and switch to it */
   createGroup: (
     name: string,
@@ -74,12 +76,22 @@ export interface UseMessagingReturn {
   addMember: (groupId: string, pubkeyHex: string) => Promise<void>;
   /** Remove a member from a group (admin only) */
   removeMember: (groupId: string, pubkeyHex: string) => Promise<void>;
+  /** Leave a group (removes self from member list) */
+  leaveGroup: (groupId: string) => Promise<void>;
+  /** Update a group's config (name, description, relays, etc.) */
+  updateGroupConfig: (groupId: string, config: Partial<GroupConfig>) => Promise<void>;
+  /** Set per-thread notification preference */
+  setNotificationPreference: (threadId: string, pref: string) => void;
   /** Mark a message as read in the active thread */
   markRead: (messageId: string) => Promise<void>;
   /** Set ephemeral config that will be applied to the next outbound message */
   setEphemeral: (config: EphemeralConfig | undefined) => void;
   /** Currently selected thread */
   activeThread: MessageThread | null;
+  /** Currently selected thread ID (alias for activeThread?.id ?? null) */
+  selectedThreadId: string | null;
+  /** Select a thread by id (alias for setActiveThread) */
+  selectThread: (threadId: string | null) => void;
   /** Select a thread by id */
   setActiveThread: (threadId: string | null) => void;
   /** Whether any async operation is in flight */
@@ -104,6 +116,7 @@ export function useMessaging({
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingEphemeral, setPendingEphemeral] = useState<
     EphemeralConfig | undefined
@@ -222,6 +235,7 @@ export function useMessaging({
       const dm = directManagerRef.current!;
       const effectiveEphemeral = ephemeralConfig ?? pendingEphemeral;
 
+      setIsSending(true);
       setIsLoading(true);
       setError(null);
 
@@ -256,6 +270,7 @@ export function useMessaging({
         setError(msg);
         throw err;
       } finally {
+        setIsSending(false);
         setIsLoading(false);
       }
     },
@@ -344,6 +359,67 @@ export function useMessaging({
   );
 
   // --------------------------------------------------------------------------
+  // leaveGroup
+  // --------------------------------------------------------------------------
+
+  const leaveGroup = useCallback(
+    async (groupId: string) => {
+      const gm = groupManagerRef.current!;
+      setIsLoading(true);
+      setError(null);
+      try {
+        await gm.leaveGroup(groupId);
+        await loadThreads();
+        // Clear active thread if we just left it
+        setActiveThreadId((prev) => (prev === groupId ? null : prev));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [loadThreads],
+  );
+
+  // --------------------------------------------------------------------------
+  // updateGroupConfig
+  // --------------------------------------------------------------------------
+
+  const updateGroupConfig = useCallback(
+    async (groupId: string, config: Partial<GroupConfig>) => {
+      const gm = groupManagerRef.current!;
+      setIsLoading(true);
+      setError(null);
+      try {
+        await gm.updateGroupConfig(groupId, config);
+        await loadThreads();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [loadThreads],
+  );
+
+  // --------------------------------------------------------------------------
+  // setNotificationPreference (in-memory; persisted by useNotifications)
+  // --------------------------------------------------------------------------
+
+  const notificationPrefsRef = useRef<Record<string, string>>({});
+
+  const setNotificationPreference = useCallback(
+    (threadId: string, pref: string) => {
+      notificationPrefsRef.current[threadId] = pref;
+    },
+    [],
+  );
+
+  // --------------------------------------------------------------------------
   // markRead
   // --------------------------------------------------------------------------
 
@@ -389,19 +465,41 @@ export function useMessaging({
 
   const activeThread = threads.find((t) => t.id === activeThreadId) ?? null;
 
+  const selectedThreadId = activeThread?.id ?? null;
+  const selectThread = setActiveThread;
+
   return {
     threads,
     messages,
     sendMessage,
+    isSending,
     createGroup,
     addMember,
     removeMember,
+    leaveGroup,
+    updateGroupConfig,
+    setNotificationPreference,
     markRead,
     setEphemeral,
     activeThread,
+    selectedThreadId,
+    selectThread,
     setActiveThread,
     isLoading,
     error,
     refresh,
   };
+}
+
+
+// ============================================================================
+// MessagingProvider — layout wrapper exported for MessagesPage
+// ============================================================================
+
+/**
+ * MessagingProvider wraps the messaging UI subtree.
+ * Inner components call useMessaging() directly with their own instance.
+ */
+export function MessagingProvider({ children }: { children: ReactNode }) {
+  return <>{children}</>;
 }

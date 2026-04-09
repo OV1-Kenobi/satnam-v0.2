@@ -4,17 +4,13 @@
  * CSS-only — no chart library. Shows connection, latency, balances, and swap availability.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   Zap,
   Coins,
   Server,
   ArrowLeftRight,
-  Circle,
-  CheckCircle2,
-  XCircle,
-  Clock,
   RefreshCw,
   ChevronDown,
   ChevronUp,
@@ -541,3 +537,4 @@ export default function RailHealthIndicator({
     </div>
   );
 }
+

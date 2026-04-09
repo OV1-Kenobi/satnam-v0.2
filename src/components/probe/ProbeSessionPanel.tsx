@@ -10,7 +10,7 @@
  * Data comes from useProbeSession hook (Nostr kind:39230/39231 subscriptions).
  */
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import clsx from 'clsx';
 import {
   Activity,
@@ -31,7 +31,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
-import type { AgentSession, AgentSessionEvent, SessionStatus, SessionEventType } from '../../lib/agent/session/types.js';
+import type { TrajectorySession, TrajectoryEvent, TrajectoryEventType } from '../../lib/probe/types.js';
 import { useProbeSession } from '../../hooks/useProbeSession.js';
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ import { useProbeSession } from '../../hooks/useProbeSession.js';
 
 interface TrajectoryStep {
   id: string;
-  type: SessionEventType;
+  type: TrajectoryEventType;
   label: string;
   timestamp: string;
   sats_cost: number;
@@ -93,7 +93,7 @@ function statusDot(status: SessionStatus): string {
   }
 }
 
-function eventTypeIcon(type: SessionEventType) {
+function eventTypeIcon(type: TrajectoryEventType) {
   switch (type) {
     case 'TOOL_CALL':        return Wrench;
     case 'MESSAGE':          return MessageSquare;
@@ -106,7 +106,7 @@ function eventTypeIcon(type: SessionEventType) {
   }
 }
 
-function eventTypeColor(type: SessionEventType): string {
+function eventTypeColor(type: TrajectoryEventType): string {
   switch (type) {
     case 'TOOL_CALL':        return 'text-blue-400';
     case 'MESSAGE':          return 'text-slate-300';
@@ -119,7 +119,7 @@ function eventTypeColor(type: SessionEventType): string {
   }
 }
 
-function eventDotColor(type: SessionEventType): string {
+function eventDotColor(type: TrajectoryEventType): string {
   switch (type) {
     case 'TOOL_CALL':        return 'bg-blue-400';
     case 'MESSAGE':          return 'bg-slate-400';
@@ -132,7 +132,7 @@ function eventDotColor(type: SessionEventType): string {
   }
 }
 
-const EVENT_TYPE_LABELS: Partial<Record<SessionEventType, string>> = {
+const EVENT_TYPE_LABELS: Partial<Record<TrajectoryEventType, string>> = {
   MESSAGE:           'Message',
   TOOL_CALL:         'Tool Call',
   CONTEXT_REFRESH:   'Context Refresh',
@@ -152,7 +152,7 @@ const EVENT_TYPE_LABELS: Partial<Record<SessionEventType, string>> = {
   CONFLICT_DETECTED: 'Conflict',
 };
 
-const ALL_EVENT_TYPES: SessionEventType[] = [
+const ALL_EVENT_TYPES: TrajectoryEventType[] = [
   'MESSAGE', 'TOOL_CALL', 'TASK_COMPLETION', 'TASK_FAILURE',
   'ERROR', 'WARNING', 'DELEGATION', 'CONTEXT_REFRESH',
 ];
@@ -166,7 +166,7 @@ function SessionListItem({
   selected,
   onSelect,
 }: {
-  session: AgentSession;
+  session: TrajectorySession;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -186,7 +186,7 @@ function SessionListItem({
         <div className="flex items-center gap-2">
           <span className={clsx('w-2 h-2 rounded-full flex-shrink-0', statusDot(session.status))} aria-hidden="true" />
           <span className="text-xs font-mono text-slate-400 truncate max-w-[140px]">
-            {session.session_id}
+            {session.sessionId}
           </span>
         </div>
         <span className={clsx('text-[10px] font-medium uppercase tracking-wider', statusColor(session.status))}>
@@ -197,21 +197,21 @@ function SessionListItem({
       <div className="flex items-center gap-3 text-[11px] text-slate-500">
         <span className="flex items-center gap-1">
           <Clock size={10} aria-hidden="true" />
-          {formatDuration(session.started_at)}
+          {formatDuration(new Date(session.startedAt * 1000).toISOString())}
         </span>
         <span className="flex items-center gap-1">
           <Wrench size={10} aria-hidden="true" />
-          {session.total_tool_calls} calls
+          {session.metadata['toolCalls'] ?? '—'} calls
         </span>
         <span className="flex items-center gap-1">
           <Zap size={10} aria-hidden="true" />
-          {session.sats_spent} sats
+          {session.metadata['satsCost'] ?? '—'} sats
         </span>
       </div>
 
       <div className="mt-1.5 flex items-center justify-between">
         <span className="text-[10px] text-slate-600 uppercase tracking-wider">
-          {session.session_type} · {session.primary_channel}
+          {session.metadata['type'] ?? 'probe'}
         </span>
         <ChevronRight size={12} className="text-slate-700 group-hover:text-slate-500 transition-colors" aria-hidden="true" />
       </div>
@@ -227,12 +227,12 @@ function TrajectoryTimeline({
   events,
   filteredTypes,
 }: {
-  events: AgentSessionEvent[];
-  filteredTypes: Set<SessionEventType>;
+  events: TrajectoryEvent[];
+  filteredTypes: Set<TrajectoryEventType>;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const visible = events.filter(e => filteredTypes.size === 0 || filteredTypes.has(e.event_type));
+  const visible = events.filter(e => filteredTypes.size === 0 || filteredTypes.has(e.eventType));
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -256,10 +256,10 @@ function TrajectoryTimeline({
       aria-live="polite"
     >
       {visible.map((event, idx) => {
-        const Icon = eventTypeIcon(event.event_type);
-        const color = eventTypeColor(event.event_type);
-        const dot = eventDotColor(event.event_type);
-        const label = EVENT_TYPE_LABELS[event.event_type] ?? event.event_type;
+        const Icon = eventTypeIcon(event.eventType);
+        const color = eventTypeColor(event.eventType);
+        const dot = eventDotColor(event.eventType);
+        const label = EVENT_TYPE_LABELS[event.eventType] ?? event.event_type;
         const isLast = idx === visible.length - 1;
 
         return (
@@ -278,9 +278,9 @@ function TrajectoryTimeline({
                 <div className="flex items-center gap-1.5">
                   <Icon size={12} className={color} aria-hidden="true" />
                   <span className={clsx('text-xs font-medium', color)}>{label}</span>
-                  {event.tool_name && (
+                  {event.eventType === 'tool_call' && 'toolName' in event.data && (event.data as {toolName?: string}).toolName && (
                     <span className="text-[10px] text-slate-500 font-mono">
-                      {event.tool_name}
+                      {(event.data as {toolName?: string}).toolName}
                     </span>
                   )}
                 </div>
@@ -290,14 +290,14 @@ function TrajectoryTimeline({
               </div>
 
               {/* Event details */}
-              {Object.keys(event.event_data).length > 0 && (
+              {event.data && Object.keys(event.data).length > 0 && (
                 <p className="text-[11px] text-slate-500 truncate">
-                  {JSON.stringify(event.event_data).slice(0, 80)}
+                  {JSON.stringify(event.data).slice(0, 80)}
                 </p>
               )}
 
               {/* Cost / tokens inline */}
-              {(event.sats_cost > 0 || event.input_tokens > 0) && (
+              {false /* sats_cost/tokens not in TrajectoryEvent */ && (
                 <div className="flex items-center gap-2 mt-1.5 text-[10px] text-slate-600">
                   {event.sats_cost > 0 && (
                     <span className="flex items-center gap-0.5">
@@ -330,13 +330,13 @@ function SessionDetail({
   session,
   events,
 }: {
-  session: AgentSession;
-  events: AgentSessionEvent[];
+  session: TrajectorySession;
+  events: TrajectoryEvent[];
 }) {
-  const [filteredTypes, setFilteredTypes] = useState<Set<SessionEventType>>(new Set());
+  const [filteredTypes, setFilteredTypes] = useState<Set<TrajectoryEventType>>(new Set());
   const [showFilter, setShowFilter] = useState(false);
 
-  const toggleType = useCallback((type: SessionEventType) => {
+  const toggleType = useCallback((type: TrajectoryEventType) => {
     setFilteredTypes(prev => {
       const next = new Set(prev);
       if (next.has(type)) next.delete(type);
@@ -357,21 +357,21 @@ function SessionDetail({
                 {session.status}
               </span>
             </div>
-            <p className="font-mono text-xs text-slate-400 break-all">{session.session_id}</p>
+            <p className="font-mono text-xs text-slate-400 break-all">{session.sessionId}</p>
           </div>
           <div className="text-right">
-            <p className="text-xs text-slate-500">{session.session_type}</p>
-            <p className="text-[10px] text-slate-600">{session.primary_channel}</p>
+            <p className="text-xs text-slate-500">{session.metadata['type'] ?? 'probe'}</p>
+            <p className="text-[10px] text-slate-600">{session.metadata['channel'] ?? 'nostr'}</p>
           </div>
         </div>
 
         {/* Stats row */}
         <div className="grid grid-cols-4 gap-2">
           {[
-            { label: 'Duration', value: formatDuration(session.started_at), Icon: Clock },
-            { label: 'Messages', value: session.total_messages, Icon: MessageSquare },
-            { label: 'Tool Calls', value: session.total_tool_calls, Icon: Wrench },
-            { label: 'Sats Spent', value: `${session.sats_spent}`, Icon: Zap },
+            { label: 'Duration', value: formatDuration(new Date(session.startedAt * 1000).toISOString()), Icon: Clock },
+            { label: 'Messages', value: session.metadata['messages'] ?? 0, Icon: MessageSquare },
+            { label: 'Tool Calls', value: session.metadata['toolCalls'] ?? 0, Icon: Wrench },
+            { label: 'Sats Spent', value: `${session.metadata['satsCost'] ?? 0}`, Icon: Zap },
           ].map(({ label, value, Icon }) => (
             <div key={label} className="text-center">
               <Icon size={12} className="mx-auto text-slate-600 mb-1" aria-hidden="true" />
@@ -459,8 +459,8 @@ export default function ProbeSessionPanel({ className }: ProbeSessionPanelProps)
   const { sessions, activeSession, trajectory, subscribeSession } = useProbeSession();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const selectedSession = sessions.find(s => s.session_id === selectedId) ?? null;
-  const sessionEvents: AgentSessionEvent[] = selectedId === activeSession?.session_id
+  const selectedSession = sessions.find(s => s.sessionId === selectedId) ?? null;
+  const sessionEvents: TrajectoryEvent[] = selectedId === activeSession?.sessionId
     ? trajectory
     : [];
 
@@ -508,10 +508,10 @@ export default function ProbeSessionPanel({ className }: ProbeSessionPanelProps)
           >
             {sessions.map(session => (
               <SessionListItem
-                key={session.session_id}
+                key={session.sessionId}
                 session={session}
-                selected={selectedId === session.session_id}
-                onSelect={() => handleSelect(session.session_id)}
+                selected={selectedId === session.sessionId}
+                onSelect={() => handleSelect(session.sessionId)}
               />
             ))}
           </div>
@@ -532,3 +532,4 @@ export default function ProbeSessionPanel({ className }: ProbeSessionPanelProps)
     </div>
   );
 }
+

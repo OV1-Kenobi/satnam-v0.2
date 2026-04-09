@@ -375,8 +375,7 @@ export class SkillManager {
       expiryTimestamp,
       inputSchema,
       outputSchema,
-      signerNsec,
-      relayUrls,
+          relayUrls,
     } = params;
 
     // Build the unsigned manifest
@@ -428,8 +427,7 @@ export class SkillManager {
    */
   async attestSkill(
     manifestEventId: string,
-    tier: VerificationTier,
-    signerNsec: string
+    tier: VerificationTier: string
   ): Promise<string> {
     void signerNsec; // Used via CEPS session initialised by caller
 
@@ -463,8 +461,7 @@ export class SkillManager {
       changeType,
       revokeOldVersion = false,
       newManifest,
-      signerNsec,
-      relayUrls,
+          relayUrls,
     } = params;
 
     void signerNsec; // Used via active CEPS session
@@ -480,8 +477,7 @@ export class SkillManager {
       expiryTimestamp: newManifest.expiryTimestamp,
       inputSchema: newManifest.inputSchema,
       outputSchema: newManifest.outputSchema,
-      signerNsec,
-      relayUrls,
+          relayUrls,
     });
 
     // 2. Publish version log
@@ -526,8 +522,7 @@ export class SkillManager {
    * @returns The published revocation event ID
    */
   async revokeSkill(
-    manifestEventId: string,
-    signerNsec: string,
+    manifestEventId: string: string,
     reason?: string
   ): Promise<string> {
     void signerNsec; // Used via active CEPS session
@@ -613,3 +608,4 @@ export class SkillManager {
     };
   }
 }
+

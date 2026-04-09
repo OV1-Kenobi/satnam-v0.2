@@ -10,10 +10,9 @@
  * Consumer components subscribe to tap events via the onTap callback.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   isWebNfcAvailable,
-  isIos,
   getNfcMethod,
   registerNfcUniversalLinkHandler,
   unregisterNfcUniversalLinkHandler,
@@ -245,3 +244,4 @@ export default function NfcTapHandler({
 
   return <>{children}</>;
 }
+

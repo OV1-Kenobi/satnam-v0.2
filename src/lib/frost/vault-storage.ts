@@ -26,7 +26,7 @@
 
 import { bytesToHex, hexToBytes, utf8ToBytes, bytesToUtf8, randomBytes } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
-import { secp256k1, schnorr } from '@noble/curves/secp256k1';
+import { secp256k1 } from '@noble/curves/secp256k1';
 
 import { getVault } from '../vault/vault.js';
 import { VaultError } from '../vault/types.js';
@@ -546,3 +546,4 @@ export function generateSessionId(): string {
 
 // Re-export helpers used by higher-level modules
 export { computeEventId };
+

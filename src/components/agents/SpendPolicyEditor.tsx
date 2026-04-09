@@ -11,7 +11,7 @@
  * - sweep_threshold + sweep_destination
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import clsx from 'clsx';
 import { Plus, X, Zap, Coins } from 'lucide-react';
 import type { SpendPolicy } from '../../hooks/useAgentProfile.js';
@@ -30,12 +30,12 @@ interface SpendPolicyEditorProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function msatsToSats(msats: number): number {
-  return Math.floor(msats / 1000);
+function msatsToSats(msats: bigint): number {
+  return Number(msats) / 1000;
 }
 
-function satsToMsats(sats: number): number {
-  return sats * 1000;
+function satsToMsats(sats: number): bigint {
+  return BigInt(Math.round(sats * 1000));
 }
 
 function formatSats(sats: number): string {
@@ -304,10 +304,10 @@ export default function SpendPolicyEditor({ value, onChange, disabled }: SpendPo
             id="sweep-threshold"
             type="number"
             min={0}
-            value={value.sweep_threshold !== undefined ? Math.floor(value.sweep_threshold / 1000) : ''}
+            value={value.sweep_threshold_msats !== undefined ? Number(value.sweep_threshold_msats) / 1000 : ''}
             onChange={e => {
               const sats = parseInt(e.target.value);
-              update({ sweep_threshold: isNaN(sats) ? undefined : satsToMsats(sats) });
+              update({ sweep_threshold_msats: isNaN(sats) ? undefined : BigInt(Math.round(sats * 1000)) });
             }}
             disabled={disabled}
             placeholder="e.g. 50000"
@@ -334,3 +334,4 @@ export default function SpendPolicyEditor({ value, onChange, disabled }: SpendPo
     </div>
   );
 }
+

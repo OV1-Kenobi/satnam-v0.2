@@ -23,9 +23,7 @@ import type {
 
 import {
   publishEventWithCeps,
-  publishOptimizedWithCeps,
   signEventWithCeps,
-  listEventsWithCeps,
   sendGiftwrappedMessageWithCeps,
   getDefaultRelays,
 } from '../ceps/ceps-client.js';
@@ -585,3 +583,4 @@ export class GroupChatManager {
     }
   }
 }
+

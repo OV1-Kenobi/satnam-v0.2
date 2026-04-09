@@ -18,7 +18,7 @@
  * Optimized for mobile — full-screen modal, step-by-step progression.
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type {
   PolCeremony,
   PolState,
@@ -728,3 +728,4 @@ export default function ProofOfLifeFlow({
     </div>
   );
 }
+

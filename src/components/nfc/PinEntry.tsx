@@ -8,7 +8,7 @@
  * Accessibility: Full keyboard navigation, screen reader announcements.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -389,3 +389,4 @@ export default function PinEntry({
     </div>
   );
 }
+

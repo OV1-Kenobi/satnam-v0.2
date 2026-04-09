@@ -10,7 +10,7 @@
  * Push device registration via kind:22456 (0xchat model).
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import {
   Bell,
@@ -18,9 +18,6 @@ import {
   CheckCheck,
   MessageSquare,
   Users,
-  Settings,
-  BellOff,
-  BellRing,
   Check,
 } from 'lucide-react';
 import { useNotifications } from '../../hooks/useNotifications.js';
@@ -269,3 +266,4 @@ export default function NotificationCenter({
     </div>
   );
 }
+

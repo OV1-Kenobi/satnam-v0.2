@@ -11,7 +11,7 @@
  * Spec §8.2 — No external syntax highlighting libraries.
  */
 
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   FileDiff,
@@ -154,7 +154,6 @@ function tokenizeLine(line: string, lang: string): Token[] {
 function DiffLineRow({
   line,
   language,
-  lineIdx,
 }: {
   line: DiffLine;
   language: string;
@@ -530,3 +529,4 @@ export default function SessionDiffRenderer({
     </div>
   );
 }
+

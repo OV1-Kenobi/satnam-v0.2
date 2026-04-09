@@ -56,21 +56,21 @@ function formatHeartbeat(timestamp?: number): string {
 
 function statusBadgeClass(status: AgentViewModel['status']): string {
   switch (status) {
-    case 'active': return 'bg-green-600 text-white';
+    case 'working': return 'bg-green-600 text-white';
+    case 'idle': return 'bg-slate-600 text-slate-200';
     case 'paused': return 'bg-yellow-600 text-white';
     case 'error': return 'bg-red-600 text-white';
     case 'terminated': return 'bg-slate-800 text-slate-400';
-    default: return 'bg-slate-600 text-slate-200';
   }
 }
 
 function statusDotClass(status: AgentViewModel['status']): string {
   switch (status) {
-    case 'active': return 'bg-green-500';
+    case 'working': return 'bg-green-500';
+    case 'idle': return 'bg-slate-500';
     case 'paused': return 'bg-yellow-500';
     case 'error': return 'bg-red-500';
     case 'terminated': return 'bg-slate-600';
-    default: return 'bg-slate-500';
   }
 }
 
@@ -263,3 +263,4 @@ export default function AgentCard({
     </article>
   );
 }
+

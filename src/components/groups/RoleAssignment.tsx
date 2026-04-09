@@ -8,7 +8,7 @@
  * 3. Sign and publish the NIP-26 delegation event
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { RoleType } from '../../lib/nip26/types.js';
 import { constructRoleDelegation } from '../../lib/nip26/construct.js';
 import type { DelegationEvent } from '../../lib/nip26/types.js';
@@ -286,3 +286,4 @@ export default function RoleAssignment({
     </div>
   );
 }
+

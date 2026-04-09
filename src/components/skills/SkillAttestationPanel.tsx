@@ -8,7 +8,7 @@
  * - Revocation button
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import clsx from 'clsx';
 import { Shield, X, CheckCircle, AlertTriangle, Plus, ChevronDown } from 'lucide-react';
 import { useSkillManager } from '../../hooks/useSkillManager.js';
@@ -221,7 +221,7 @@ export default function SkillAttestationPanel({
     setAttestError(null);
     setAttestSuccess(false);
     try {
-      await attestSkill(skill.id, selectedTier);
+      await attestSkill(skill.manifestEventId, selectedTier, '' /* signerNsec provided by vault in hook */);
       setAttestSuccess(true);
       setTimeout(() => setAttestSuccess(false), 3000);
     } catch (err) {
@@ -232,7 +232,7 @@ export default function SkillAttestationPanel({
   const handleRevoke = async (attesterPubkey: string) => {
     setRevokeError(null);
     try {
-      await revokeSkill(skill.id, attesterPubkey);
+      await revokeSkill(skill.manifestEventId, '' /* signerNsec provided by vault */, attesterPubkey);
     } catch (err) {
       setRevokeError(err instanceof Error ? err.message : 'Revocation failed');
     }
@@ -334,3 +334,4 @@ export default function SkillAttestationPanel({
     </div>
   );
 }
+

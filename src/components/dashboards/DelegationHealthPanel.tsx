@@ -10,12 +10,12 @@
  * Data from useDelegation hook (Nostr NIP-AC delegation events).
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import clsx from 'clsx';
 import {
   Shield,
   ShieldCheck,
-  ShieldX,
+  ShieldOff,
   ShieldAlert,
   ChevronRight,
   ChevronDown,
@@ -102,7 +102,7 @@ function statusConfig(status: DelegationStatus) {
       };
     case 'revoked':
       return {
-        Icon: ShieldX,
+        Icon: ShieldOff,
         iconCls: 'text-red-400',
         dotCls: 'bg-red-400',
         label: 'Revoked',
@@ -440,3 +440,4 @@ export default function DelegationHealthPanel({ className }: DelegationHealthPan
     </div>
   );
 }
+

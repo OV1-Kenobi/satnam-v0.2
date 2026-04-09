@@ -47,6 +47,10 @@ import type {
   IntentParams,
   CreditLifecycleCallback,
 } from '../lib/nip-ac/client.js';
+import type { CreditLifecycleState } from '../lib/nip-ac/types.js';
+
+/** CreditState is an alias for CreditLifecycleState — exported for component consumers. */
+export type CreditState = CreditLifecycleState;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,6 +101,8 @@ export interface UseCreditLifecycleResult {
   settleEnvelope: (envelopeId: string, score: number, totalSpentMsats: bigint) => Promise<string>;
   /** Issue a default notice for an expired/abandoned envelope */
   issueDefault: (envelopeId: string, reason: string) => Promise<string>;
+  /** Alias for activeEnvelopes — for callers that prefer shorter destructuring */
+  envelopes: CreditEnvelope[];
   /** Manually refresh active envelopes from relay */
   refreshEnvelopes: () => Promise<void>;
   /** Clear error state */
@@ -403,6 +409,8 @@ export function useCreditLifecycle(
   }, [status]);
 
   return {
+    /** Alias for activeEnvelopes — convenience for destructuring in callers */
+    envelopes: activeEnvelopes,
     activeEnvelopes,
     pendingOffers,
     lifecycleEvents,
@@ -425,3 +433,4 @@ export function useCreditLifecycle(
     clearError,
   };
 }
+

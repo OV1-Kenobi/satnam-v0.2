@@ -11,7 +11,7 @@
  * - Credit envelope panel
  */
 
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Helmet } from 'react-helmet-async';
 import clsx from 'clsx';
 import {
@@ -19,7 +19,6 @@ import {
   Briefcase,
   CreditCard,
   Search,
-  SlidersHorizontal,
   X,
   RefreshCw,
 } from 'lucide-react';
@@ -363,3 +362,4 @@ export default function MarketplacePage() {
     </>
   );
 }
+

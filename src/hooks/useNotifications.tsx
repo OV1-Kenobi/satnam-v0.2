@@ -19,6 +19,7 @@ import {
   useEffect,
   useCallback,
   useRef,
+  type ReactNode,
 } from 'react';
 
 import type {
@@ -314,4 +315,17 @@ export function useNotifications({
     unreadByThread,
     refresh,
   };
+}
+
+
+// ============================================================================
+// NotificationsProvider — layout wrapper exported for MessagesPage
+// ============================================================================
+
+/**
+ * NotificationsProvider wraps the notifications-aware subtree.
+ * Inner components call useNotifications() directly with their own instance.
+ */
+export function NotificationsProvider({ children }: { children: ReactNode }) {
+  return <>{children}</>;
 }

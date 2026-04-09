@@ -8,7 +8,6 @@
  * - Requires vault unlock (PIN gate for outgoing comms)
  */
 
-import React from 'react';
 import clsx from 'clsx';
 import { Phone, Video, ShieldAlert } from 'lucide-react';
 import type { CallType } from '../../lib/calls/types.js';
@@ -122,3 +121,4 @@ export default function CallInitiator({
     </div>
   );
 }
+

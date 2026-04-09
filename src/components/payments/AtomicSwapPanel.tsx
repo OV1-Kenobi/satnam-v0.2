@@ -9,7 +9,7 @@
  * - Swap history table
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   ArrowLeftRight,
@@ -543,3 +543,4 @@ export default function AtomicSwapPanel({ className }: AtomicSwapPanelProps) {
     </div>
   );
 }
+

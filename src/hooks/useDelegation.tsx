@@ -53,8 +53,17 @@ interface UseDelegationReturn {
   graph: DelegationGraph;
   /** Role of the current user (null if not in graph) */
   currentRole: RoleType | null;
+  /**
+   * Ordered delegation chain (Guardian → Agent members).
+   * Null when the graph has no members yet.
+   */
+  delegationChain: Array<{ pubkey: string; role: RoleType }> | null;
   /** All members reachable from the Guardian */
   groupMembers: Array<{ pubkey: string; role: RoleType }>;
+  /** Unix timestamp (ms) of the last successful sync; null if never synced */
+  lastUpdated: number | null;
+  /** Trigger manual refresh — reloads graph from vault */
+  refresh: () => void;
   /** Add a delegation event to the graph */
   addDelegation: (event: DelegationEvent) => void;
   /** Revoke a delegation */
@@ -134,6 +143,7 @@ export function useDelegation(options: UseDelegationOptions = {}): UseDelegation
   const [version, setVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
   // Register guardian on config change
   useEffect(() => {
@@ -198,6 +208,7 @@ export function useDelegation(options: UseDelegationOptions = {}): UseDelegation
       if (syncPubkeys.length > 0) {
         await graph.syncFromRelay(relayUrl, syncPubkeys);
         setVersion(v => v + 1);
+        setLastUpdated(Date.now());
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
@@ -239,10 +250,19 @@ export function useDelegation(options: UseDelegationOptions = {}): UseDelegation
     }
   }, [vault, guardianPubkey]);
 
+  const delegationChain = groupMembers.length > 0 ? groupMembers : null;
+
+  const refresh = useCallback(() => {
+    void load();
+  }, [load]);
+
   return {
     graph,
     currentRole,
+    delegationChain,
     groupMembers,
+    lastUpdated,
+    refresh,
     addDelegation,
     revokeDelegation,
     getRole,
@@ -258,3 +278,4 @@ export function useDelegation(options: UseDelegationOptions = {}): UseDelegation
 }
 
 export default useDelegation;
+

@@ -15,7 +15,6 @@
  * - Send payment
  */
 
-import React from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Link, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
@@ -23,16 +22,12 @@ import {
   Bot,
   Store,
   Users,
-  Wallet,
   Plus,
   Zap,
   Send,
-  ArrowRight,
   Activity,
   Shield,
   ChevronRight,
-  PenLine,
-  Phone,
   Coins,
   Server,
   ArrowLeftRight,
@@ -71,8 +66,7 @@ function StatCard({
   icon: Icon,
   label,
   value,
-  sub,
-  accent = false,
+  sub = false,
   href,
   color = '#f7931a',
 }: {
@@ -132,27 +126,24 @@ function MultiRailBalanceSummary({ totalNwcMsats }: { totalNwcMsats: bigint }) {
     {
       label: 'Lightning',
       color: '#f7931a',
-      icon: Zap,
-      balanceSats: nwcSats,
+      icon: Zap: nwcSats,
       subLabel: 'NWC wallet',
     },
     {
       label: 'Cashu',
       color: '#a855f7',
-      icon: Coins,
-      balanceSats: 5030,
+      icon: Coins: 5030,
       subLabel: '2 mints',
     },
     {
       label: 'LNbits',
       color: '#22c55e',
-      icon: Server,
-      balanceSats: 12500,
+      icon: Server: 12500,
       subLabel: 'LNbits wallet',
     },
   ];
 
-  const totalSats = rails.reduce((s, r) => s + r.balanceSats, 0);
+  const totalSats = rails.reduce((s, r) => s + r.0);
 
   return (
     <Link
@@ -297,7 +288,7 @@ function ActivityItem({
 // ---------------------------------------------------------------------------
 
 function CircleOfTrustSummaryCard() {
-  const { contacts, stats } = useCircleOfTrust();
+  const { stats } = useCircleOfTrust();
 
   return (
     <div>
@@ -358,7 +349,6 @@ export default function HomePage() {
   const totalAgents = agents.length;
   const pendingJobs = activeJobs.filter((j) => j.status === 'pending' || j.status === 'processing').length;
   const activeEnvelopes = envelopes.filter((e) => !['Settlement', 'Default'].includes(e.state)).length;
-  const balanceSats = balance ? Math.floor(Number(balance) / 1000) : 0;
   const nwcMsats = balance ?? 84_000_000n; // fallback for display
 
   // Recent combined activity (mock until real event stream)
@@ -517,3 +507,4 @@ export default function HomePage() {
     </>
   );
 }
+

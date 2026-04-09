@@ -10,11 +10,10 @@
  * Spec §8.2
  */
 
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   Terminal,
-  AlertTriangle,
   CheckCircle2,
   XCircle,
   FileText,
@@ -105,7 +104,6 @@ function OutputBlock({
 
   const lines = content.split('\n');
   const lineCount = lines.length;
-  const hasMore = lineCount > 30 && !expanded;
   const visibleContent = !expanded ? lines.slice(0, 30).join('\n') + '\n…' : content;
 
   const handleCopy = useCallback(async () => {
@@ -537,3 +535,4 @@ export default function ExecutionResultPanel({
     </div>
   );
 }
+

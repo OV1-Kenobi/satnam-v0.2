@@ -11,14 +11,13 @@
  * Spec §8.2
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   Wrench,
   Check,
   X,
   Edit3,
-  RotateCcw,
   Shield,
   ShieldCheck,
   Clock,
@@ -453,7 +452,6 @@ export interface ToolCallApprovalProps {
 }
 
 export default function ToolCallApproval({
-  sessionId,
   pendingRequests: externalRequests,
   showAutoApprove = true,
   className,
@@ -605,3 +603,4 @@ export default function ToolCallApproval({
     </div>
   );
 }
+

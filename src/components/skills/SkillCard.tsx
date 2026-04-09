@@ -10,7 +10,6 @@
  * - Attest button (for Guardians)
  */
 
-import React from 'react';
 import clsx from 'clsx';
 import { Shield, BookOpen, Calendar, ExternalLink } from 'lucide-react';
 import type { Skill, AttestationTier } from '../../hooks/useSkillManager.js';
@@ -200,3 +199,4 @@ export default function SkillCard({
     </article>
   );
 }
+

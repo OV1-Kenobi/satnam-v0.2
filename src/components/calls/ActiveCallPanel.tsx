@@ -9,17 +9,14 @@
  * - Connection quality indicator (CSS dot)
  */
 
-import React, { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import clsx from 'clsx';
 import {
   Mic,
   MicOff,
   Video,
   VideoOff,
-  PhoneOff,
-  Wifi,
-  WifiOff,
-  User,
+  PhoneOffOff,
 } from 'lucide-react';
 import type { CallSession } from '../../lib/calls/types.js';
 
@@ -275,3 +272,4 @@ export default function ActiveCallPanel({
     </div>
   );
 }
+

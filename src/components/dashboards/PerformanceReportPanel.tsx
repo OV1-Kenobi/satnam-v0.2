@@ -11,21 +11,16 @@
  * All amounts in sats — no fiat (Axiom 1).
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import clsx from 'clsx';
 import {
   BarChart2,
-  TrendingUp,
-  TrendingDown,
-  Minus,
   CheckCircle2,
-  XCircle,
   Clock,
   Zap,
   Cpu,
   Star,
   Brain,
-  RefreshCw,
   ArrowUp,
   ArrowDown,
 } from 'lucide-react';
@@ -494,3 +489,4 @@ export default function PerformanceReportPanel({
     </div>
   );
 }
+

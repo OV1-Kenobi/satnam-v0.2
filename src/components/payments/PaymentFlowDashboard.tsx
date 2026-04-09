@@ -9,7 +9,7 @@
  * - Daily/weekly/monthly volume bar charts (CSS-only)
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import clsx from 'clsx';
 import {
   Zap,
@@ -21,7 +21,6 @@ import {
   TrendingUp,
   TrendingDown,
   Circle,
-  BarChart3,
   Activity,
   RefreshCw,
 } from 'lucide-react';
@@ -467,3 +466,4 @@ export default function PaymentFlowDashboard({ className }: PaymentFlowDashboard
     </div>
   );
 }
+

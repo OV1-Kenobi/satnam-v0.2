@@ -8,9 +8,9 @@
  *   - Active timer display for messages that are ephemeral (countdown + flame)
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
-import { Flame, ChevronDown, Check, X, Clock } from 'lucide-react';
+import { Flame, ChevronDown, Check } from 'lucide-react';
 import type { EphemeralConfig } from '../../hooks/useMessaging.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -289,3 +289,4 @@ export default function EphemeralControls({
     </div>
   );
 }
+

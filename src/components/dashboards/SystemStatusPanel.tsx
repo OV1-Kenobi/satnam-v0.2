@@ -12,27 +12,18 @@
  * Compact version also suitable for HomePage dashboard sidebar.
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import clsx from 'clsx';
 import {
   Server,
   Lock,
   Unlock,
-  Wifi,
-  WifiOff,
   Shield,
-  ShieldCheck,
   Activity,
-  Radio,
   Clock,
   AlertTriangle,
-  CheckCircle2,
-  XCircle,
-  Loader2,
-  RefreshCw,
   ChevronDown,
   ChevronUp,
-  Zap,
   Network,
   GitMerge,
 } from 'lucide-react';
@@ -402,3 +393,4 @@ export default function SystemStatusPanel({
     </div>
   );
 }
+

@@ -23,7 +23,7 @@
  * @see phase3-spec-sections.md §7.2 — NIP-AC Credit Lifecycle
  */
 
-import { finalizeEvent, getPublicKey, nip19, SimplePool } from 'nostr-tools';
+import { nip19 } from 'nostr-tools';
 import { hexToBytes } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
@@ -559,7 +559,7 @@ export function calculateReputationDelta(params: {
  *
  * @example
  * ```ts
- * const manager = new CreditLifecycleManager(ceps, vault);
+ * const manager = new CreditLifecycleManager(ceps);
  * const intentId = await manager.createIntent({
  *   description: 'Research 5 AI companies',
  *   budgetMsats: BigInt(5_000_000),
@@ -575,8 +575,7 @@ export class CreditLifecycleManager {
   };
 
   constructor(
-    ceps: CepsClient,
-    vault: { loadAgentNsec(agentNpub: string): Promise<string> }
+    ceps: CepsClient: { loadAgentNsec(agentNpub: string): Promise<string> }
   ) {
     this.ceps = ceps;
     this.vault = vault;
@@ -811,3 +810,4 @@ export class CreditLifecycleManager {
       .filter((e): e is CreditEnvelope => e !== null && e.expiresAt > now);
   }
 }
+

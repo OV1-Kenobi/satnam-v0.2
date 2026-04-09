@@ -30,8 +30,6 @@ import {
   getPublicKey,
   nip04,
   nip19,
-  nip44,
-  nip59,
   SimplePool,
   verifyEvent,
   type Event,
@@ -326,8 +324,7 @@ export class CentralEventPublishingService {
   // ---- Session management (v2: in-memory only) ----
 
   async initializeSession(
-    nsecOrMarker: string,
-    options?: {
+    nsecOrMarker: string?: {
       userAgent?: string;
       ttlHours?: number;
       authMethod?: "nip07";
@@ -457,8 +454,7 @@ export class CentralEventPublishingService {
   }
 
   async publishOptimized(
-    event: Event,
-    options?: {
+    event: Event?: {
       recipientPubHex?: string;
       senderPubHex?: string;
       includeFallback?: boolean;
@@ -525,8 +521,7 @@ export class CentralEventPublishingService {
 
   async list(
     filters: Parameters<SimplePool["querySync"]>[1],
-    relays: string[],
-    options?: { eoseTimeout?: number }
+    relays: string[]?: { eoseTimeout?: number }
   ): Promise<Event[]> {
     return this.getPool().querySync(relays, filters);
   }
@@ -726,3 +721,4 @@ export class CentralEventPublishingService {
 
 export const central_event_publishing_service =
   new CentralEventPublishingService();
+

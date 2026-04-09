@@ -9,7 +9,7 @@
  * - Accessible: focus trap, keyboard shortcuts
  */
 
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import clsx from 'clsx';
 import { Phone, PhoneOff, Video } from 'lucide-react';
 import type { CallSession } from '../../lib/calls/types.js';
@@ -179,3 +179,4 @@ export default function IncomingCallOverlay({
     </div>
   );
 }
+

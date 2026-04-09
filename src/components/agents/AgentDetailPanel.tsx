@@ -100,10 +100,10 @@ const TABS: Array<{ id: DetailTab; label: string; Icon: typeof User }> = [
 
 function ProfileTab({ agent }: { agent: AgentViewModel }) {
   const statusColor: Record<AgentViewModel['status'], string> = {
-    active: 'text-green-500',
+    working: 'text-green-500',
+    idle: 'text-slate-400',
     paused: 'text-yellow-500',
     error: 'text-red-500',
-    idle: 'text-slate-400',
     terminated: 'text-slate-600',
   };
 
@@ -202,7 +202,7 @@ function WalletTab({ agent }: { agent: AgentViewModel }) {
 
 function SkillsTab({ agent }: { agent: AgentViewModel }) {
   const { skills } = useSkillManager();
-  const agentSkills = skills.filter(s => agent.skills.includes(s.id));
+  const agentSkills = skills.filter(s => agent.skills.includes(s.manifestEventId));
 
   const tierColors: Record<string, string> = {
     tier1: 'bg-slate-600',
@@ -224,11 +224,11 @@ function SkillsTab({ agent }: { agent: AgentViewModel }) {
     <div className="space-y-3">
       {agentSkills.length > 0 ? agentSkills.map(skill => {
         const topAttestation = skill.attestations
-          .filter(a => !a.revoked)
+          /* revoked field not on GuardianAttestation — all attestations shown */
           .sort((a, b) => Number(b.tier.replace('tier', '')) - Number(a.tier.replace('tier', '')))[0];
 
         return (
-          <div key={skill.id} className="flex items-start gap-3 px-4 py-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+          <div key={skill.manifestEventId} className="flex items-start gap-3 px-4 py-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <p className="font-medium text-sm text-[#f5f5f5] truncate">{skill.name}</p>
@@ -238,7 +238,7 @@ function SkillsTab({ agent }: { agent: AgentViewModel }) {
                   </span>
                 )}
               </div>
-              <p className="text-xs text-[#555555]">v{skill.version} · {skill.attestations.filter(a => !a.revoked).length} attestations</p>
+              <p className="text-xs text-[#555555]">v{skill.version} · {skill.attestations/* revoked field not on GuardianAttestation — all attestations shown */.length} attestations</p>
             </div>
           </div>
         );
@@ -259,8 +259,8 @@ function SkillsTab({ agent }: { agent: AgentViewModel }) {
 // ---------------------------------------------------------------------------
 
 function CreditsTab({ agent }: { agent: AgentViewModel }) {
-  const { envelopes, isLoading } = useCreditLifecycle();
-  const agentEnvelopes = envelopes.filter(e => e.agentId === agent.id);
+  const { envelopes, isLoading } = useCreditLifecycle(null, null, null);
+  const agentEnvelopes = envelopes.filter(e => e.agentPubkey === agent.pubkey);
 
   const stateColors: Record<string, string> = {
     Intent: 'bg-slate-600',
@@ -291,12 +291,12 @@ function CreditsTab({ agent }: { agent: AgentViewModel }) {
   return (
     <div className="space-y-3">
       {agentEnvelopes.map(env => (
-        <div key={env.id} className="px-4 py-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+        <div key={env.eventId} className="px-4 py-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
           <div className="flex items-center gap-2 mb-2">
             <span className={clsx('px-2 py-0.5 rounded-full text-xs font-bold text-white', stateColors[env.state] ?? 'bg-slate-600')}>
               {env.state}
             </span>
-            <span className="font-mono text-xs text-[#555555] truncate">{env.id.slice(0, 16)}…</span>
+            <span className="font-mono text-xs text-[#555555] truncate">{env.eventId.slice(0, 16)}…</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-[#555555]">Budget</span>
@@ -465,3 +465,4 @@ export default function AgentDetailPanel({ agent, onBack, onEdit }: AgentDetailP
     </div>
   );
 }
+

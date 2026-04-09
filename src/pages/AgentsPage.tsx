@@ -13,7 +13,7 @@
  * - Credits/envelope overview
  */
 
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Helmet } from 'react-helmet-async';
 import clsx from 'clsx';
 import {
@@ -22,7 +22,6 @@ import {
   CreditCard,
   Plus,
   Search,
-  SlidersHorizontal,
   Activity,
   Terminal,
 } from 'lucide-react';
@@ -622,3 +621,4 @@ export default function AgentsPage() {
     </>
   );
 }
+

@@ -11,7 +11,7 @@
  *   Skills    — SkillsTrustPanel
  */
 
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Helmet } from 'react-helmet-async';
 import clsx from 'clsx';
 import {
@@ -21,7 +21,6 @@ import {
   Wallet,
   BookOpen,
   Search,
-  SlidersHorizontal,
 } from 'lucide-react';
 
 import { useCircleOfTrust } from '../hooks/useCircleOfTrust.js';
@@ -236,10 +235,10 @@ export default function CircleOfTrustPage() {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
 
   // Placeholder handlers — wired to real routing/modals in later phases
-  const handleMessage    = useCallback((pub: string) => { console.info('Message', pub); }, []);
-  const handleZap        = useCallback((pub: string) => { console.info('Zap', pub); }, []);
-  const handleCall       = useCallback((pub: string) => { console.info('Call', pub); }, []);
-  const handleViewProfile = useCallback((pub: string) => { console.info('View profile', pub); }, []);
+  const handleMessage    = useCallback((pub: string) => { console.info('Message'); }, []);
+  const handleZap        = useCallback((pub: string) => { console.info('Zap'); }, []);
+  const handleCall       = useCallback((pub: string) => { console.info('Call'); }, []);
+  const handleViewProfile = useCallback((pub: string) => { console.info('View profile'); }, []);
   const handleContactClick = useCallback((pub: string) => {
     setActiveTab('contacts');
   }, []);
@@ -316,3 +315,4 @@ export default function CircleOfTrustPage() {
     </>
   );
 }
+

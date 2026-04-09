@@ -16,12 +16,11 @@
  * ```
  */
 
-import React, {
+import {
   useState,
   useEffect,
   useCallback,
-  type ReactNode,
-} from 'react';
+  type } from 'react';
 
 // ============================================================================
 // Types
@@ -267,3 +266,4 @@ export function OfflineBannerSpacer(): React.JSX.Element {
 }
 
 export default OfflineBanner;
+
