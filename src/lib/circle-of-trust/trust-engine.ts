@@ -413,3 +413,53 @@ export function calculateTrustScore(contact: TrustedContact): number {
   );
   return engine.calculateTrustScore(contact);
 }
+
+// ---------------------------------------------------------------------------
+// Standalone helpers — operate on plain arrays (no TrustEngine instance needed)
+// ---------------------------------------------------------------------------
+
+/**
+ * Aggregate statistics across an array of contacts.
+ *
+ * Mirrors TrustEngine.calculateCircleStats() but works on a plain
+ * TrustedContact[] so component tests don't need an engine instance.
+ *
+ * @param contacts - Array of TrustedContact objects
+ * @returns CircleOfTrustStats aggregates
+ */
+export function calculateCircleStats(contacts: TrustedContact[]): CircleOfTrustStats {
+  if (contacts.length === 0) {
+    return {
+      totalContacts: 0,
+      avgTrustScore: 0,
+      highTrustContacts: 0,
+      mediumTrustContacts: 0,
+      newContacts: 0,
+      totalMeetings: 0,
+      oldestRelationshipDays: 0,
+    };
+  }
+
+  const engine = createTrustEngine(contacts);
+  return engine.calculateCircleStats();
+}
+
+/**
+ * Filter and sort a flat HandshakeLedgerEntry[] for a given contact pubkey.
+ *
+ * Returns entries matching contactPubkey, sorted descending by timestamp
+ * (most recent first), which is the display order expected by the ledger UI.
+ *
+ * @param contactPubkey - The pubkey to filter by
+ * @param entries - All HandshakeLedgerEntry records
+ * @returns Filtered + sorted entries
+ */
+export function getHandshakeLedger(
+  contactPubkey: string,
+  entries: HandshakeLedgerEntry[],
+): HandshakeLedgerEntry[] {
+  return entries
+    .filter((e) => e.contactPubkey === contactPubkey)
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+

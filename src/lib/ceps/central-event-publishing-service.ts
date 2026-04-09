@@ -324,7 +324,8 @@ export class CentralEventPublishingService {
   // ---- Session management (v2: in-memory only) ----
 
   async initializeSession(
-    nsecOrMarker: string?: {
+    nsecOrMarker?: string,
+    options?: {
       userAgent?: string;
       ttlHours?: number;
       authMethod?: "nip07";
@@ -348,6 +349,7 @@ export class CentralEventPublishingService {
       this.activeNsecHex = null;
     } else {
       // Decode nsec to hex for signing
+      if (!nsecOrMarker) throw new Error("nsec or nip07 marker required");
       let nsecHex: string;
       if (/^[0-9a-fA-F]{64}$/.test(nsecOrMarker)) {
         nsecHex = nsecOrMarker;
@@ -454,7 +456,8 @@ export class CentralEventPublishingService {
   }
 
   async publishOptimized(
-    event: Event?: {
+    event: Event,
+    _options?: {
       recipientPubHex?: string;
       senderPubHex?: string;
       includeFallback?: boolean;
@@ -521,7 +524,8 @@ export class CentralEventPublishingService {
 
   async list(
     filters: Parameters<SimplePool["querySync"]>[1],
-    relays: string[]?: { eoseTimeout?: number }
+    relays: string[],
+    _options?: { eoseTimeout?: number }
   ): Promise<Event[]> {
     return this.getPool().querySync(relays, filters);
   }
@@ -721,4 +725,5 @@ export class CentralEventPublishingService {
 
 export const central_event_publishing_service =
   new CentralEventPublishingService();
+
 

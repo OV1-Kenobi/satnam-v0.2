@@ -185,7 +185,7 @@ function SessionCard({
 }: {
   session: ActiveSessionSummary;
   events: SessionEventTimeline[];
-  onAction: (sessionId: string: 'pause' | 'resume' | 'terminate') => Promise<void>;
+  onAction: (sessionId: string, action: 'pause' | 'resume' | 'terminate') => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
@@ -398,7 +398,8 @@ export default function SessionManagerPanel({
     : allEvents.filter(e => e.event_type === filterType);
 
   const handleAction = useCallback(async (
-    sessionId: string: 'pause' | 'resume' | 'terminate',
+    sessionId: string,
+    _action: 'pause' | 'resume' | 'terminate',
   ) => {
     // In production, dispatch NIP-17 encrypted DM to agent with action
     // For now: subscribe to get latest state
@@ -552,4 +553,5 @@ export default function SessionManagerPanel({
     </div>
   );
 }
+
 
