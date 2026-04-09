@@ -28,7 +28,7 @@
  * Returns (POST): { registered: true, pubkey: string }
  */
 
-import type { Handler } from '@netlify/functions';
+import type { Handler, HandlerResponse } from "@netlify/functions";
 import { createClient } from '@supabase/supabase-js';
 import { verifyNip98 } from '../../src/lib/nip98/verify';
 
@@ -78,7 +78,7 @@ function errorResponse(
   statusCode: number,
   message: string,
   origin?: string
-): ReturnType<Handler> {
+): HandlerResponse {
   return {
     statusCode,
     headers: corsHeaders(origin),
@@ -107,8 +107,7 @@ function checkRateLimit(ip: string): boolean {
 function getClientIP(headers: Record<string, string | undefined>): string {
   return (
     (headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-    headers['x-real-ip'] ||
-    'unknown'
+    (headers['x-real-ip'] ?? 'unknown')
   );
 }
 
@@ -119,7 +118,7 @@ function getClientIP(headers: Record<string, string | undefined>): string {
 async function handleGet(
   pubkey: string,
   requestOrigin: string | undefined
-): Promise<ReturnType<Handler>> {
+): Promise<HandlerResponse> {
   if (!HEX_PUBKEY_REGEX.test(pubkey)) {
     return errorResponse(400, 'Invalid pubkey format (expected 64-character hex)', requestOrigin);
   }
@@ -160,8 +159,8 @@ async function handleGet(
 async function handlePost(
   event: Parameters<Handler>[0],
   requestOrigin: string | undefined,
-  clientIP: string
-): Promise<ReturnType<Handler>> {
+  _clientIP: string
+): Promise<HandlerResponse> {
   // ── NIP-98 Authentication (MUST be called before any business logic — S10) ──
   const authHeader = event.headers?.authorization || event.headers?.Authorization;
   const requestUrl = `https://${event.headers?.host || NIP05_DOMAIN}/.netlify/functions/issuer-registry`;
@@ -282,7 +281,7 @@ async function handlePost(
 // Handler — routes GET and POST
 // ============================================================================
 
-export const handler: Handler = async (event) => {
+export const handler: Handler = async (event): Promise<HandlerResponse> => {
   const requestOrigin = event.headers?.origin || event.headers?.Origin;
   const clientIP = getClientIP(event.headers as Record<string, string | undefined>);
 
