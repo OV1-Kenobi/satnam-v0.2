@@ -15,7 +15,7 @@
  * Rate limiting: IP-based in-memory, 30 req/min.
  */
 
-import type { Handler } from '@netlify/functions';
+import type { Handler, HandlerResponse } from "@netlify/functions";
 import { createClient } from '@supabase/supabase-js';
 
 // ============================================================================
@@ -69,7 +69,7 @@ function errorResponse(
   statusCode: number,
   message: string,
   origin?: string
-): ReturnType<Handler> {
+): HandlerResponse {
   return {
     statusCode,
     headers: corsHeaders(origin),
@@ -98,8 +98,7 @@ function checkRateLimit(ip: string): boolean {
 function getClientIP(headers: Record<string, string | undefined>): string {
   return (
     (headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-    headers['x-real-ip'] ||
-    'unknown'
+    (headers['x-real-ip'] ?? 'unknown')
   );
 }
 
@@ -134,7 +133,7 @@ function validateUsername(name: string): string | null {
 // Handler
 // ============================================================================
 
-export const handler: Handler = async (event) => {
+export const handler: Handler = async (event): Promise<HandlerResponse> => {
   const requestOrigin = event.headers?.origin || event.headers?.Origin;
   const clientIP = getClientIP(event.headers as Record<string, string | undefined>);
 
