@@ -16,7 +16,7 @@
  *   /marketplace → NIP-90 DVM marketplace (Phase 3)
  */
 
-import React, { Suspense, lazy } from 'react';
+import { Suspense, lazy } from 'react';
 import {
   BrowserRouter,
   Routes,
