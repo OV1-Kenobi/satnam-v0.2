@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 concurrency:
@@ -261,3 +261,4 @@ jobs:
           name: dist
           path: dist/
           retention-days: 7
+
