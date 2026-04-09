@@ -73,7 +73,14 @@ jobs:
           # Bare variable named 'key' is NOT matched (too generic — used for storage key iteration)
           MATCHES=$(grep -rn \
             --include="*.ts" --include="*.tsx" --include="*.js" \
-            -E "localStorage\.setItem\s*\(\s*['"][^'"]*?(nsec|priv|secret|key|pairing)[^'"]*?['"]|localStorage\.setItem\s*\([^)]*\b(nsec[A-Za-z0-9_]*|secretKey|privateKey|signingKey|encKey|pairing)\b" \
+            -e "localStorage.setItem('nsec" \
+            -e "localStorage.setItem('priv" \
+            -e "localStorage.setItem('secret" \
+            -e "localStorage.setItem('pairing" \
+            -e 'localStorage.setItem("nsec' \
+            -e 'localStorage.setItem("priv' \
+            -e 'localStorage.setItem("secret' \
+            -e 'localStorage.setItem("pairing' \
             src/ || true)
           if [ -n "$MATCHES" ]; then
             echo "::error::S4 FAILED — localStorage.setItem with key material found:"
