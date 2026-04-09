@@ -144,16 +144,17 @@ async function forwardToRelay(
   encryptedPayload: string,
   pubkey: string
 ): Promise<{ response: string | null; relayed: boolean }> {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     const timeout = setTimeout(() => {
       try { ws.close(); } catch { /* ignore */ }
       resolve({ response: null, relayed: false });
     }, WS_TIMEOUT_MS);
 
+    // C2 fix: use dynamic import instead of require('ws') to preserve ESM
     const WebSocket =
       typeof globalThis.WebSocket !== 'undefined'
         ? globalThis.WebSocket
-        : (require('ws') as typeof import('ws'));
+        : (await import('ws')).default;
 
     const ws = new (WebSocket as any)(relayUrl);
     let resolved = false;
