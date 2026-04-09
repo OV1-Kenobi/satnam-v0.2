@@ -187,7 +187,7 @@ export default function AgentCard({
       {agent.skills.length > 0 && (
         <div className="flex items-center gap-1 flex-wrap mb-4" aria-label="Enabled skills">
           <BookOpen size={12} className="text-[#555555]" />
-          {agent.skills.slice(0, 4).map(skill => (
+          {agent.skills.slice(0, 4).map((skill: string) => (
             <span
               key={skill}
               className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px] font-medium"
