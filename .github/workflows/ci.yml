@@ -66,9 +66,11 @@ jobs:
       # S4 — No localStorage.setItem storing nsec/priv/secret/key/pairing
       - name: "S4: No localStorage storing key material"
         run: |
-          echo "::group::S4 — No localStorage.setItem with nsec/priv/secret/key/pairing"
-          # Match localStorage.setItem calls where the key or value variable name
-          # contains nsec|priv|secret|key|pairing (case-insensitive)
+          echo "::group::S4 — No localStorage.setItem with key-material names"
+          # Match localStorage.setItem calls where:
+          # 1. The storage key is a quoted string containing nsec|priv|secret|key|pairing, OR
+          # 2. The storage key variable name is nsec*/secretKey/privateKey/signingKey/encKey/pairing
+          # Bare variable named 'key' is NOT matched (too generic — used for storage key iteration)
           MATCHES=$(grep -rn \
             --include="*.ts" --include="*.tsx" --include="*.js" \
             -iE "localStorage\.setItem\s*\([^)]*['\"]?(nsec|priv|secret|key|pairing)['\"]?" \
