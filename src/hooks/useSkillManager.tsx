@@ -1,4 +1,3 @@
-SHA: 8c5702383f388c36746f89474047ead6165c8524
 /**
  * @module hooks/useSkillManager
  * @description React hook wrapping {@link SkillManager} for NIP-SKL skill lifecycle
