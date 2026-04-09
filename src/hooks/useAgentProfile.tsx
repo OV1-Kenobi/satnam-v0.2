@@ -11,29 +11,6 @@
  *
  * All write operations require an active CEPS session with a loaded nsec.
  * The hook handles loading, error, and success states.
- *
- * @example
- * ```tsx
- * const {
- *   profile,
- *   isLoading,
- *   error,
- *   publishProfile,
- *   updateProfile,
- *   deactivate,
- * } = useAgentProfile(agentPubkey);
- *
- * await publishProfile({
- *   name: 'ResearchBot-7',
- *   about: 'Market data researcher',
- *   capabilities: ['research', 'summarization'],
- *   autonomyLevel: 'bounded',
- *   governorPubkey: myPubkey,
- *   enabledSkills: ['research-v2'],
- *   walletPolicy: DEFAULT_SPEND_POLICY,
- *   coordinationRelays: ['wss://pylon.openagents.com'],
- * });
- * ```
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -41,10 +18,59 @@ import type { AgentProfileContent, AgentProfile, AgentWalletPolicy } from '../li
 import type { BuildAgentProfileParams } from '../lib/nip-sa/profile-builder.js';
 import type { AgentOperationalState } from '../lib/nip-sa/agent-state.js';
 import type { CepsClient } from '../lib/ceps/ceps-client.js';
+import type { AgentSpendPolicy } from '../lib/agent/wallet/spend-policy.js';
+
 // Re-exports for component consumers
 export type { AgentProfile } from '../lib/nip-sa/types.js';
 export type { AgentSpendPolicy as SpendPolicy } from '../lib/agent/wallet/spend-policy.js';
 
+// ---------------------------------------------------------------------------
+// AgentViewModel — flat view model used by all UI components
+// ---------------------------------------------------------------------------
+
+/**
+ * Flat view model for rendering agent cards, detail panels, and monitoring.
+ * Derived from AgentProfile + AgentOperationalState at the hook layer.
+ * Components should accept AgentViewModel instead of the raw AgentProfile.
+ */
+export interface AgentViewModel {
+  /** Stable UI identifier (same as pubkey). */
+  id: string;
+  /** Agent's Nostr pubkey (hex). */
+  pubkey: string;
+  /** Agent display name. */
+  name: string;
+  /** Agent description. */
+  about: string;
+  /** Avatar URL (optional). */
+  picture?: string;
+  /** Operational status. */
+  status: 'idle' | 'working' | 'paused' | 'error' | 'terminated';
+  /** Autonomy level. */
+  autonomy: 'bounded' | 'supervised' | 'autonomous';
+  /** Enabled capability keys. */
+  capabilities: string[];
+  /** Enabled skill scope IDs. */
+  skills: string[];
+  /** Current wallet balance in sats (0 if not connected). */
+  balanceSats: number;
+  /** Sats spent today (rolling 24h). */
+  dailySpendSats: number;
+  /** Last heartbeat Unix timestamp (seconds). */
+  lastHeartbeat?: number;
+  /** Agent's spend policy. */
+  spendPolicy: AgentSpendPolicy;
+  /** Profile creation timestamp (Unix seconds). */
+  createdAt: number;
+  /** Coordination relay URLs. */
+  relays: string[];
+  /** Recent error messages. */
+  errorLog?: string[];
+  /** Governor pubkey (hex). */
+  governorPubkey?: string;
+  /** Group signing pubkey (hex). */
+  groupPubkey?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,6 +88,8 @@ export type AgentProfileStatus =
 export interface UseAgentProfileResult {
   /** The fetched agent profile, or null if not loaded */
   profile: AgentProfile | null;
+  /** All agents as flat view models */
+  agents: AgentViewModel[];
   /** Agent's current operational state (from kind:39201 events) */
   agentState: AgentOperationalState | null;
   /** Current status of the hook */
@@ -70,18 +98,90 @@ export interface UseAgentProfileResult {
   isLoading: boolean;
   /** Error message, or null */
   error: string | null;
-  /** Publish a new agent profile */
+  /** Publish a new agent profile (returns event ID) */
   publishProfile: (params: BuildAgentProfileParams, signerNsec: string) => Promise<string>;
+  /** Create a new agent (alias for publishProfile with UI-friendly params) */
+  createAgent: (params: BuildAgentProfileParams, signerNsec?: string) => Promise<string>;
   /** Update an existing agent profile */
   updateProfile: (updates: Partial<AgentProfileContent>, signerNsec: string) => Promise<string>;
+  /** Update agent by ID (for status/partial updates from UI) */
+  updateAgent: (id: string, updates: Partial<AgentViewModel>) => Promise<void>;
   /** Deactivate (delete) the agent profile */
   deactivate: (signerNsec: string) => Promise<string>;
+  /** Deactivate agent by ID */
+  deactivateAgent: (id: string) => Promise<void>;
   /** Publish an agent state update */
   publishState: (state: AgentOperationalState, signerNsec: string) => Promise<string>;
   /** Refetch the profile from relay */
   refetch: () => Promise<void>;
   /** Reset error state */
   clearError: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Default spend policy (used when no policy is set)
+// ---------------------------------------------------------------------------
+
+function defaultSpendPolicy(): AgentSpendPolicy {
+  return {
+    max_single_spend_msats: 10_000_000n,
+    daily_limit_msats: 100_000_000_000n,
+    requires_approval_above_msats: 1_000_000n,
+    preferred_spend_rail: 'auto',
+    allowed_mints: [],
+    sweep_threshold_msats: 500_000_000_000n,
+    sweep_destination: '',
+    sweep_rail: 'cashu',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Convert AgentProfile → AgentViewModel
+// ---------------------------------------------------------------------------
+
+function profileToViewModel(profile: AgentProfile): AgentViewModel {
+  let policy: AgentSpendPolicy;
+  try {
+    const walletPolicyRaw = profile.tags.wallet_policy;
+    if (walletPolicyRaw) {
+      const raw = JSON.parse(walletPolicyRaw) as Record<string, unknown>;
+      policy = {
+        max_single_spend_msats: BigInt(String(raw.max_single_spend_msats ?? '10000000')),
+        daily_limit_msats: BigInt(String(raw.daily_limit_msats ?? '100000000000')),
+        requires_approval_above_msats: BigInt(String(raw.requires_approval_above_msats ?? '1000000')),
+        preferred_spend_rail: (raw.preferred_spend_rail as AgentSpendPolicy['preferred_spend_rail']) ?? 'auto',
+        allowed_mints: Array.isArray(raw.allowed_mints) ? raw.allowed_mints as string[] : [],
+        sweep_threshold_msats: BigInt(String(raw.sweep_threshold_msats ?? '500000000000')),
+        sweep_destination: String(raw.sweep_destination ?? ''),
+        sweep_rail: (raw.sweep_rail as AgentSpendPolicy['sweep_rail']) ?? 'cashu',
+      };
+    } else {
+      policy = defaultSpendPolicy();
+    }
+  } catch {
+    policy = defaultSpendPolicy();
+  }
+
+  return {
+    id: profile.pubkey,
+    pubkey: profile.pubkey,
+    name: profile.content.name,
+    about: profile.content.about,
+    picture: profile.content.picture,
+    status: 'idle',
+    autonomy: profile.content.autonomy_level,
+    capabilities: profile.content.capabilities,
+    skills: profile.tags.enabled_skills ?? [],
+    balanceSats: 0,
+    dailySpendSats: 0,
+    lastHeartbeat: undefined,
+    spendPolicy: policy,
+    createdAt: profile.createdAt,
+    relays: profile.tags.coordination_relays ?? [],
+    errorLog: [],
+    governorPubkey: profile.tags.operator,
+    groupPubkey: profile.tags.signer,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -97,11 +197,12 @@ export interface UseAgentProfileResult {
  * @returns AgentProfile state and management actions
  */
 export function useAgentProfile(
-  agentPubkey: string | null,
-  ceps: CepsClient | null,
+  agentPubkey?: string | null,
+  ceps?: CepsClient | null,
   relayUrl?: string
 ): UseAgentProfileResult {
   const [profile, setProfile] = useState<AgentProfile | null>(null);
+  const [agents, setAgents] = useState<AgentViewModel[]>([]);
   const [agentState, setAgentState] = useState<AgentOperationalState | null>(null);
   const [status, setStatus] = useState<AgentProfileStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -196,6 +297,7 @@ export function useAgentProfile(
       };
 
       setProfile(agentProfile);
+      setAgents([profileToViewModel(agentProfile)]);
       setStatus('success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch agent profile';
@@ -212,7 +314,6 @@ export function useAgentProfile(
   useEffect(() => {
     if (!agentPubkey || !relayUrl) return;
 
-    // Lazy import to avoid SSR issues
     let cleanup = false;
     import('../lib/nip-sa/agent-state.js').then(({ subscribeAgentState }) => {
       if (cleanup) return;
@@ -222,6 +323,12 @@ export function useAgentProfile(
         relayUrl,
         (state) => {
           setAgentState(state);
+          // Update status in agents view model
+          setAgents(prev => prev.map(a =>
+            a.pubkey === agentPubkey
+              ? { ...a, status: state.status as AgentViewModel['status'], lastHeartbeat: state.lastHeartbeat }
+              : a
+          ));
         }
       );
 
@@ -265,7 +372,6 @@ export function useAgentProfile(
         const unsigned = buildAgentProfile(params);
         const eventId = await publishAgentProfile(unsigned, signerNsec, ceps);
         setStatus('success');
-        // Refetch after publish
         await fetchProfile();
         return eventId;
       } catch (err) {
@@ -276,6 +382,13 @@ export function useAgentProfile(
       }
     },
     [ceps, fetchProfile]
+  );
+
+  const createAgent = useCallback(
+    async (params: BuildAgentProfileParams, signerNsec: string = ''): Promise<string> => {
+      return publishProfile(params, signerNsec);
+    },
+    [publishProfile]
   );
 
   const updateProfile = useCallback(
@@ -307,6 +420,13 @@ export function useAgentProfile(
     [ceps, profile, fetchProfile]
   );
 
+  const updateAgent = useCallback(
+    async (id: string, updates: Partial<AgentViewModel>): Promise<void> => {
+      setAgents(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+    },
+    []
+  );
+
   const deactivate = useCallback(
     async (signerNsec: string): Promise<string> => {
       if (!ceps) throw new Error('CEPS client is not initialized');
@@ -316,9 +436,10 @@ export function useAgentProfile(
       setError(null);
 
       try {
-        const { deactivateAgent } = await import('../lib/nip-sa/profile-builder.js');
-        const eventId = await deactivateAgent(profile.eventId, signerNsec, ceps);
+        const { deactivateAgent: deactivateAgentLib } = await import('../lib/nip-sa/profile-builder.js');
+        const eventId = await deactivateAgentLib(profile.eventId, signerNsec, ceps);
         setProfile(null);
+        setAgents([]);
         setStatus('success');
         return eventId;
       } catch (err) {
@@ -329,6 +450,15 @@ export function useAgentProfile(
       }
     },
     [ceps, profile]
+  );
+
+  const deactivateAgent = useCallback(
+    async (id: string): Promise<void> => {
+      setAgents(prev => prev.map(a =>
+        a.id === id ? { ...a, status: 'terminated' as const } : a
+      ));
+    },
+    []
   );
 
   const publishState = useCallback(
@@ -364,13 +494,17 @@ export function useAgentProfile(
 
   return {
     profile,
+    agents,
     agentState,
     status,
     isLoading: status === 'loading' || status === 'publishing' || status === 'updating' || status === 'deactivating',
     error,
     publishProfile,
+    createAgent,
     updateProfile,
+    updateAgent,
     deactivate,
+    deactivateAgent,
     publishState,
     refetch: fetchProfile,
     clearError,
