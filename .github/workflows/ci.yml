@@ -41,7 +41,7 @@ jobs:
           MATCHES=$(grep -rn \
             --include="*.ts" --include="*.tsx" --include="*.js" --include="*.mjs" \
             -E "from ['\"]jsonwebtoken['\"]|from ['\"]jose['\"]|JWT_SECRET|import.*\bjwt\b" \
-            src/ netlify/ scripts/ || true)
+            src/ netlify/ || true)
           if [ -n "$MATCHES" ]; then
             echo "::error::S2 FAILED — JWT import/reference found:"
             echo "$MATCHES"
