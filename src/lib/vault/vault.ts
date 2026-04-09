@@ -590,7 +590,7 @@ export class Vault implements VaultOps {
     const storage = await this.getStorage();
 
     // Create directory structure
-    const dirs = ['identities', 'frost', 'nwc', 'nfc', 'nip46', 'agents', 'cashu'];
+    const dirs = ['identities', 'frost', 'nwc', 'nfc', 'nip46', 'agents', 'cashu', 'sig4sats'];
     for (const dir of dirs) {
       // Write a sentinel file so the directory is created
       const sentinelPath = `${this.config.vaultRoot}/${dir}/.keep`;
@@ -915,6 +915,37 @@ export class Vault implements VaultOps {
   }
 
   // -------------------------------------------------------------------------
+  // Sig4Sats
+  // -------------------------------------------------------------------------
+
+  /** @inheritdoc */
+  async storeSig4SatsBonds(bondsJson: string): Promise<void> {
+    const key = this.requireUnlocked();
+    this.resetIdleTimer();
+    await this.writeEncrypted(
+      key,
+      this.path('sig4sats', 'bonds.json'),
+      utf8ToBytes(bondsJson),
+    );
+  }
+
+  /** @inheritdoc */
+  async getSig4SatsBonds(): Promise<string | null> {
+    const key = this.requireUnlocked();
+    this.resetIdleTimer();
+    try {
+      const plaintext = await this.readDecrypted(key, this.path('sig4sats', 'bonds.json'));
+      return bytesToUtf8(plaintext);
+    } catch (err) {
+      // VaultError.IdentityNotFound means no bonds stored yet — return null
+      if (err instanceof Error && err.message === VaultError.IdentityNotFound) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Backup
   // -------------------------------------------------------------------------
 
@@ -935,7 +966,7 @@ export class Vault implements VaultOps {
     // Collect all vault entries (already-encrypted blobs stored as hex)
     const entries: Record<string, string> = {};
 
-    const dirs = ['identities', 'frost', 'nwc', 'nfc', 'nip46', 'agents', 'cashu'];
+    const dirs = ['identities', 'frost', 'nwc', 'nfc', 'nip46', 'agents', 'cashu', 'sig4sats'];
     for (const dir of dirs) {
       const files = await storage.list(`${this.config.vaultRoot}/${dir}`);
       for (const file of files) {
