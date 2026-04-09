@@ -1,3 +1,4 @@
+SHA: 2485e625f46ee71fe1998d6dac3e07a159f92531
 /**
  * @module hooks/useMarketplace
  * @description React hook wrapping {@link DvmMarketplace} for NIP-90 DVM
@@ -204,7 +205,7 @@ export function useMarketplace(defaultRelayUrls?: string[]): UseMarketplaceRetur
    * @internal
    */
   const withState = useCallback(
-    async <T>(operation: (m: DvmMarketplace) => Promise<T>): Promise<T> => {
+    async <T,>(operation: (m: DvmMarketplace) => Promise<T>): Promise<T> => {
       setIsLoading(true);
       setError(null);
       try {
@@ -347,3 +348,4 @@ export function useMarketplace(defaultRelayUrls?: string[]): UseMarketplaceRetur
     ]
   );
 }
+
