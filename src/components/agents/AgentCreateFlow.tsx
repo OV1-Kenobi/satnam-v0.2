@@ -26,7 +26,6 @@ import {
   ChevronLeft,
   X,
   Plus,
-  Trash2,
 } from 'lucide-react';
 import { useAgentProfile } from '../../hooks/useAgentProfile.js';
 import { useSkillManager } from '../../hooks/useSkillManager.js';
@@ -405,12 +404,12 @@ function StepSkills({
       ) : (
         <div className="space-y-2" role="group" aria-label="Skill selection">
           {skills.map(skill => {
-            const selected = form.selectedSkills.includes(skill.id);
+            const selected = form.selectedSkills.includes(skill.manifest.manifestEventId);
             return (
               <button
-                key={skill.id}
+                key={skill.manifest.manifestEventId}
                 type="button"
-                onClick={() => toggle(skill.id)}
+                onClick={() => toggle(skill.manifest.manifestEventId)}
                 aria-pressed={selected}
                 className={clsx(
                   'w-full flex items-center gap-3 px-4 py-3 rounded-lg border text-left transition-all',
@@ -426,8 +425,8 @@ function StepSkills({
                   {selected && <span className="text-black text-xs">✓</span>}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[#f5f5f5] truncate">{skill.name}</p>
-                  <p className="text-xs text-[#555555]">v{skill.version} · {skill.scopeId}</p>
+                  <p className="text-sm font-medium text-[#f5f5f5] truncate">{skill.manifest.name}</p>
+                  <p className="text-xs text-[#555555]">v{skill.manifest.version} · {skill.manifest.skillScopeId}</p>
                 </div>
                 <span className="text-xs text-[#555555] flex-shrink-0">
                   {skill.attestations.length} attestation{skill.attestations.length !== 1 ? 's' : ''}
