@@ -80,6 +80,7 @@ import {
   respondToSigningRequest,
   combineSignatures,
   collectPartialSigs,
+  collectRelayMessages,
   rotateShares as rotateSharesCeremony,
 } from './ceremony.js';
 
@@ -176,17 +177,36 @@ export class FrostClient {
    * @internal
    */
   private async _waitForDkgRound1(session: DkgSession): Promise<DkgSession> {
-    // In a real implementation: subscribe to coordinator relay events and wait
-    // for round1 commitments from all participants.
-    //
-    // For this implementation, we simulate all participants responding
-    // by immediately advancing the state.
+    // Collect round-1 commitment packages from all participants via the coordinator relay.
+    // Waits until all `totalShares` participants have published their round-1 events,
+    // or until the DKG timeout elapses.
+    const timeoutMs = this.config.dkgTimeout ?? 120_000;
+    const events = await collectRelayMessages(
+      session.coordinatorRelay ?? this.config.coordinatorRelay,
+      {
+        kinds: [this.config.signingRequestKind],
+        '#d': [session.groupId],
+      },
+      session.totalShares,
+      timeoutMs,
+    );
+
+    // Parse round-1 commitments from collected events
+    const round1Commitments = new Map<string, Uint8Array>(session.round1Commitments);
+    const encoder = new TextEncoder();
+    for (const event of events) {
+      try {
+        const payload = JSON.parse(event.content) as { type?: string; commitments?: string };
+        if (payload.type === 'dkg_round1' && payload.commitments) {
+          round1Commitments.set(event.pubkey, encoder.encode(payload.commitments));
+        }
+      } catch { /* ignore malformed events */ }
+    }
+
     return {
       ...session,
       state: 'round2_initiated',
-      round1Commitments: new Map(
-        session.participants.map((p) => [p, new Uint8Array(64)]),
-      ),
+      round1Commitments,
     };
   }
 
@@ -197,13 +217,36 @@ export class FrostClient {
    * @internal
    */
   private async _waitForDkgRound2(session: DkgSession): Promise<DkgSession> {
-    // Simulate all participants completing Round 2
+    // Collect round-2 secret share packages from all participants via the coordinator relay.
+    // Waits until all `totalShares` participants have published their round-2 events,
+    // or until the DKG timeout elapses.
+    const timeoutMs = this.config.dkgTimeout ?? 120_000;
+    const events = await collectRelayMessages(
+      session.coordinatorRelay ?? this.config.coordinatorRelay,
+      {
+        kinds: [this.config.signingRequestKind],
+        '#d': [session.groupId],
+      },
+      session.totalShares,
+      timeoutMs,
+    );
+
+    // Parse round-2 share packages from collected events
+    const round2Shares = new Map<string, Uint8Array>(session.round2Shares);
+    const encoder = new TextEncoder();
+    for (const event of events) {
+      try {
+        const payload = JSON.parse(event.content) as { type?: string; sharePackage?: string };
+        if (payload.type === 'dkg_round2' && payload.sharePackage) {
+          round2Shares.set(event.pubkey, encoder.encode(payload.sharePackage));
+        }
+      } catch { /* ignore malformed events */ }
+    }
+
     return {
       ...session,
       state: 'round2_collecting',
-      round2Shares: new Map(
-        session.participants.map((p) => [p, new Uint8Array(64)]),
-      ),
+      round2Shares,
     };
   }
 
