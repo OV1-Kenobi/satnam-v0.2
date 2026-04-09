@@ -1,7 +1,7 @@
 {
   "name": "satnam-v2",
   "private": true,
-  "version": "2.0.0-alpha.1",
+  "version": "0.2.0-alpha.1",
   "description": "Nostr-native sovereign identity and agent economy platform",
   "type": "module",
   "scripts": {
@@ -63,3 +63,4 @@
     "vitest": "^2.1.0"
   }
 }
+
