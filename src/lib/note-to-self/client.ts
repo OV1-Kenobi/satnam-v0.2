@@ -34,7 +34,8 @@ function mockWrap(content: string): string {
 }
 
 /** Simulate kind:1059 unwrapping.  Returns the content unchanged. */
-function mockUnwrap(eventId: string: string): string {
+function mockUnwrap(eventId: string, content: string): string {
+  void eventId;
   return content;
 }
 
@@ -77,9 +78,11 @@ export class NoteToSelfClient {
   ): Promise<SelfNote> {
     const note: SelfNote = {
       id:        generateId(),
-          category,
+      content,
+      category,
       tags,
-      createdAt: Math.floor(Date.now() / 1000):   mockWrap(content),
+      createdAt: Math.floor(Date.now() / 1000),
+      eventId:   mockWrap(content),
     };
 
     const notes = readNotes();
@@ -125,9 +128,8 @@ export class NoteToSelfClient {
     const notes = readNotes();
     const idx = notes.findIndex(n => n.id === noteId);
     if (idx < 0) return null;
-    notes[idx] = { ...notes[idx], ...patch };
+    notes[idx] = { ...notes[idx]!, ...patch };
     writeNotes(notes);
-    return notes[idx];
+    return notes[idx] ?? null;
   }
 }
-

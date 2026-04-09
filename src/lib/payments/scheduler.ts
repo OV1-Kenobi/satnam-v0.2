@@ -105,7 +105,8 @@ export class PaymentScheduler {
       const rawSchedules = JSON.parse(serialized) as ScheduledPaymentSerialized[];
       this.schedules.clear();
       for (const raw of rawSchedules) {
-              this.schedules.set(payment.id);
+        const payment = deserializeScheduledPayment(raw);
+        this.schedules.set(payment.id, payment);
       }
     } catch {
       // No schedules stored yet — start fresh
@@ -147,8 +148,9 @@ export class PaymentScheduler {
     }
 
     const enriched: ScheduledPayment = {
-      ...executionHistory: payment.executionHistory ?? [],
-      nextExecutionAt: this.computeNextExecution(payment.schedule.lastExecutedAt),
+      ...payment,
+      executionHistory: payment.executionHistory ?? [],
+      nextExecutionAt: this.computeNextExecution(payment.schedule),
     };
 
     this.schedules.set(payment.id, enriched);
@@ -177,7 +179,11 @@ export class PaymentScheduler {
    */
   async pausePayment(id: string): Promise<void> {
     this.requireLoaded();
-      this.schedules.set(id, { ...status: 'paused' });
+    const existing = this.schedules.get(id);
+    if (!existing) {
+      throw new Error(`PaymentScheduler: payment ${id} not found`);
+    }
+    this.schedules.set(id, { ...existing, status: 'paused' });
     await this.save();
   }
 
@@ -188,9 +194,14 @@ export class PaymentScheduler {
    */
   async resumePayment(id: string): Promise<void> {
     this.requireLoaded();
-      this.schedules.set(id, {
-      ...status: 'active',
-      nextExecutionAt: this.computeNextExecution(payment.schedule.lastExecutedAt),
+    const existing = this.schedules.get(id);
+    if (!existing) {
+      throw new Error(`PaymentScheduler: payment ${id} not found`);
+    }
+    this.schedules.set(id, {
+      ...existing,
+      status: 'active',
+      nextExecutionAt: this.computeNextExecution(existing.schedule),
     });
     await this.save();
   }
@@ -209,7 +220,7 @@ export class PaymentScheduler {
    * Get a single scheduled payment by ID.
    *
    * @param id - Payment UUID
-   * @returns The or undefined if not found
+   * @returns The payment or undefined if not found
    */
   getPayment(id: string): ScheduledPayment | undefined {
     this.requireLoaded();
@@ -246,7 +257,8 @@ export class PaymentScheduler {
 
       // Update payment state
       const updated: ScheduledPayment = {
-        ...lastExecutedAt: now,
+        ...payment,
+        lastExecutedAt: now,
         executionHistory: [...payment.executionHistory, execution],
       };
 
@@ -292,7 +304,7 @@ export class PaymentScheduler {
     const rail = this.resolveRail(payment);
 
     try {
-      const result = await this.executeOnRail(rail);
+      const result = await this.executeOnRail(payment, rail);
       return {
         executedAt,
         amountMsats: payment.amountMsats,
@@ -337,7 +349,7 @@ export class PaymentScheduler {
    * @internal
    */
   private async evaluateCondition(
-    condition: PaymentCondition: ScheduledPayment,
+    condition: PaymentCondition,
   ): Promise<boolean> {
     switch (condition.type) {
       case 'balance_above': {
@@ -458,7 +470,8 @@ export class PaymentScheduler {
         }
         // Fetch invoice from LNURL-pay address
         const invoice = await this.fetchLnurlPayInvoice(
-          payment.recipientLud16.amountMsats,
+          payment.recipientLud16,
+          payment.amountMsats,
         );
         const result = await this.nwc.payInvoice(invoice);
         return { paymentHash: result.paymentHash };
@@ -486,7 +499,8 @@ export class PaymentScheduler {
           throw new Error('LNbits rail requires recipientLud16');
         }
         const invoice = await this.fetchLnurlPayInvoice(
-          payment.recipientLud16.amountMsats,
+          payment.recipientLud16,
+          payment.amountMsats,
         );
         const result = await this.lnbits.payInvoice(invoice);
         return { paymentHash: result.paymentHash };
@@ -567,10 +581,10 @@ export class PaymentScheduler {
 
   /** Get a payment by ID or throw. */
   private getOrThrow(id: string): ScheduledPayment {
-      if (!payment) {
+    const payment = this.schedules.get(id);
+    if (!payment) {
       throw new Error(`PaymentScheduler: payment ${id} not found`);
     }
     return payment;
   }
 }
-

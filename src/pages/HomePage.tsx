@@ -126,24 +126,27 @@ function MultiRailBalanceSummary({ totalNwcMsats }: { totalNwcMsats: bigint }) {
     {
       label: 'Lightning',
       color: '#f7931a',
-      icon: Zap: nwcSats,
+      icon: Zap,
+      balanceSats: nwcSats,
       subLabel: 'NWC wallet',
     },
     {
       label: 'Cashu',
       color: '#a855f7',
-      icon: Coins: 5030,
+      icon: Coins,
+      balanceSats: 5030,
       subLabel: '2 mints',
     },
     {
       label: 'LNbits',
       color: '#22c55e',
-      icon: Server: 12500,
+      icon: Server,
+      balanceSats: 12500,
       subLabel: 'LNbits wallet',
     },
   ];
 
-  const totalSats = rails.reduce((s, r) => s + r.0);
+  const totalSats = rails.reduce((s, r) => s + r.balanceSats);
 
   return (
     <Link
@@ -507,4 +510,3 @@ export default function HomePage() {
     </>
   );
 }
-
