@@ -51,7 +51,7 @@ import ToolCallApproval from '../components/probe/ToolCallApproval.js';
 import SessionDiffRenderer from '../components/probe/SessionDiffRenderer.js';
 import ExecutionResultPanel from '../components/probe/ExecutionResultPanel.js';
 
-import type { AgentProfile } from '../hooks/useAgentProfile.js';
+import type { AgentViewModel } from '../hooks/useAgentProfile.js';
 import type { Skill } from '../hooks/useSkillManager.js';
 
 // ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@ function EmptyAgents({ onCreate }: { onCreate: () => void }) {
 function AgentsTab() {
   const { agents, updateAgent, deactivateAgent, isLoading } = useAgentProfile();
   const [view, setView] = useState<AgentView>('list');
-  const [selectedAgent, setSelectedAgent] = useState<AgentProfile | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<AgentViewModel | null>(null);
   const [search, setSearch] = useState('');
 
   const filtered = search
