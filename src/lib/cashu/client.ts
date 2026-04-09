@@ -174,6 +174,23 @@ function toCashuTsProof(p: CashuProof): CashuTsProof {
  * mutations go through `storeProofs()` to ensure atomicity — partial writes
  * are not possible because the vault writes are atomic at the file level.
  *
+ * ## Dual storage architecture
+ *
+ * CashuClient splits storage across two backends based on data sensitivity:
+ *
+ * **IndexedDB — mint metadata (non-secret)**
+ * - Database: `satnam-cashu-mints` (object store: `mints`)
+ * - Stores mint URL, display name, supported NUTs, and `isAllowed` flag
+ * - These values are not secret — loss only degrades the mint list UI
+ * - Survives vault lock/unlock cycles without requiring vault access
+ *
+ * **OPFS Vault — Cashu proofs (secret bearer instruments)**
+ * - Path: `cashu/{sha256(mintUrl)}.proofs` (one file per mint)
+ * - Encrypted with AES-256-GCM under the vault master key
+ * - Proofs are bearer instruments — whoever has a valid proof can redeem it
+ * - The vault MUST be unlocked for all proof read/write operations
+ * - Lost proofs = lost sats; never log, cache, or copy proof data outside vault
+ *
  * ## Coin selection
  * `selectProofsForAmount()` uses a greedy descending approach: it picks the
  * largest denominations first. This minimizes the number of proofs consumed
