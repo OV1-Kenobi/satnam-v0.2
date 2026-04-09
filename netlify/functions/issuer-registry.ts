@@ -106,7 +106,7 @@ function checkRateLimit(ip: string): boolean {
 
 function getClientIP(headers: Record<string, string | undefined>): string {
   return (
-    (headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+    ((headers['x-forwarded-for'] || '').split(',')[0] ?? '').trim() ||
     (headers['x-real-ip'] ?? 'unknown')
   );
 }
@@ -323,3 +323,4 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
 
   return errorResponse(405, 'Method not allowed', requestOrigin);
 };
+
