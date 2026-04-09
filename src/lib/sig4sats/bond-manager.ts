@@ -37,6 +37,7 @@ import { createAdaptorSignature, generateAdaptorPoint, hashMessage } from './ada
 const VAULT_PATH_PREFIX = 'sig4sats';
 const BONDS_FILE = 'bonds.json';
 
+
 function generateId(prefix: string): string {
   const rand = randomBytes(12);
   return `${prefix}-${bytesToHex(rand)}`;
@@ -47,23 +48,19 @@ function nowSecs(): number {
 }
 
 // ============================================================================
-// Vault adapter interface (subset of Vault we actually use)
-// ============================================================================
-
-interface VaultAdapter {
-  isUnlocked(): boolean;
-}
-
-// ============================================================================
 // BondManager
 // ============================================================================
 
 /**
  * BondManager — full lifecycle manager for all 3 Sig4Sats bond types.
  *
+ * All persistence goes through the OPFS Vault (AES-256-GCM encrypted).
+ * No bond data ever touches localStorage, sessionStorage, or any unencrypted
+ * persistent storage. The vault must be unlocked before write operations.
+ *
  * @example
  * ```ts
- * const manager = new BondManager();
+ * const manager = new BondManager(vault);
  * const bond = await manager.createEntitlementBond({
  *   featureId: 'premium-agents',
  *   amount: 500,
@@ -75,45 +72,58 @@ interface VaultAdapter {
 export class BondManager {
   /** In-memory bond cache — keyed by bond ID */
   private bonds: Map<string, Sig4SatsBond> = new Map();
-  /** Whether the cache has been hydrated from persistent storage */
+  /** Whether the cache has been hydrated from vault storage */
   private loaded = false;
 
+  /**
+   * @param vault - OPFS Vault instance. Must be unlocked for all write
+   *   operations. Read-only operations (validate, list) also require unlock
+   *   because bonds are encrypted at rest.
+   */
+  constructor(private readonly vault: Vault) {}
+
   // -------------------------------------------------------------------------
-  // Persistence (localStorage fallback — vault integration requires unlock)
+  // Persistence (vault — AES-256-GCM encrypted OPFS)
   // -------------------------------------------------------------------------
 
   /**
-   * Persist the bond cache to localStorage (encrypted at rest in vault context).
-   * Falls back to sessionStorage in non-OPFS environments.
+   * Persist the bond cache to the OPFS Vault.
+   *
+   * Serializes the current in-memory bond map to JSON and writes it to
+   * `satnam/sig4sats/bonds.json` in the vault. The vault write is atomic
+   * at the file level — partial writes are not possible.
+   *
    * @internal
    */
-  private persist(): void {
-    try {
-      const payload = JSON.stringify(
-        Array.from(this.bonds.entries()).map(([id, bond]) => ({ id, bond }))
-      );
-      localStorage.setItem('satnam:sig4sats:bonds', payload);
-    } catch {
-      // Storage quota exceeded or private browsing — ignore
-    }
+  private async persist(): Promise<void> {
+    const payload = JSON.stringify(
+      Array.from(this.bonds.entries()).map(([id, bond]) => ({ id, bond }))
+    );
+    await this.vault.storeSig4SatsBonds(payload);
   }
 
   /**
-   * Hydrate the bond cache from localStorage.
+   * Hydrate the bond cache from the OPFS Vault.
+   *
+   * Reads `satnam/sig4sats/bonds.json` from the vault and populates the
+   * in-memory bond map. Called lazily on first access; subsequent calls are
+   * no-ops if `this.loaded` is already true.
+   *
    * @internal
    */
-  private hydrate(): void {
+  private async hydrate(): Promise<void> {
     if (this.loaded) return;
     this.loaded = true;
     try {
-      const raw = localStorage.getItem('satnam:sig4sats:bonds');
+      const raw = await this.vault.getSig4SatsBonds();
       if (!raw) return;
       const entries = JSON.parse(raw) as Array<{ id: string; bond: Sig4SatsBond }>;
       for (const { id, bond } of entries) {
         this.bonds.set(id, bond);
       }
     } catch {
-      // Corrupt data — start fresh
+      // VaultError.IdentityNotFound → no bonds yet, start fresh
+      // Any other error: corrupt data — start fresh rather than crashing
       this.bonds.clear();
     }
   }
@@ -134,7 +144,7 @@ export class BondManager {
    * @returns The created EntitlementBond
    */
   async createEntitlementBond(params: CreateEntitlementParams): Promise<EntitlementBond> {
-    this.hydrate();
+    await this.hydrate();
 
     const { featureId, amount, mintUrl, ttlSeconds = 30 * 24 * 3600 } = params;
     const now = nowSecs();
@@ -167,7 +177,7 @@ export class BondManager {
 
     const bondId = generateId('ent');
     this.bonds.set(bondId, bond);
-    this.persist();
+    await this.persist();
 
     return bond;
   }
@@ -180,7 +190,7 @@ export class BondManager {
    * @returns true if the token is active, not expired, and matches the feature
    */
   async validateEntitlementToken(featureId: string, token: string): Promise<boolean> {
-    this.hydrate();
+    await this.hydrate();
 
     const now = nowSecs();
     for (const bond of this.bonds.values()) {
@@ -204,7 +214,7 @@ export class BondManager {
    * @returns true if a token was found and spent, false if none available
    */
   async spendEntitlementToken(featureId: string): Promise<boolean> {
-    this.hydrate();
+    await this.hydrate();
 
     const now = nowSecs();
     for (const [id, bond] of this.bonds.entries()) {
@@ -216,7 +226,7 @@ export class BondManager {
       ) {
         const updated: EntitlementBond = { ...bond, status: 'spent' };
         this.bonds.set(id, updated);
-        this.persist();
+        await this.persist();
         return true;
       }
     }
@@ -237,7 +247,7 @@ export class BondManager {
    * @returns The created RecoveryBond
    */
   async createRecoveryBond(params: CreateRecoveryParams): Promise<RecoveryBond> {
-    this.hydrate();
+    await this.hydrate();
 
     const { recoveryEventId, guardians, threshold, ttlSeconds = 7 * 24 * 3600 } = params;
     const now = nowSecs();
@@ -269,7 +279,7 @@ export class BondManager {
 
     const bondId = generateId('rec');
     this.bonds.set(bondId, bond);
-    this.persist();
+    await this.persist();
 
     return bond;
   }
@@ -287,7 +297,7 @@ export class BondManager {
     guardianPubkey: string,
     bondProof: string
   ): Promise<RecoveryBond | null> {
-    this.hydrate();
+    await this.hydrate();
 
     for (const [id, bond] of this.bonds.entries()) {
       if (bond.type !== 'recovery' || bond.recoveryEventId !== recoveryEventId) continue;
@@ -318,7 +328,7 @@ export class BondManager {
       };
 
       this.bonds.set(id, updated);
-      this.persist();
+      await this.persist();
       return updated;
     }
 
@@ -332,7 +342,7 @@ export class BondManager {
    * @returns The recovery token string, or null if threshold not met / not found
    */
   async executeRecovery(recoveryEventId: string): Promise<string | null> {
-    this.hydrate();
+    await this.hydrate();
 
     for (const [id, bond] of this.bonds.entries()) {
       if (bond.type !== 'recovery' || bond.recoveryEventId !== recoveryEventId) continue;
@@ -359,7 +369,7 @@ export class BondManager {
       };
 
       this.bonds.set(id, updated);
-      this.persist();
+      await this.persist();
       return recoveryToken;
     }
 
@@ -377,7 +387,7 @@ export class BondManager {
    * @returns The created AllowanceBond
    */
   async createAllowanceBond(params: CreateAllowanceParams): Promise<AllowanceBond> {
-    this.hydrate();
+    await this.hydrate();
 
     const {
       recipientPubkey,
@@ -424,7 +434,7 @@ export class BondManager {
 
     const bondId = generateId('alw');
     this.bonds.set(bondId, bond);
-    this.persist();
+    await this.persist();
 
     return bond;
   }
@@ -444,7 +454,7 @@ export class BondManager {
     amount: number,
     rail: 'lightning' | 'cashu' = 'lightning'
   ): Promise<SpendResult> {
-    this.hydrate();
+    await this.hydrate();
 
     for (const [id, bond] of this.bonds.entries()) {
       if (
@@ -497,7 +507,7 @@ export class BondManager {
       };
 
       this.bonds.set(id, updated);
-      this.persist();
+      await this.persist();
 
       return {
         success: true,
@@ -520,12 +530,12 @@ export class BondManager {
    * @param recipientPubkey - Recipient's pubkey
    * @returns Object with token count, sats value, and bond status
    */
-  getAllowanceBalance(recipientPubkey: string): {
+  async getAllowanceBalance(recipientPubkey: string): Promise<{
     tokensRemaining: number;
     satsRemaining: number;
     status: AllowanceBond['status'] | 'not_found';
-  } {
-    this.hydrate();
+  }> {
+    await this.hydrate();
 
     for (const bond of this.bonds.values()) {
       if (bond.type === 'allowance' && bond.recipientPubkey === recipientPubkey) {
@@ -551,8 +561,8 @@ export class BondManager {
    * @param type - Optional bond type filter
    * @returns Array of bonds with their IDs
    */
-  listBonds(type?: BondType): Array<{ id: string; bond: Sig4SatsBond }> {
-    this.hydrate();
+  async listBonds(type?: BondType): Promise<Array<{ id: string; bond: Sig4SatsBond }>> {
+    await this.hydrate();
 
     const result: Array<{ id: string; bond: Sig4SatsBond }> = [];
     for (const [id, bond] of this.bonds.entries()) {
@@ -575,8 +585,8 @@ export class BondManager {
    * @param bondId - Bond ID to look up
    * @returns The bond, or undefined if not found
    */
-  getBond(bondId: string): Sig4SatsBond | undefined {
-    this.hydrate();
+  async getBond(bondId: string): Promise<Sig4SatsBond | undefined> {
+    await this.hydrate();
     return this.bonds.get(bondId);
   }
 
@@ -586,8 +596,8 @@ export class BondManager {
    *
    * @returns Number of bonds expired
    */
-  expireStaleBonds(): number {
-    this.hydrate();
+  async expireStaleBonds(): Promise<number> {
+    await this.hydrate();
 
     const now = nowSecs();
     let count = 0;
@@ -602,20 +612,20 @@ export class BondManager {
       }
     }
 
-    if (count > 0) this.persist();
+    if (count > 0) await this.persist();
     return count;
   }
 
   /**
    * Clear all bonds (for testing / reset).
    */
-  clearAll(): void {
+  async clearAll(): Promise<void> {
     this.bonds.clear();
     this.loaded = false;
     try {
-      localStorage.removeItem('satnam:sig4sats:bonds');
+      await this.vault.storeSig4SatsBonds('[]');
     } catch {
-      // ignore
+      // ignore — vault may not be unlocked during test teardown
     }
   }
 }
@@ -628,10 +638,13 @@ let _bondManagerInstance: BondManager | null = null;
 
 /**
  * Get the module-level BondManager singleton.
+ *
+ * @param vault - OPFS Vault instance. Required on first call to initialize
+ *   the singleton. Subsequent calls return the existing instance.
  */
-export function getBondManager(): BondManager {
+export function getBondManager(vault: Vault): BondManager {
   if (!_bondManagerInstance) {
-    _bondManagerInstance = new BondManager();
+    _bondManagerInstance = new BondManager(vault);
   }
   return _bondManagerInstance;
 }
