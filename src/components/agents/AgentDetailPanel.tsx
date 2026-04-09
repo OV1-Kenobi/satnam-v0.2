@@ -21,12 +21,10 @@ import {
   CreditCard,
   Activity,
   Users,
-  ChevronDown,
-  ChevronUp,
   Copy,
   CheckCheck,
 } from 'lucide-react';
-import type { AgentProfile } from '../../hooks/useAgentProfile.js';
+import type { AgentViewModel } from '../../hooks/useAgentProfile.js';
 import { useCreditLifecycle } from '../../hooks/useCreditLifecycle.js';
 import { useSkillManager } from '../../hooks/useSkillManager.js';
 import SpendPolicyEditor from './SpendPolicyEditor.js';
@@ -36,7 +34,7 @@ import SpendPolicyEditor from './SpendPolicyEditor.js';
 // ---------------------------------------------------------------------------
 
 interface AgentDetailPanelProps {
-  agent: AgentProfile;
+  agent: AgentViewModel;
   onBack: () => void;
   onEdit?: (id: string) => void;
 }
@@ -84,37 +82,6 @@ function CopyPubkey({ pubkey }: { pubkey: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Collapsible section
-// ---------------------------------------------------------------------------
-
-function Section({
-  title,
-  children,
-  defaultOpen = true,
-}: {
-  title: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  return (
-    <div className="card">
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between"
-        aria-expanded={open}
-      >
-        <h3 className="text-xs font-medium text-[#555555] uppercase tracking-widest">{title}</h3>
-        {open ? <ChevronUp size={14} className="text-[#555555]" /> : <ChevronDown size={14} className="text-[#555555]" />}
-      </button>
-      {open && <div className="mt-4">{children}</div>}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Tab navigation
 // ---------------------------------------------------------------------------
 
@@ -131,8 +98,8 @@ const TABS: Array<{ id: DetailTab; label: string; Icon: typeof User }> = [
 // Profile tab
 // ---------------------------------------------------------------------------
 
-function ProfileTab({ agent }: { agent: AgentProfile }) {
-  const statusColor: Record<AgentProfile['status'], string> = {
+function ProfileTab({ agent }: { agent: AgentViewModel }) {
+  const statusColor: Record<AgentViewModel['status'], string> = {
     active: 'text-green-500',
     paused: 'text-yellow-500',
     error: 'text-red-500',
@@ -199,7 +166,7 @@ function ProfileTab({ agent }: { agent: AgentProfile }) {
 // Wallet tab
 // ---------------------------------------------------------------------------
 
-function WalletTab({ agent }: { agent: AgentProfile }) {
+function WalletTab({ agent }: { agent: AgentViewModel }) {
   return (
     <div className="space-y-5">
       {/* Balance summary */}
@@ -233,7 +200,7 @@ function WalletTab({ agent }: { agent: AgentProfile }) {
 // Skills tab
 // ---------------------------------------------------------------------------
 
-function SkillsTab({ agent }: { agent: AgentProfile }) {
+function SkillsTab({ agent }: { agent: AgentViewModel }) {
   const { skills } = useSkillManager();
   const agentSkills = skills.filter(s => agent.skills.includes(s.id));
 
@@ -291,7 +258,7 @@ function SkillsTab({ agent }: { agent: AgentProfile }) {
 // Credits tab
 // ---------------------------------------------------------------------------
 
-function CreditsTab({ agent }: { agent: AgentProfile }) {
+function CreditsTab({ agent }: { agent: AgentViewModel }) {
   const { envelopes, isLoading } = useCreditLifecycle();
   const agentEnvelopes = envelopes.filter(e => e.agentId === agent.id);
 
@@ -349,7 +316,7 @@ function CreditsTab({ agent }: { agent: AgentProfile }) {
 // Activity tab
 // ---------------------------------------------------------------------------
 
-function ActivityTab({ agent }: { agent: AgentProfile }) {
+function ActivityTab({ agent }: { agent: AgentViewModel }) {
   const mockActivity = [
     { ts: Date.now() / 1000 - 120, msg: 'Heartbeat received' },
     { ts: Date.now() / 1000 - 300, msg: 'Task completed: summarization job' },
@@ -383,7 +350,7 @@ function ActivityTab({ agent }: { agent: AgentProfile }) {
 // Delegation tab
 // ---------------------------------------------------------------------------
 
-function DelegationTab({ agent }: { agent: AgentProfile }) {
+function DelegationTab({ agent }: { agent: AgentViewModel }) {
   return (
     <div className="space-y-3">
       <div className="space-y-2">
