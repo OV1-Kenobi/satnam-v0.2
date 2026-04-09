@@ -41,6 +41,10 @@ import type { AgentProfileContent, AgentProfile, AgentWalletPolicy } from '../li
 import type { BuildAgentProfileParams } from '../lib/nip-sa/profile-builder.js';
 import type { AgentOperationalState } from '../lib/nip-sa/agent-state.js';
 import type { CepsClient } from '../lib/ceps/ceps-client.js';
+// Re-exports for component consumers
+export type { AgentProfile } from '../lib/nip-sa/types.js';
+export type { AgentSpendPolicy as SpendPolicy } from '../lib/agent/wallet/spend-policy.js';
+
 
 // ---------------------------------------------------------------------------
 // Types
