@@ -10,7 +10,7 @@
  * - pushRegistration: current push device registration status
  */
 
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import type { InAppNotification, PushRegistration } from '../lib/messaging/types.js';
 
 // Re-export for consumers that import from this hook
@@ -75,3 +75,11 @@ export function useNotifications(
 }
 
 export default useNotifications;
+
+/**
+ * NotificationsProvider — context wrapper for the notification subtree.
+ * Currently a pass-through since useNotifications is self-contained.
+ */
+export function NotificationsProvider({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}

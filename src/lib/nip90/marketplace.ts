@@ -18,7 +18,7 @@ import { finalizeEvent, nip19 } from "nostr-tools";
 import { hexToBytes } from "@noble/hashes/utils";
 
 import type { DvmJobRequest, DvmJobResult, DvmProvider, DvmFeedbackStatus, PaymentInfo } from "./types.js";
-import { constructJobRequest, constructJobFeedback, parseJobResult } from "./construct.js";
+import { constructJobRequest, constructJobFeedback } from "./construct.js";
 import { subscribeToJobResults, fetchProviders, waitForJobResult } from "./subscribe.js";
 import type { NwcConnectionManager, PaymentResult } from "../nwc/connection-manager.js";
 import type { CepsClient } from "../ceps/ceps-client.js";

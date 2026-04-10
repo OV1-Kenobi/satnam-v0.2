@@ -61,7 +61,7 @@ function MessagesContent() {
     selectedThreadId,
     messages,
     selectThread,
-  } = useMessaging({ selfPubkey: '' });
+  } = useMessaging({ localPubkeyHex: '' });
 
   // Mobile: track if we're showing the chat (vs thread list)
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');

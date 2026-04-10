@@ -137,9 +137,8 @@ function ThreadRow({
   isSelected: boolean;
   onSelect: () => void;
 }) {
-  const lastMsg = thread.lastMessage;
-  const preview = lastMsg ? truncate(lastMsg.content) : 'No messages yet';
-  const time = lastMsg ? formatTime(lastMsg.timestamp) : '';
+  const preview = thread.lastMessagePreview ? truncate(thread.lastMessagePreview) : 'No messages yet';
+  const time = thread.lastActivity ? formatTime(thread.lastActivity) : '';
 
   return (
     <button
@@ -232,8 +231,8 @@ export default function ThreadList({
     if (!search.trim()) return threads;
     const q = search.toLowerCase();
     return threads.filter(t =>
-      t.name.toLowerCase().includes(q) ||
-      t.lastMessage?.content.toLowerCase().includes(q)
+      threadDisplayName(t).toLowerCase().includes(q) ||
+      (t.lastMessagePreview ?? '').toLowerCase().includes(q)
     );
   }, [threads, search]);
 

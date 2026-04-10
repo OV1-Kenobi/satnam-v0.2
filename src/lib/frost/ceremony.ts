@@ -144,12 +144,18 @@ async function loadBifrost(): Promise<{
       generateRound1Package(participantIndex, threshold, totalShares) {
         // Dealer-keygen: generate a new group + shares for the given parameters.
         // The calling node acts as the trusted dealer in the first round.
-        const bifLib = libLib as unknown as Record<string, (...args: unknown[]) => unknown>;
-        const { group, shares } = bifLib['generate_dealer_package'](threshold, totalShares) as { group: unknown; shares: unknown[] };
+        const bifLib = libLib as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
+        const generateDealerPkg = bifLib['generate_dealer_package'];
+        const encodeGroupPkg = bifLib['encode_group_pkg'];
+        const encodeSharePkg = bifLib['encode_share_pkg'];
+        if (!generateDealerPkg || !encodeGroupPkg || !encodeSharePkg) {
+          throw new Error('bifrost: missing required exports');
+        }
+        const { group, shares } = generateDealerPkg(threshold, totalShares) as { group: unknown; shares: unknown[] };
         // Serialize group as commitments bytes and this participant's secret
         const enc = new TextEncoder();
-        const commitments = enc.encode(bifLib['encode_group_pkg'](group) as string);
-        const secretPackage = enc.encode(bifLib['encode_share_pkg'](shares[participantIndex]) as string);
+        const commitments = enc.encode(encodeGroupPkg(group) as string);
+        const secretPackage = enc.encode(encodeSharePkg(shares[participantIndex]) as string);
         return { commitments, secretPackage };
       },
 

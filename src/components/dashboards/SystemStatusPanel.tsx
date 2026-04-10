@@ -226,7 +226,7 @@ export interface SystemStatusPanelProps {
   compact?: boolean;
   className?: string;
   /** SpacetimeBridge instance for presence/heartbeat monitoring */
-  bridge: SpacetimeBridge;
+  bridge?: SpacetimeBridge;
 }
 
 export default function SystemStatusPanel({
@@ -235,7 +235,12 @@ export default function SystemStatusPanel({
   bridge,
 }: SystemStatusPanelProps) {
   const { isConnected, isAuthenticated } = usePylon();
-  const { presenceStatus, computeAssignments, heartbeatActive } = useSpacetimeBridge(bridge);
+  // useSpacetimeBridge requires a non-null bridge; we always call it (hooks can't be conditional)
+  // but guard its output when bridge is absent.
+  const spacetimeBridgeState = useSpacetimeBridge(bridge!);
+  const presenceStatus = bridge ? spacetimeBridgeState.presenceStatus : 'offline' as const;
+  const computeAssignments = bridge ? spacetimeBridgeState.computeAssignments : [];
+  const heartbeatActive = bridge ? spacetimeBridgeState.heartbeatActive : false;
 
   const [showRelays, setShowRelays] = useState(!compact);
   const [swStatus]   = useState<ServiceWorkerStatus>(getSWStatus);

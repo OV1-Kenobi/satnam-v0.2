@@ -11,7 +11,6 @@
  */
 
 import React, { useState } from 'react';
-import clsx from 'clsx';
 import { Zap, Plus, X, Send } from 'lucide-react';
 import { useMarketplace } from '../../hooks/useMarketplace.js';
 import type { DVMProvider } from '../../hooks/useMarketplace.js';

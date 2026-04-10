@@ -216,7 +216,7 @@ export class LNbitsClient {
    */
   async createInvoice(amountSats: number, memo: string): Promise<string> {
     const key = await this.getApiKey('invoice');
-    const _body = {
+    const body = {
       out: false,
       amount: amountSats,
       memo: memo || '',
@@ -226,7 +226,8 @@ export class LNbitsClient {
       'POST',
       '/api/v1/payments',
       key,
-        );
+      body,
+    );
     return raw.payment_request ?? '';
   }
 
@@ -241,11 +242,13 @@ export class LNbitsClient {
    */
   async payInvoice(bolt11: string): Promise<LNbitsPayment> {
     const key = await this.getApiKey('admin');
-      const raw = await this.request<LNbitsPaymentApiResponse>(
+    const body = { out: true, bolt11 };
+    const raw = await this.request<LNbitsPaymentApiResponse>(
       'POST',
       '/api/v1/payments',
       key,
-        );
+      body,
+    );
     return mapPayment(raw);
   }
 
@@ -299,7 +302,7 @@ export class LNbitsClient {
    */
   async createLnurlPay(username: string): Promise<import('./types.js').LNURLPayConfig> {
     const key = await this.getApiKey('admin');
-    const _body = {
+    const body = {
       description: `Lightning Address for ${username}`,
       min: 1,
       max: 1_000_000, // 1M sats
@@ -311,7 +314,7 @@ export class LNbitsClient {
       min: number;
       max: number;
       lnurl: string;
-    }>('POST', '/lnurlp/api/v1/links', key);
+    }>('POST', '/lnurlp/api/v1/links', key, body);
 
     return {
       description: raw.description ?? '',

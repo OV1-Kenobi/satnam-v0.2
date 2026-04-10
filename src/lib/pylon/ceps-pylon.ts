@@ -49,6 +49,7 @@ const RETRY_MAX_ATTEMPTS = 5;
 
 /** EOSE timeout for list queries (ms). */
 const _LIST_EOSE_TIMEOUT_MS = 8_000;
+void _LIST_EOSE_TIMEOUT_MS;
 
 // ---------------------------------------------------------------------------
 // Types

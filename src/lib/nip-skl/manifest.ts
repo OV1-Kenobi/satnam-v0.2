@@ -28,7 +28,9 @@ export async function fetchSkillManifest(
     throw new Error(`Invalid skillScopeId format: ${skillScopeId}`);
   }
 
-  const [, pubkey, dTag] = parts;
+  const [, pubkeyRaw, dTagRaw] = parts;
+  const pubkey = pubkeyRaw ?? '';
+  const dTag = dTagRaw ?? '';
 
   // Use CEPS for relay subscription (v2 architecture)
   const { listEventsWithCeps } = await import("../ceps/index");

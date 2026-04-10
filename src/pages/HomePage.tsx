@@ -53,11 +53,6 @@ import RailHealthIndicator from '../components/payments/RailHealthIndicator.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatSats(msats: bigint | number): string {
-  const sats = typeof msats === 'bigint' ? Number(msats) / 1000 : msats;
-  return Math.floor(sats).toLocaleString();
-}
-
 // ---------------------------------------------------------------------------
 // Overview stat card
 // ---------------------------------------------------------------------------
@@ -66,7 +61,7 @@ function StatCard({
   icon: Icon,
   label,
   value,
-  sub = false,
+  sub = '',
   href,
   color = '#f7931a',
 }: {
@@ -146,7 +141,7 @@ function MultiRailBalanceSummary({ totalNwcMsats }: { totalNwcMsats: bigint }) {
     },
   ];
 
-  const totalSats = rails.reduce((s, r) => s + r.balanceSats);
+  const totalSats = rails.reduce((s, r) => s + r.balanceSats, 0);
 
   return (
     <Link
@@ -342,22 +337,22 @@ export default function HomePage() {
 
   // Hooks (data may be empty — hooks handle their own loading states)
   const { agents } = useAgentProfile();
-  const { activeJobs, providers } = useMarketplace();
+  const { activeJobs, providers } = useMarketplace([]);
   const { envelopes } = useCreditLifecycle();
   const { balance } = useNwc();
   const { groups } = useFrost();
 
   // Derived stats
-  const activeAgents = agents.filter((a) => a.status === 'active').length;
+  const activeAgents = agents.filter((a) => a.status === 'working').length;
   const totalAgents = agents.length;
-  const pendingJobs = activeJobs.filter((j) => j.status === 'pending' || j.status === 'processing').length;
+  const pendingJobs = activeJobs.filter((j) => !j.result).length;
   const activeEnvelopes = envelopes.filter((e) => !['Settlement', 'Default'].includes(e.state)).length;
   const nwcMsats = balance ?? 84_000_000n; // fallback for display
 
   // Recent combined activity (mock until real event stream)
   const recentActivity = [
     ...(agents.length > 0 ? [{ Icon: Bot, text: `Agent "${agents[0].name}" is ${agents[0].status}`, time: '2m ago', color: 'text-green-500' }] : []),
-    ...(activeJobs.length > 0 ? [{ Icon: Store, text: `Job ${activeJobs[0].jobType} — ${activeJobs[0].status}`, time: '5m ago', color: 'text-blue-400' }] : []),
+    ...(activeJobs.length > 0 ? [{ Icon: Store, text: `Job ${activeJobs[0].requestEventId.slice(0, 8)} — ${activeJobs[0].result ? 'completed' : 'pending'}`, time: '5m ago', color: 'text-blue-400' }] : []),
     ...(groups.length > 0 ? [{ Icon: Shield, text: `Group "${groups[0].metadata.name}" active`, time: '1h ago', color: 'text-[#ffd700]' }] : []),
   ];
 

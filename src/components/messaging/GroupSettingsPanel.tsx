@@ -259,7 +259,7 @@ export default function GroupSettingsPanel({
                 onRemove={() => handleRemoveMember(pubkey)}
                 onTransferAdmin={() => {
                   // In production: update group config to change admin
-                  alert(`Transfer admin to ${p.displayName ?? p.pubkey}? (Not implemented in dev mode)`);
+                  alert(`Transfer admin to ${pubkey}? (Not implemented in dev mode)`);
                 }}
               />
             ))}

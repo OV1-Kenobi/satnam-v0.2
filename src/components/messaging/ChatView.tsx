@@ -152,9 +152,7 @@ function MessageBubble({
           aria-hidden="true"
           title={senderName}
         >
-          {sender?.avatarUrl
-            ? <img src={sender.avatarUrl} alt={senderName} className="w-full h-full rounded-full object-cover" />
-            : senderName.slice(0, 2).toUpperCase()}
+          {senderName.slice(0, 2).toUpperCase()}
         </div>
       )}
 
@@ -164,15 +162,7 @@ function MessageBubble({
         {!self && showSender && thread.type === 'group' && (
           <div className="flex items-center gap-1.5 mb-1 ml-1">
             <span className="text-[10px] font-medium text-slate-400">{senderName}</span>
-            {sender?.polTrustScore != null && sender.polTrustScore >= 30 && (
-              <span
-                className="inline-flex items-center gap-0.5 text-[8px] text-[#f7931a] bg-[#f7931a]/10 px-1 py-0.5 rounded"
-                aria-label={`Proof of Life trust score ${sender.polTrustScore}`}
-              >
-                <Shield size={7} aria-hidden="true" />
-                PoL {sender.polTrustScore}
-              </span>
-            )}
+
           </div>
         )}
 
@@ -199,7 +189,7 @@ function MessageBubble({
           )}
         >
           <span className="text-[10px] text-slate-600">
-            {formatMessageTime(message.timestamp)}
+            {formatMessageTime(message.createdAt)}
           </span>
 
           {/* Read receipt (sent messages only) */}
@@ -410,11 +400,11 @@ export default function ChatView({
               style={{ background: thread.type === 'self' ? '#f7931a' : `hsl(${avatarHue(thread.id)},50%,38%)` }}
               aria-hidden="true"
             >
-              {(thread.type === "group" ? thread.config.name : thread.type === "direct" ? (thread.recipientDisplayName ?? thread.recipientPubkey.slice(0, 8)) : "You").slice(0, 2).toUpperCase()}
+              {(thread.type === "direct" ? (thread.recipientDisplayName ?? thread.recipientPubkey.slice(0, 8)) : "You").slice(0, 2).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-slate-200 truncate">{thread.type === "group" ? thread.config.name : thread.type === "direct" ? (thread.recipientDisplayName ?? thread.recipientPubkey.slice(0, 8)) : "Note to Self"}</span>
+                <span className="text-sm font-semibold text-slate-200 truncate">{thread.type === "direct" ? (thread.recipientDisplayName ?? thread.recipientPubkey.slice(0, 8)) : "Note to Self"}</span>
                 <ProtocolIndicator protocol="nip17" />
               </div>
               {isDm && (thread as { polVerified?: boolean }).polVerified === true && (
@@ -438,12 +428,12 @@ export default function ChatView({
           ) : (
             messages.map((msg, i) => {
               const prev = messages[i - 1];
-              const showDate = !prev || !sameDay(prev.timestamp, msg.timestamp);
+              const showDate = !prev || !sameDay(prev.createdAt, msg.createdAt);
               const showSender = !prev || prev.senderPubkey !== msg.senderPubkey || showDate;
 
               return (
                 <React.Fragment key={msg.id}>
-                  {showDate && <DateHeader timestamp={msg.timestamp} />}
+                  {showDate && <DateHeader timestamp={msg.createdAt} />}
                   <MessageBubble
                     message={msg}
                     thread={thread}

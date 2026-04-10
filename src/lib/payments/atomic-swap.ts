@@ -308,6 +308,7 @@ export class AtomicSwapEngine {
       const meltResult = await this.meltCashuForInvoice(request.sourceMint, invoiceStr, amountSats);
       preimage = meltResult.preimage ?? '';
       melted = true;
+      void melted;
       markStep(step2, 'completed', preimage);
     } catch (err) {
       markStep(step2, 'failed');
@@ -771,3 +772,4 @@ export class AtomicSwapEngine {
     return 'pending'; // timed out
   }
 }
+

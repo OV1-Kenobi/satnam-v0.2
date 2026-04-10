@@ -19,18 +19,6 @@
  * @see SPECIFICATION.md §5.3 — PIN Gate
  */
 
-// argon2-browser is loaded at runtime via CDN / bundler — declare minimal interface
-declare module 'argon2-browser' {
-  interface Argon2HashResult { hash: Uint8Array; encoded: string; }
-  interface Argon2HashOptions {
-    pass: string; salt: string; time: number; mem: number;
-    parallelism: number; hashLen: number; type: number;
-  }
-  const ArgonType: { Argon2id: number };
-  function hash(opts: Argon2HashOptions): Promise<Argon2HashResult>;
-  const _default: { hash: typeof hash; ArgonType: typeof ArgonType };
-  export = _default;
-}
 import argon2 from 'argon2-browser';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';

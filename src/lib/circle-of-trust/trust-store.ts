@@ -277,22 +277,6 @@ export class TrustStore {
     }
   }
 
-  /**
-   * Register a bucket key in the index.
-   */
-  private async _registerBucketKey(key: string): Promise<void> {
-    const existing = await this._listAllBuckets();
-    if (!existing.includes(key)) {
-      existing.push(key);
-      const bytes = new TextEncoder().encode(JSON.stringify(existing));
-      await this.vault.storeNfcKey('cot:index', 'k1' as any, bytes);
-    }
-  }
-
-  /**
-   * Override _saveBucket to also register the bucket key.
-   * This ensures listTrustedContacts() can discover all buckets.
-   */
   // -------------------------------------------------------------------------
   // Re-export addTrustedContact with index registration
   // -------------------------------------------------------------------------

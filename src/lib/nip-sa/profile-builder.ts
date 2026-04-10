@@ -305,15 +305,13 @@ export async function updateAgentProfile(
 
   // Fetch the existing profile from relay to merge tags and content
   const existing = await ceps.list(
-    [
-      {
-        kinds: [39200],
-        authors: [pubkey],
-        '#d': ['profile'],
-        limit: 1,
-      },
-    ],
-    undefined,
+    {
+      kinds: [39200],
+      authors: [pubkey],
+      '#d': ['profile'],
+      limit: 1,
+    },
+    undefined as unknown as string[],
     { eoseTimeout: 5000 }
   );
 
@@ -399,3 +397,4 @@ export async function deactivateAgent(
 
   return ceps.publishEvent(deletionEvent as any);
 }
+

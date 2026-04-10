@@ -29,12 +29,12 @@ const STORAGE_KEY = 'satnam:notes-to-self';
 // ---------------------------------------------------------------------------
 
 /** Simulate kind:14 → kind:1059 wrapping.  Returns a fake event ID. */
-function mockWrap(content: string): string {
+function mockWrap(_content: string): string {
   return `mock_evt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
 /** Simulate kind:1059 unwrapping.  Returns the content unchanged. */
-function mockUnwrap(eventId: string, content: string): string {
+function _mockUnwrap(eventId: string, content: string): string {
   void eventId;
   return content;
 }
@@ -61,10 +61,7 @@ function writeNotes(notes: SelfNote[]): void {
 // ---------------------------------------------------------------------------
 
 export class NoteToSelfClient {
-  private readonly selfPubkey: string;
-
-  constructor(selfPubkey: string) {
-    this.selfPubkey = selfPubkey;
+  constructor(_selfPubkey: string) {
   }
 
   /**

@@ -120,7 +120,7 @@ export default function EphemeralControls({
     if (seconds === null && !burnAfterRead) {
       onChange(null);
     } else {
-      onChange({ ttl: seconds, burnAfterRead: value?.burnAfterRead ?? false });
+      onChange({ ttl: seconds ?? 0, burnAfterRead: value?.burnAfterRead ?? false });
     }
     setShowCustom(false);
     setOpen(false);
@@ -131,7 +131,7 @@ export default function EphemeralControls({
     if (!nextBurn && ttl === null) {
       onChange(null);
     } else {
-      onChange({ ttl: ttl, burnAfterRead: nextBurn });
+      onChange({ ttl: ttl ?? 0, burnAfterRead: nextBurn });
     }
   }, [burnAfterRead, ttl, onChange]);
 

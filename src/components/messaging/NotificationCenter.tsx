@@ -66,8 +66,10 @@ function ThreadNotifGroup({
   notifications: InAppNotification[];
   onMarkRead: (threadId: string) => void;
 }) {
-  const unread = notifications.filter(n => !n.isRead);
+  const unread = notifications.filter(n => !n.read);
   const latest = notifications[0];
+
+  if (!latest) return null;
 
   return (
     <div className="px-3 py-2 hover:bg-slate-800/50 transition-colors cursor-pointer rounded-lg">
@@ -89,19 +91,19 @@ function ThreadNotifGroup({
                   {unread.length}
                 </span>
               )}
-              <span className="text-[10px] text-slate-600">{formatTime(latest.timestamp)}</span>
+              <span className="text-[10px] text-slate-600">{formatTime(latest.receivedAt)}</span>
             </div>
           </div>
 
           {notifications.length > 1 && (
             <p className="text-[10px] text-slate-500 mb-0.5">
-              {notifications.length} new messages from {latest.senderName}
+              {notifications.length} new messages from {latest.senderDisplayName ?? latest.senderPubkey.slice(0, 8)}
             </p>
           )}
 
           <p className="text-xs text-slate-400 truncate">
-            {isGroup && <span className="text-[#f7931a]">{latest.senderName}: </span>}
-            {latest.preview}
+            {isGroup && <span className="text-[#f7931a]">{latest.senderDisplayName ?? latest.senderPubkey.slice(0, 8)}: </span>}
+            {latest.messagePreview}
           </p>
         </div>
 
@@ -154,7 +156,7 @@ export default function NotificationCenter({
 
   // Sort threads by most recent notification
   const sortedThreadIds = Array.from(grouped.entries())
-    .sort(([, a], [, b]) => (b[0]?.timestamp ?? 0) - (a[0]?.timestamp ?? 0))
+    .sort(([, a], [, b]) => (b[0]?.receivedAt ?? 0) - (a[0]?.receivedAt ?? 0))
     .map(([id]) => id);
 
   return (
@@ -229,12 +231,16 @@ export default function NotificationCenter({
                 {sortedThreadIds.map(threadId => {
                   const group = grouped.get(threadId)!;
                   const first = group[0];
+                  const derivedThreadName = first.threadType === 'group'
+                    ? (first.threadId.slice(0, 8) + '…')
+                    : (first.senderDisplayName ?? first.senderPubkey.slice(0, 8));
+                  const derivedIsGroup = first.threadType === 'group';
                   return (
                     <ThreadNotifGroup
                       key={threadId}
                       threadId={threadId}
-                      threadName={first.threadName}
-                      isGroup={first.isGroup}
+                      threadName={derivedThreadName}
+                      isGroup={derivedIsGroup}
                       notifications={group}
                       onMarkRead={markThreadRead}
                     />

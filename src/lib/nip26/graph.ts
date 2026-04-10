@@ -36,6 +36,7 @@ const _ROLE_LEVEL: Record<RoleType, number> = {
   [RoleType.Adult]: 2,
   [RoleType.Offspring]: 3,
 };
+void _ROLE_LEVEL;
 
 /**
  * Capability → Set of roles that have the capability.
@@ -204,6 +205,7 @@ export class DelegationGraph {
       if (validDelegations.length === 0) break;
 
       const delegation = validDelegations[0];
+      if (!delegation) break;
       chain.push(delegation);
 
       // If delegator is a known Guardian, stop
@@ -447,8 +449,8 @@ export class DelegationGraph {
     const chunks = this._splitIntoChunks(bytes, 16);
     for (let i = 0; i < chunks.length; i += 2) {
       const syntheticUid = `${storageKey.slice(0, 14)}_${i}`;
-      const lo = chunks[i] ? this._padTo16(chunks[i]) : new Uint8Array(16);
-      const hi = chunks[i + 1] ? this._padTo16(chunks[i + 1]) : new Uint8Array(16);
+      const lo = chunks[i] ? this._padTo16(chunks[i]!) : new Uint8Array(16);
+      const hi = chunks[i + 1] ? this._padTo16(chunks[i + 1]!) : new Uint8Array(16);
       await vault.storeNfcKey(syntheticUid, 'k1', lo);
       await vault.storeNfcKey(syntheticUid, 'k2', hi);
     }
@@ -547,7 +549,9 @@ export class DelegationGraph {
       const roleTag = event.tags.find(t => t[0] === 'role');
       const role = roleTag?.[1] as RoleType | undefined;
 
-      const [, delegatorPubkey, conditions, signature] = delegationTag;
+      const delegatorPubkey = delegationTag[1] ?? '';
+      const conditions = delegationTag[2] ?? '';
+      const signature = delegationTag[3] ?? '';
 
       return {
         delegateePubkey: event.pubkey,

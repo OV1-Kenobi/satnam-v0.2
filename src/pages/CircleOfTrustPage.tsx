@@ -297,7 +297,7 @@ export default function CircleOfTrustPage() {
 
             {activeTab === 'identity' && (
               <IdentityTrustPanel
-                profile={identityProfile}
+                profile={identityProfile('')}
                 isLoading={isLoading}
               />
             )}

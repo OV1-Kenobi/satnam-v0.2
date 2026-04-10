@@ -23,8 +23,6 @@
  * @see phase3-spec-sections.md §7.2 — NIP-AC Credit Lifecycle
  */
 
-import { nip19 } from 'nostr-tools';
-import { hexToBytes } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import type { CepsClient } from '../ceps/ceps-client.js';
@@ -116,26 +114,6 @@ export type CreditLifecycleCallback = (event: {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Decode an nsec bech32 or hex secret key to raw bytes.
- * @internal
- */
-function _decodeSecretKey(nsecOrHex: string): Uint8Array {
-  if (/^[0-9a-fA-F]{64}$/.test(nsecOrHex)) {
-    return hexToBytes(nsecOrHex);
-  }
-  if (nsecOrHex.startsWith('nsec1')) {
-    const decoded = nip19.decode(nsecOrHex);
-    if (decoded.type !== 'nsec') {
-      throw new Error('Expected nsec bech32 string, got: ' + decoded.type);
-    }
-    return decoded.data as Uint8Array;
-  }
-  throw new Error(
-    'Invalid secret key format — expected nsec bech32 or 64-char hex'
-  );
-}
 
 /**
  * Generate a short random hex string for use as a d-tag identifier.
@@ -570,16 +548,12 @@ export function calculateReputationDelta(params: {
  */
 export class CreditLifecycleManager {
   private readonly ceps: CepsClient;
-  private readonly _vault: {
-    loadAgentNsec(agentNpub: string): Promise<string>;
-  };
 
   constructor(
     ceps: CepsClient,
-    vault: { loadAgentNsec(agentNpub: string): Promise<string> }
+    _vault?: { loadAgentNsec(agentNpub: string): Promise<string> }
   ) {
     this.ceps = ceps;
-    this._vault = vault;
   }
 
   /**
@@ -726,14 +700,14 @@ export class CreditLifecycleManager {
             const eTag = event.tags.find((t: string[]) => t[0] === 'e');
             const envelopeId = eTag?.[1] ?? '';
 
-            const typeMap: Record<number, string> = {
+            const typeMap: Record<number, 'offer' | 'settlement' | 'default' | 'revocation'> = {
               39241: 'offer',
               39244: 'settlement',
               39245: 'default',
               1985: 'revocation',
             };
 
-            const type = typeMap[event.kind];
+            const type = typeMap[event.kind] as 'offer' | 'settlement' | 'default' | 'revocation' | undefined;
             if (type) {
               callback({
                 type,
@@ -772,13 +746,11 @@ export class CreditLifecycleManager {
     relayUrl: string
   ): Promise<CreditEnvelope[]> {
     const events = await this.ceps.list(
-      [
-        {
-          kinds: [39242],
-          authors: [agentPubkey],
-          limit: 100,
-        },
-      ],
+      {
+        kinds: [39242],
+        authors: [agentPubkey],
+        limit: 100,
+      },
       [relayUrl],
       { eoseTimeout: 5000 }
     );

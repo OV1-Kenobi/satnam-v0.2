@@ -185,7 +185,7 @@ export async function listEventsWithCeps(
   options?: { eoseTimeout?: number }
 ): Promise<CepsEvent[]> {
   const ceps = await loadCeps();
-  return ceps.list(filters, relays ?? getDefaultRelays(), options);
+  return ceps.list(filters[0] ?? {}, relays ?? getDefaultRelays(), options);
 }
 
 // ============================================================================

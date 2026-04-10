@@ -221,14 +221,12 @@ export function useAgentProfile(
 
     try {
       const events = await ceps.list(
-        [
-          {
-            kinds: [39200],
-            authors: [agentPubkey],
-            '#d': ['profile'],
-            limit: 1,
-          },
-        ],
+        {
+          kinds: [39200],
+          authors: [agentPubkey],
+          '#d': ['profile'],
+          limit: 1,
+        },
         relayUrl ? [relayUrl] : undefined,
         { eoseTimeout: 5000 }
       );
@@ -510,3 +508,4 @@ export function useAgentProfile(
     clearError,
   };
 }
+
