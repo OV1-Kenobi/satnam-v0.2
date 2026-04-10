@@ -33,7 +33,7 @@ type Rail = 'lightning' | 'cashu' | 'lnbits' | 'boltz';
 
 interface PaymentEvent {
   id: string;
-  rail: Rail ?? "lightning" as Rail;
+  rail: Rail;
   direction: 'in' | 'out';
   amountSats: number;
   description: string;
@@ -42,7 +42,7 @@ interface PaymentEvent {
 }
 
 interface RailBalance {
-  rail: Rail ?? "lightning" as Rail;
+  rail: Rail;
   balanceSats: number;
   label: string;
 }
@@ -76,10 +76,10 @@ function generateMockPayments(count = 8): PaymentEvent[] {
   ];
   return Array.from({ length: count }, (_, i) => ({
     id: `evt-${i}`,
-    rail: rails ?? "lightning" as Rail[i % rails.length],
+    rail: rails[i % rails.length]!,
     direction: i % 3 === 0 ? 'in' : 'out',
     amountSats: Math.floor(Math.random() * 50_000) + 100,
-    description: descriptions[i % descriptions.length],
+    description: descriptions[i % descriptions.length]!,
     timestamp: Math.floor(Date.now() / 1000) - i * 900,
     status: i === 0 ? 'pending' : 'complete',
   }));

@@ -61,7 +61,10 @@ function writeNotes(notes: SelfNote[]): void {
 // ---------------------------------------------------------------------------
 
 export class NoteToSelfClient {
-  constructor(_selfPubkey: string) {
+  private readonly selfPubkey: string;
+
+  constructor(selfPubkey: string) {
+    this.selfPubkey = selfPubkey;
   }
 
   /**
