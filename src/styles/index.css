@@ -246,7 +246,7 @@
            disabled:pointer-events-none disabled:opacity-50;
     background-color: var(--color-bitcoin);
     color: var(--color-text-inverse);
-    focus-visible:ring-color: var(--color-bitcoin);
+    --tw-ring-color: var(--color-bitcoin);
   }
 
   .btn-primary:hover:not(:disabled) {
