@@ -134,7 +134,11 @@ describe('LNbitsClient', () => {
       await fresh.connect(CONFIG);
 
       expect(fresh.isConnected()).toBe(true);
-      expect(vault.storeCashuProofs).toHaveBeenCalled();
+      // Source's connect() calls this.vault.storeLNbitsKey(...) for adminKey and
+      // invoiceKey. The vault stub's storeLNbitsKey is the direct spy to check.
+      // (The runtime prototype extension that routes storeLNbitsKey → storeCashuProofs
+      //  is bypassed by the stub's own implementation.)
+      expect(vault.storeLNbitsKey).toHaveBeenCalled();
     });
 
     it('disconnect() removes keys and sets isConnected to false', async () => {

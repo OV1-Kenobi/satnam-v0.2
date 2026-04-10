@@ -419,10 +419,18 @@ describe('SpacetimeBridge', () => {
     });
 
     it('publishes a heartbeat immediately (at interval start)', async () => {
+      // The source fires publishHeartbeat() immediately (not via a timer),
+      // then schedules a setInterval for subsequent heartbeats.
+      // With fake timers active we must NOT call runAllTimers (infinite loop
+      // from setInterval). Instead, stop the interval first, then flush the
+      // microtask queue so the immediate async publish can resolve.
       bridge.startHeartbeatInterval('agent-hex', 30_000);
 
-      // Advance timers to let the immediate publish happen
-      await vi.runAllTimersAsync();
+      // Stop the repeating interval so fake-timer advancement is finite
+      bridge.stopHeartbeatInterval();
+
+      // Flush all pending microtasks/promises (the immediate publish)
+      await vi.runAllTicksAsync();
 
       expect(mockCeps.publish).toHaveBeenCalled();
     });

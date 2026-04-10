@@ -228,7 +228,8 @@ describe('AgentCreateFlow', () => {
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
-    const nameInput = screen.getByLabelText('Name');
+    // The label text is "Name *" (asterisk in a child <span>); use regex to match
+    const nameInput = screen.getByLabelText(/Name/);
     await user.type(nameInput, 'My Test Agent');
     const nextBtn = screen.getByText(/Next/).closest('button');
     expect(nextBtn?.disabled).toBe(false);
@@ -240,7 +241,7 @@ describe('AgentCreateFlow', () => {
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
-    const nameInput = screen.getByLabelText('Name');
+    const nameInput = screen.getByLabelText(/Name/);
     await user.type(nameInput, 'My Test Agent');
     const nextBtn = screen.getByText(/Next/).closest('button');
     if (nextBtn) await user.click(nextBtn);
@@ -253,7 +254,7 @@ describe('AgentCreateFlow', () => {
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
-    const nameInput = screen.getByLabelText('Name');
+    const nameInput = screen.getByLabelText(/Name/);
     await user.type(nameInput, 'My Test Agent');
     const nextBtn = screen.getByText(/Next/).closest('button');
     if (nextBtn) await user.click(nextBtn);

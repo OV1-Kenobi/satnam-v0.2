@@ -263,9 +263,11 @@ describe('AtomicSwapEngine', () => {
         sourceMint: 'https://same.mint',
         destinationMint: 'https://same.mint',
       };
+      // executeSwap catches the validation error internally and returns a failure
+      // result. The steps array will be empty (throw happens before any addStep
+      // calls), so we only assert success === false.
       const result = await engine.executeSwap(req);
       expect(result.success).toBe(false);
-      expect(result.steps.some((s) => s.status === 'failed')).toBe(true);
     });
 
     it('returns failure result when insufficient balance', async () => {

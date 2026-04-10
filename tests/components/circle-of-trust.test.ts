@@ -163,26 +163,102 @@ describe('calculateCircleStats', () => {
     expect(stats.totalMeetings).toBe(0);
   });
 
+  /**
+   * calculateCircleStats computes trust scores from meeting data using
+   * TrustEngine.calculateTrustScore — it does NOT read the trustScore field.
+   *
+   * With only meeting data available (no ledger), the max achievable composite
+   * score is meetingDepth(max=30) + timeConsistency(max=30) = 60, which falls
+   * in the medium tier (30–70). Contacts with a single recent meeting score ~9
+   * and land in the new tier (<30).
+   *
+   * Tier boundaries (from trust-engine.ts constants):
+   *   HIGH_TRUST_THRESHOLD = 70  (composite > 70 → high)
+   *   NEW_CONTACT_THRESHOLD = 30 (composite < 30 → new)
+   *   30 ≤ composite ≤ 70       → medium
+   *
+   * We construct:
+   * - "medium" contact: several meetings spanning ~250 days → composite ~38-45
+   * - "new" contacts: 1 recent meeting each → composite ~9
+   */
   it('correctly counts tier buckets', () => {
-    const contacts = [
-      makeContact({ trustScore: 80, meetings: [makeMeeting(800000, 10)] }),
-      makeContact({ pubkey: 'bbbb', trustScore: 50, meetings: [makeMeeting(800001, 10)] }),
-      makeContact({ pubkey: 'cccc', trustScore: 20, meetings: [makeMeeting(800002, 10)] }),
-    ];
-    const stats = calculateCircleStats(contacts);
-    expect(stats.highTrustContacts).toBe(1);
-    expect(stats.mediumTrustContacts).toBe(1);
-    expect(stats.newContacts).toBe(1);
-    expect(stats.totalMeetings).toBe(3);
+    // Medium-tier contact: 3 meetings spanning ~250 days
+    // meetingDepth(3) ≈ 17, timeConsistency(250) ≈ Math.round(30*250/365) = 21 → composite ≈ 38
+    const mediumContact = makeContact({
+      pubkey: 'aaaa',
+      meetings: [
+        makeMeeting(800000, 260), // ~260 days ago
+        makeMeeting(800100, 130), // ~130 days ago
+        makeMeeting(800200, 10),  // recent
+      ],
+    });
+
+    // New-tier contacts: 1 recent meeting → meetingDepth ≈ 9, timeConsistency = 0 → composite ≈ 9
+    const newContact1 = makeContact({
+      pubkey: 'bbbb',
+      meetings: [makeMeeting(800001, 10)],
+    });
+    const newContact2 = makeContact({
+      pubkey: 'cccc',
+      meetings: [makeMeeting(800002, 10)],
+    });
+
+    const stats = calculateCircleStats([mediumContact, newContact1, newContact2]);
+
+    // All three contacts must be accounted for across the tier buckets
+    expect(stats.highTrustContacts + stats.mediumTrustContacts + stats.newContacts)
+      .toBe(3);
+    expect(stats.totalMeetings).toBe(5); // 3 + 1 + 1
+    expect(stats.totalContacts).toBe(3);
+
+    // mediumContact has composite ~38 → medium tier
+    expect(stats.mediumTrustContacts).toBeGreaterThanOrEqual(1);
+    // newContact1 and newContact2 have composite ~9 → new tier
+    expect(stats.newContacts).toBeGreaterThanOrEqual(2);
   });
 
+  /**
+   * avgTrustScore is computed from the actual calculated composite scores,
+   * not from the trustScore field on the contact.
+   *
+   * Both contacts have identical meeting profiles (1 meeting each, 30 days ago)
+   * so their computed composites are equal. The average therefore equals
+   * each individual score, which is the same for both.
+   *
+   * We test that:
+   *  1. avgTrustScore is in [0, 100]
+   *  2. avgTrustScore equals the composite of either individual contact
+   *     (since both are identical)
+   *  3. avgTrustScore is NOT influenced by the trustScore field
+   *     (we set different trustScore values but expect the same avg)
+   */
   it('avgTrustScore is correct', () => {
-    const contacts = [
-      makeContact({ trustScore: 60 }),
-      makeContact({ pubkey: 'bbbb', trustScore: 40 }),
-    ];
-    const stats = calculateCircleStats(contacts);
-    expect(stats.avgTrustScore).toBe(50);
+    // Both contacts have the same meeting profile → same computed composite
+    const contactA = makeContact({
+      pubkey: 'aaaa',
+      meetings: [makeMeeting(800000, 30)],
+      trustScore: 60, // ignored by calculateCircleStats
+    });
+    const contactB = makeContact({
+      pubkey: 'bbbb',
+      meetings: [makeMeeting(800001, 30)],
+      trustScore: 40, // ignored by calculateCircleStats
+    });
+
+    const stats = calculateCircleStats([contactA, contactB]);
+
+    // Computed composite for a single-meeting contact with 30-day span:
+    //   meetingDepth(1) = Math.round(30 * log2(2) / log2(11)) ≈ 9
+    //   timeConsistency(0) = 0  (only 1 meeting → no span)
+    //   composite ≈ 9
+    const expectedComposite = calculateTrustScore(contactA).composite;
+
+    // Both contacts have equal composites so avg = that composite
+    expect(stats.avgTrustScore).toBe(expectedComposite);
+
+    // Sanity bounds
+    expect(stats.avgTrustScore).toBeGreaterThanOrEqual(0);
+    expect(stats.avgTrustScore).toBeLessThanOrEqual(100);
   });
 });
 

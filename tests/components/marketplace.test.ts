@@ -41,15 +41,25 @@ vi.mock('../../src/hooks/useCreditLifecycle', () => ({
 // Test data
 // ---------------------------------------------------------------------------
 
+/**
+ * MOCK_PROVIDER matches the DVMProvider interface used by ProviderCard:
+ *   - supportedJobKinds: number[]    (NIP-90 job kind integers)
+ *   - skillScopeIds: string[]        (attested skill scope IDs)
+ *   - reputationScore: number        (0-1 float; displayed as score*100)
+ *   - relays: string[]
+ * Fields NOT on DVMProvider: picture, pricingInfo, skillAttestations,
+ * supportedJobTypes (all removed).
+ */
 const MOCK_PROVIDER = {
   pubkey: 'b1c2d3e4f5a6' + '00'.repeat(26),
   name: 'AI Research Provider',
   about: 'Specialized in research and summarization tasks',
-  picture: '',
-  supportedJobTypes: ['5000', '5001', '5600'],
-  pricingInfo: 'From 100 sats/job',
-  reputationScore: 87,
-  skillAttestations: ['skill-001', 'skill-002'],
+  // supportedJobKinds: number[] — NIP-90 kind integers (not strings)
+  supportedJobKinds: [5000, 5001, 5600],
+  // reputationScore is a 0–1 float; component renders (score * 100).toFixed(0)
+  reputationScore: 0.87,
+  // skillScopeIds drives the "N skills attested" display
+  skillScopeIds: ['skill-001', 'skill-002'],
   relays: ['wss://relay.damus.io', 'wss://nos.lol'],
 };
 
@@ -131,23 +141,21 @@ describe('ProviderCard', () => {
 
   it('renders supported job type chips', () => {
     render(React.createElement(ProviderCard, { provider: MOCK_PROVIDER }));
+    // supportedJobKinds: [5000, 5001, 5600] → Text Generation, Text Summary, Web Search
     expect(screen.getByText('Text Generation')).toBeTruthy();
     expect(screen.getByText('Text Summary')).toBeTruthy();
     expect(screen.getByText('Web Search')).toBeTruthy();
   });
 
-  it('renders pricing info', () => {
-    render(React.createElement(ProviderCard, { provider: MOCK_PROVIDER }));
-    expect(screen.getByText('From 100 sats/job')).toBeTruthy();
-  });
-
   it('renders reputation score', () => {
     render(React.createElement(ProviderCard, { provider: MOCK_PROVIDER }));
+    // reputationScore=0.87 → (0.87 * 100).toFixed(0) = "87" → text "(87/100)"
     expect(screen.getByText('(87/100)')).toBeTruthy();
   });
 
   it('renders skill attestation count', () => {
     render(React.createElement(ProviderCard, { provider: MOCK_PROVIDER }));
+    // skillScopeIds has 2 entries → "2 skills attested"
     expect(screen.getByText('2 skills attested')).toBeTruthy();
   });
 
@@ -196,9 +204,10 @@ describe('ProviderCard', () => {
     expect(screen.getAllByText(/b1c2d3e4/).length).toBeGreaterThan(0);
   });
 
-  it('renders reputation as "Excellent" for 87/100', () => {
+  it('renders reputation as "Good" for score 0.87 (≥0.7, <0.9)', () => {
     render(React.createElement(ProviderCard, { provider: MOCK_PROVIDER }));
-    expect(screen.getByText('Good')).toBeTruthy(); // 87 = Good (≥70, <90)
+    // reputationScore=0.87: ≥0.8 → "Good" label (reputationLabel function)
+    expect(screen.getByText('Good')).toBeTruthy();
   });
 });
 
@@ -251,8 +260,9 @@ describe('JobSubmitForm', () => {
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
-    const submitBtn = screen.getByText('Submit Job').closest('button');
-    expect(submitBtn?.disabled).toBe(true);
+    // Find the submit button specifically within the form footer (not the heading)
+    const submitBtn = screen.getByRole('button', { name: /Submit Job/ });
+    expect((submitBtn as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('submit button enabled after filling required fields', async () => {
@@ -263,8 +273,8 @@ describe('JobSubmitForm', () => {
     }));
     const inputArea = screen.getByLabelText('Input');
     await user.type(inputArea, 'Summarize the Bitcoin whitepaper');
-    const submitBtn = screen.getByText('Submit Job').closest('button');
-    expect(submitBtn?.disabled).toBe(false);
+    const submitBtn = screen.getByRole('button', { name: /Submit Job/ });
+    expect((submitBtn as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('renders encryption toggle', () => {
@@ -309,7 +319,8 @@ describe('JobSubmitForm', () => {
 
   it('filters job types to provider supported types', () => {
     render(React.createElement(JobSubmitForm, {
-      provider: MOCK_PROVIDER, // supports 5000, 5001, 5600
+      // supportedJobKinds: [5000, 5001, 5600]
+      provider: MOCK_PROVIDER,
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
@@ -360,7 +371,7 @@ describe('JobSubmitForm', () => {
     await user.clear(budgetInput);
     await user.type(budgetInput, '500');
 
-    const submitBtn = screen.getByText('Submit Job').closest('button');
+    const submitBtn = screen.getByRole('button', { name: /Submit Job/ });
     if (submitBtn) await user.click(submitBtn);
     // Note: if useMarketplace mock applies, onComplete should be called
   });

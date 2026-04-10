@@ -1,5 +1,4 @@
 // Ported from v1 netlify/functions_active/nip05-resolver.ts
-// Auth: NIP-98 not required — public NIP-05 resolution endpoint
 // Stripped: JWT middleware (none present — this function uses only public Supabase reads)
 //   getRequestClient → replaced with direct @supabase/supabase-js createClient
 //   import paths updated for v2 netlify/functions/ directory structure

@@ -164,11 +164,21 @@ describe('TrustEngine', () => {
       }
     });
 
-    it('score for 3 meetings is roughly 19 (log scale sanity check)', () => {
+    /**
+     * Formula: Math.round(30 * log2(n+1) / log2(11))
+     *
+     * For n=3: Math.round(30 * log2(4) / log2(11))
+     *        = Math.round(30 * 2 / 3.4594...)
+     *        = Math.round(17.356...)
+     *        = 17
+     *
+     * The range [16, 19] covers the actual result (17) with reasonable
+     * tolerance while confirming the log-scale diminishing-returns property.
+     */
+    it('score for 3 meetings is in the expected log-scale range (16–19)', () => {
       const score = engine._scoreMeetingDepth(3);
-      // log2(4) / log2(11) * 30 ≈ 18.8 → 19
-      expect(score).toBeGreaterThanOrEqual(18);
-      expect(score).toBeLessThanOrEqual(20);
+      expect(score).toBeGreaterThanOrEqual(16);
+      expect(score).toBeLessThanOrEqual(19);
     });
   });
 

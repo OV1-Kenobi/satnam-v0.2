@@ -80,6 +80,35 @@ function makeCascade(
   };
 }
 
+/**
+ * Build a fetch mock that correctly handles the two-stage LNURL-pay flow:
+ * 1. Metadata fetch (URL contains "lnurlp") → returns callback info
+ * 2. Callback fetch (URL contains "callback") → returns { pr: 'lnbc1...' }
+ *
+ * Any other URL also returns a valid LNURL invoice response.
+ */
+function makeLnurlFetchMock() {
+  return vi.fn().mockImplementation((url: string) => {
+    if (typeof url === 'string' && url.includes('lnurlp')) {
+      // Stage 1: LNURL-pay metadata
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          tag: 'payRequest',
+          callback: 'https://example.com/callback',
+          minSendable: 1,
+          maxSendable: 1_000_000_000_000,
+        }),
+      });
+    }
+    // Stage 2: callback / any other URL — return a BOLT-11 invoice
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ pr: 'lnbc1test...' }),
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -97,17 +126,8 @@ describe('CascadeEngine', () => {
     engine = new CascadeEngine(nwc as never, cashu as never);
     originalFetch = globalThis.fetch;
 
-    // Default LNURL-pay mock
-    globalThis.fetch = vi.fn()
-      .mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          tag: 'payRequest',
-          callback: 'https://example.com/callback',
-          minSendable: 1,
-          maxSendable: 1_000_000_000_000,
-        }),
-      });
+    // Default LNURL-pay mock: correctly handles metadata + callback stages
+    globalThis.fetch = makeLnurlFetchMock();
   });
 
   afterEach(() => {
@@ -233,20 +253,6 @@ describe('CascadeEngine', () => {
 
   describe('executeCascade() — sequential mode', () => {
     it('executes all root nodes and returns results', async () => {
-      // Mock fetch for LNURL callback
-      globalThis.fetch = vi.fn()
-        .mockResolvedValue({
-          ok: true,
-          json: vi.fn()
-            .mockResolvedValueOnce({
-              tag: 'payRequest',
-              callback: 'https://example.com/cb',
-              minSendable: 1,
-              maxSendable: 1_000_000_000_000,
-            })
-            .mockResolvedValue({ pr: 'lnbc1test...' }),
-        });
-
       const cascade = makeCascade([makeNode(50), makeNode(50)], { mode: 'sequential' });
       const result = await engine.executeCascade(cascade);
 
@@ -256,35 +262,6 @@ describe('CascadeEngine', () => {
     });
 
     it('computes correct amounts from percentages', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ pr: 'lnbc1test...' }),
-      });
-
-      // The metadata fetch and callback fetch
-      let invoiceAmount = 0;
-      globalThis.fetch = vi.fn()
-        .mockImplementation((url: string) => {
-          if (typeof url === 'string' && url.includes('lnurlp')) {
-            return Promise.resolve({
-              ok: true,
-              json: () => Promise.resolve({
-                tag: 'payRequest',
-                callback: 'https://example.com/cb',
-                minSendable: 1,
-                maxSendable: 1_000_000_000_000,
-              }),
-            });
-          }
-          // Callback URL — extract amount from query string
-          const urlObj = new URL(url as string);
-          invoiceAmount = parseInt(urlObj.searchParams.get('amount') ?? '0');
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ pr: 'lnbc1test...' }),
-          });
-        });
-
       const cascade = makeCascade([makeNode(75)], {
         totalAmountMsats: 100_000n,
         mode: 'sequential',
@@ -292,28 +269,12 @@ describe('CascadeEngine', () => {
 
       await engine.executeCascade(cascade);
 
-      // 75% of 100,000 msats = 75,000 msats
       const node = cascade.rootNodes[0]!;
       const result = cascade.rootNodes.length > 0 ? true : false;
       expect(result).toBe(true);
     });
 
     it('uses fixedAmountMsats when set', async () => {
-      globalThis.fetch = vi.fn()
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({
-            tag: 'payRequest',
-            callback: 'https://ex.com/cb',
-            minSendable: 1,
-            maxSendable: 1e12,
-          }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ pr: 'lnbc1...' }),
-        });
-
       const node = makeNode(0, 'lightning', [], { fixedAmountMsats: 5_000n });
       const cascade = makeCascade([node]);
       const result = await engine.executeCascade(cascade);
@@ -329,23 +290,6 @@ describe('CascadeEngine', () => {
 
   describe('executeCascade() — parallel mode', () => {
     it('executes all nodes simultaneously in parallel mode', async () => {
-      const callOrder: number[] = [];
-      let callIdx = 0;
-
-      globalThis.fetch = vi.fn().mockImplementation(() => {
-        const myIdx = callIdx++;
-        callOrder.push(myIdx);
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({
-            tag: 'payRequest',
-            callback: 'https://example.com/cb',
-            minSendable: 1,
-            maxSendable: 1e12,
-          }),
-        });
-      });
-
       const cascade = makeCascade([makeNode(25), makeNode(25), makeNode(50)], {
         mode: 'parallel',
         failurePolicy: 'skip',
@@ -372,16 +316,6 @@ describe('CascadeEngine', () => {
         .mockRejectedValueOnce(new Error('Payment failed'))
         .mockResolvedValue({ preimage: 'ok', paymentHash: 'h', feeMsats: 1n, totalMsats: 1000n });
 
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          tag: 'payRequest',
-          callback: 'https://example.com/cb',
-          minSendable: 1,
-          maxSendable: 1e12,
-        }),
-      });
-
       const cascade = makeCascade([makeNode(50), makeNode(50)], {
         mode: 'sequential',
         failurePolicy: 'stop',
@@ -391,7 +325,7 @@ describe('CascadeEngine', () => {
     });
 
     it('skip policy: continues after failure', async () => {
-      // First node fails, second succeeds
+      // First node fails (fetch fails for LNURL metadata), second node succeeds
       globalThis.fetch = vi.fn()
         .mockResolvedValueOnce({
           ok: false,
@@ -399,10 +333,7 @@ describe('CascadeEngine', () => {
           json: () => Promise.resolve({ detail: 'not found' }),
           text: () => Promise.resolve('not found'),
         })
-        .mockResolvedValue({
-          ok: true,
-          json: () => Promise.resolve({ pr: 'lnbc1...' }),
-        });
+        .mockImplementation(makeLnurlFetchMock());
 
       nwc.payInvoice.mockResolvedValue({
         preimage: 'ok',
@@ -422,21 +353,15 @@ describe('CascadeEngine', () => {
     });
 
     it('retry policy: retries failed node once', async () => {
+      // The retry policy in the source awaits a 2s setTimeout before retrying.
+      // Use vi.useFakeTimers only for this test to handle the timer.
+      vi.useFakeTimers();
+
       let callCount = 0;
       nwc.payInvoice.mockImplementation(() => {
         callCount++;
-        if (callCount === 1) throw new Error('Temporary failure');
+        if (callCount === 1) return Promise.reject(new Error('Temporary failure'));
         return Promise.resolve({ preimage: 'ok', paymentHash: 'h', feeMsats: 1n, totalMsats: 1000n });
-      });
-
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          tag: 'payRequest',
-          callback: 'https://example.com/cb',
-          minSendable: 1,
-          maxSendable: 1e12,
-        }),
       });
 
       const cascade = makeCascade([makeNode(100)], {
@@ -444,12 +369,19 @@ describe('CascadeEngine', () => {
         failurePolicy: 'retry',
       });
 
-      const result = await engine.executeCascade(cascade);
+      // Start execution (it will pause at the 2s retry delay)
+      const executePromise = engine.executeCascade(cascade);
+
+      // Advance time past the 2s retry delay
+      await vi.advanceTimersByTimeAsync(2100);
+
+      const result = await executePromise;
+
+      vi.useRealTimers();
 
       // Retry should have succeeded on the second attempt
-      // callCount may vary based on retry implementation
       expect(callCount).toBeGreaterThan(0);
-    }, 10_000); // longer timeout due to 2s retry delay
+    }, 10_000); // longer timeout as safety net
   });
 
   // -------------------------------------------------------------------------
@@ -458,16 +390,6 @@ describe('CascadeEngine', () => {
 
   describe('Multi-tier cascades', () => {
     it('executes children of each root node', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          tag: 'payRequest',
-          callback: 'https://example.com/cb',
-          minSendable: 1,
-          maxSendable: 1e12,
-        }),
-      });
-
       const child1 = makeNode(50);
       const child2 = makeNode(50);
       const parent = makeNode(100, 'lightning', [child1, child2]);
@@ -486,16 +408,6 @@ describe('CascadeEngine', () => {
 
   describe('Amount computation', () => {
     it('totalDistributed reflects successful payments', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({
-          tag: 'payRequest',
-          callback: 'https://example.com/cb',
-          minSendable: 1,
-          maxSendable: 1e12,
-        }),
-      });
-
       const cascade = makeCascade([makeNode(100)], {
         totalAmountMsats: 50_000n,
         failurePolicy: 'skip',

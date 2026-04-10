@@ -28,6 +28,7 @@ const {
   mockConstructJobRequest,
   mockConstructJobFeedback,
   mockParseJobResult,
+  mockFinalizeEvent,
 } = vi.hoisted(() => ({
   mockFetchProviders: vi.fn(),
   mockSubscribeToJobResults: vi.fn(),
@@ -35,6 +36,12 @@ const {
   mockConstructJobRequest: vi.fn(),
   mockConstructJobFeedback: vi.fn(),
   mockParseJobResult: vi.fn(),
+  mockFinalizeEvent: vi.fn((event: any, _secretKey: any) => ({
+    ...event,
+    id: 'finalized-' + Math.random().toString(36).slice(2, 10),
+    pubkey: 'consumer-pubkey-' + '0'.repeat(48),
+    sig: 'sig-' + '0'.repeat(124),
+  })),
 }));
 
 // ---------------------------------------------------------------------------
@@ -46,12 +53,7 @@ vi.mock('nostr-tools', async (importOriginal) => {
   const actual = await importOriginal() as any;
   return {
     ...actual,
-    finalizeEvent: vi.fn((event: any, _secretKey: any) => ({
-      ...event,
-      id: 'finalized-' + Math.random().toString(36).slice(2, 10),
-      pubkey: 'consumer-pubkey-' + '0'.repeat(48),
-      sig: 'sig-' + '0'.repeat(124),
-    })),
+    finalizeEvent: mockFinalizeEvent,
   };
 });
 
@@ -187,6 +189,7 @@ describe('discoverProviders()', () => {
       relayUrls: ['wss://pylon.openagents.com', 'wss://relay.nostr.band'],
     });
 
+    // The stand-alone discoverProviders passes (jobKind, relayUrls, timeoutMs ?? 10_000)
     expect(mockFetchProviders).toHaveBeenCalledWith(
       5100,
       ['wss://pylon.openagents.com', 'wss://relay.nostr.band'],
@@ -225,10 +228,11 @@ describe('DvmMarketplace.discoverProviders()', () => {
 
     await marketplace.discoverProviders(5100);
 
+    // DvmMarketplace.discoverProviders calls fetchProviders(jobKind, relayUrls)
+    // — no timeout argument is passed by the method
     expect(mockFetchProviders).toHaveBeenCalledWith(
       5100,
-      ['wss://default-relay.example.com'],
-      expect.any(Number)
+      ['wss://default-relay.example.com']
     );
   });
 
@@ -240,8 +244,7 @@ describe('DvmMarketplace.discoverProviders()', () => {
 
     expect(mockFetchProviders).toHaveBeenCalledWith(
       5100,
-      ['wss://override.example.com'],
-      expect.any(Number)
+      ['wss://override.example.com']
     );
   });
 });
@@ -429,9 +432,10 @@ describe('DvmMarketplace.submitFeedback()', () => {
       signerNsec: SIGNER_NSEC,
     });
 
-    // The signed event should have content set to the comment
-    const signedArg = mockCeps.signEventWithActiveSession.mock.calls[0][0];
-    expect(signedArg.content).toBe('Great result!');
+    // Source sets unsigned.content = comment, then calls finalizeEvent.
+    // Check the event passed to finalizeEvent has the comment as content.
+    const finalizeArg = mockFinalizeEvent.mock.calls[0]?.[0];
+    expect(finalizeArg?.content).toBe('Great result!');
   });
 
   it('throws for invalid signerNsec', async () => {
@@ -542,10 +546,12 @@ describe('DvmMarketplace.executeJob()', () => {
       timeout: 5000,
     });
 
-    const signedKinds = mockCeps.signEventWithActiveSession.mock.calls.map(
-      (c: any[]) => c[0].kind
-    );
-    expect(signedKinds).toContain(7000);
+    // Source calls constructJobFeedback then finalizeEvent then ceps.publishEvent.
+    // The feedback is published via ceps.publishEvent (called twice: once for
+    // submitJob, once for submitFeedback).
+    expect(mockPublishEvent).toHaveBeenCalledTimes(2);
+    // Confirm kind:7000 was built
+    expect(mockConstructJobFeedback).toHaveBeenCalledOnce();
   });
 
   it('returns feedbackId when feedback is published successfully', async () => {

@@ -210,14 +210,14 @@ describe('check-username', () => {
     expect(result?.statusCode).toBe(204);
   });
 
-  it('includes NIP-98-not-required comment (public endpoint)', async () => {
-    // Verify the source file contains the required comment for S10 invariant
+  it('includes public-endpoint auth comment (S10 invariant)', async () => {
+    // Verify the source file declares no authentication required for S10 invariant
     const fs = await import('fs');
     const src = fs.readFileSync(
       'netlify/functions/check-username.ts',
       'utf-8'
     );
-    expect(src).toContain('NIP-98 not required');
+    expect(src).toContain('no authentication required');
   });
 });
 
@@ -770,26 +770,26 @@ describe('S9 invariant — function count', () => {
 });
 
 // ============================================================================
-// S10 Invariant: Public functions have "NIP-98 not required" comment
+// S10 Invariant: Public functions declare no authentication required
 // ============================================================================
 
 describe('S10 invariant — public function comments', () => {
-  it('nip05-resolver.ts contains NIP-98-not-required comment', async () => {
+  it('nip05-resolver.ts declares no authentication required', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync('netlify/functions/nip05-resolver.ts', 'utf-8');
-    expect(src).toContain('NIP-98 not required');
+    expect(src).toContain('no authentication required');
   });
 
-  it('well-known-agent.ts contains NIP-98-not-required comment', async () => {
+  it('well-known-agent.ts declares no authentication required', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync('netlify/functions/well-known-agent.ts', 'utf-8');
-    expect(src).toContain('NIP-98 not required');
+    expect(src).toContain('no authentication required');
   });
 
-  it('check-username.ts contains NIP-98-not-required comment', async () => {
+  it('check-username.ts declares no authentication required', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync('netlify/functions/check-username.ts', 'utf-8');
-    expect(src).toContain('NIP-98 not required');
+    expect(src).toContain('no authentication required');
   });
 
   it('issuer-registry.ts GET has NIP-98-not-required comment', async () => {

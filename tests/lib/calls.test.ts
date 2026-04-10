@@ -20,6 +20,27 @@ import type {
 } from '../../src/lib/calls/types.js';
 
 // ---------------------------------------------------------------------------
+// Mock NIP-17 SatnamPrivacyFirstCommunications
+//
+// NostrSignaling.emitEvent calls:
+//   this.messaging.sendGiftwrappedMessage(config)
+// where `this.messaging` is a SatnamPrivacyFirstCommunications instance.
+//
+// We mock the entire nip17 module so that the constructor returns an object
+// with a spy on sendGiftwrappedMessage.
+// ---------------------------------------------------------------------------
+
+const mockSendGiftwrapped = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ success: true }),
+);
+
+vi.mock('../../src/lib/nip17/index.js', () => ({
+  SatnamPrivacyFirstCommunications: vi.fn().mockImplementation(() => ({
+    sendGiftwrappedMessage: mockSendGiftwrapped,
+  })),
+}));
+
+// ---------------------------------------------------------------------------
 // Type checks and constants
 // ---------------------------------------------------------------------------
 
@@ -188,20 +209,12 @@ describe('CallSession state machine', () => {
 });
 
 // ---------------------------------------------------------------------------
-// NostrSignaling (Phase 1 simulation)
+// NostrSignaling — sends via NIP-17 SatnamPrivacyFirstCommunications
 // ---------------------------------------------------------------------------
 
 describe('NostrSignaling', () => {
-  const WINDOW_MOCK = {} as any;
-
   beforeEach(() => {
-    // Mock window for signaling bus
-    Object.defineProperty(globalThis, 'window', { value: WINDOW_MOCK, writable: true });
-    WINDOW_MOCK.__satnamSignalingBus = [];
-  });
-
-  afterEach(() => {
-    WINDOW_MOCK.__satnamSignalingBus = [];
+    mockSendGiftwrapped.mockClear();
   });
 
   it('can be imported', async () => {
@@ -216,30 +229,51 @@ describe('NostrSignaling', () => {
     sig.destroy();
   });
 
-  it('emits offer to signaling bus', async () => {
+  /**
+   * sendOffer calls emitEvent which calls
+   * SatnamPrivacyFirstCommunications.sendGiftwrappedMessage with a config
+   * object containing the JSON-serialised SignalingMessage as `content`,
+   * the peer pubkey as `recipient`, and the self pubkey as `sender`.
+   */
+  it('emits offer via NIP-17 gift-wrap with correct payload', async () => {
     const { NostrSignaling } = await import('../../src/lib/calls/signaling.js');
     const sig = new NostrSignaling('self001');
     await sig.sendOffer('peer001', 'v=0', 'call001', 'audio');
 
-    const bus = WINDOW_MOCK.__satnamSignalingBus;
-    expect(bus.length).toBe(1);
-    expect(bus[0].msg.type).toBe('offer');
-    expect(bus[0].msg.callId).toBe('call001');
-    expect(bus[0].to).toBe('peer001');
-    expect(bus[0].from).toBe('self001');
+    expect(mockSendGiftwrapped).toHaveBeenCalledOnce();
+    const [config] = mockSendGiftwrapped.mock.calls[0] as [any];
+
+    // recipient and sender fields must match the call args
+    expect(config.recipient).toBe('peer001');
+    expect(config.sender).toBe('self001');
+
+    // content must be the JSON-serialised SignalingMessage
+    const parsed = JSON.parse(config.content) as SignalingMessage;
+    expect(parsed.type).toBe('offer');
+    expect(parsed.callId).toBe('call001');
+    expect(parsed.callType).toBe('audio');
 
     sig.destroy();
   });
 
-  it('emits hangup to signaling bus', async () => {
+  /**
+   * sendHangup calls emitEvent which calls
+   * SatnamPrivacyFirstCommunications.sendGiftwrappedMessage.
+   * The content must deserialise to a SignalingMessage with type='hangup'.
+   */
+  it('emits hangup via NIP-17 gift-wrap with correct payload', async () => {
     const { NostrSignaling } = await import('../../src/lib/calls/signaling.js');
     const sig = new NostrSignaling('self001');
     await sig.sendHangup('peer001', 'call001');
 
-    const bus = WINDOW_MOCK.__satnamSignalingBus;
-    const hangup = bus.find((e: any) => e.msg.type === 'hangup');
-    expect(hangup).toBeDefined();
-    expect(hangup.msg.callId).toBe('call001');
+    expect(mockSendGiftwrapped).toHaveBeenCalledOnce();
+    const [config] = mockSendGiftwrapped.mock.calls[0] as [any];
+
+    expect(config.recipient).toBe('peer001');
+
+    const parsed = JSON.parse(config.content) as SignalingMessage;
+    expect(parsed.type).toBe('hangup');
+    expect(parsed.callId).toBe('call001');
 
     sig.destroy();
   });
