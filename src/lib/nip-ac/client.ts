@@ -570,7 +570,7 @@ export function calculateReputationDelta(params: {
  */
 export class CreditLifecycleManager {
   private readonly ceps: CepsClient;
-  private readonly vault: {
+  private readonly _vault: {
     loadAgentNsec(agentNpub: string): Promise<string>;
   };
 
@@ -579,7 +579,7 @@ export class CreditLifecycleManager {
     vault: { loadAgentNsec(agentNpub: string): Promise<string> }
   ) {
     this.ceps = ceps;
-    this.vault = vault;
+    this._vault = vault;
   }
 
   /**
@@ -726,7 +726,7 @@ export class CreditLifecycleManager {
             const eTag = event.tags.find((t: string[]) => t[0] === 'e');
             const envelopeId = eTag?.[1] ?? '';
 
-            const typeMap: Record<number, CreditLifecycleCallback extends (e: infer E) => void ? E['type' as keyof typeof e] ?? '' : never> = {
+            const typeMap: Record<number, string> = {
               39241: 'offer',
               39244: 'settlement',
               39245: 'default',
