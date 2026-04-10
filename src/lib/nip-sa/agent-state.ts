@@ -199,13 +199,11 @@ export function subscribeAgentState(
     const pool = new SimplePool();
     sub = pool.subscribeMany(
       [relayUrl],
-      [
-        {
-          kinds: [39201],
-          authors: [agentPubkey],
-          '#d': ['state'],
-        },
-      ],
+      {
+        kinds: [39201],
+        authors: [agentPubkey],
+        '#d': ['state'],
+      },
       {
         onevent(event) {
           // Content is NIP-44 encrypted — attempt decrypt only if we have no key

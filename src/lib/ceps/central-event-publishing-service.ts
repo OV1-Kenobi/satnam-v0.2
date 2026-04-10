@@ -514,19 +514,18 @@ export class CentralEventPublishingService {
 
   subscribeMany(
     relays: string[],
-    filters: Parameters<SimplePool["subscribeMany"]>[1],
+    filter: Filter,
     handlers: Parameters<SimplePool["subscribeMany"]>[2]
   ) {
-    return this.getPool().subscribeMany(relays, filters, handlers);
+    return this.getPool().subscribeMany(relays, filter, handlers);
   }
 
   async list(
-    filters: Filter | Filter[],
+    filter: Filter,
     relays: string[],
     _options?: { eoseTimeout?: number }
   ): Promise<Event[]> {
-    const filterArg = Array.isArray(filters) ? filters[0] ?? {} as Filter : filters;
-    return this.getPool().querySync(relays, filterArg);
+    return this.getPool().querySync(relays, filter);
   }
 
   // ---- Messaging (NIP-04 / NIP-17) ----

@@ -172,20 +172,21 @@ export async function signEventWithCeps(
 
 export async function subscribeWithCeps(
   relays: string[],
-  filters: CepsFilter[],
+  filter: CepsFilter,
   handlers: Parameters<CepsInstance["subscribeMany"]>[2]
 ): Promise<CepsSubscription> {
   const ceps = await loadCeps();
-  return ceps.subscribeMany(relays, filters, handlers);
+  return ceps.subscribeMany(relays, filter, handlers);
 }
 
 export async function listEventsWithCeps(
-  filters: CepsFilter[],
+  filters: CepsFilter | CepsFilter[],
   relays?: string[],
   options?: { eoseTimeout?: number }
 ): Promise<CepsEvent[]> {
   const ceps = await loadCeps();
-  return ceps.list(filters[0] ?? {}, relays ?? getDefaultRelays(), options);
+  const filter: CepsFilter = Array.isArray(filters) ? filters[0] ?? {} : filters;
+  return ceps.list(filter, relays ?? getDefaultRelays(), options);
 }
 
 // ============================================================================
@@ -272,7 +273,7 @@ export async function getRelayHealthWithCeps(
     const startTime = Date.now();
     try {
       await Promise.race([
-        ceps.list([{ kinds: [0], limit: 1 }], [url], { eoseTimeout: 3000 }),
+        ceps.list({ kinds: [0], limit: 1 }, [url], { eoseTimeout: 3000 }),
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error("Timeout")), 5000)
         ),

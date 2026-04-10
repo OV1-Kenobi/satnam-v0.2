@@ -136,12 +136,10 @@ export class SkillRegistryCache {
 
     const sub = await subscribeWithCeps(
       relayUrls,
-      [
-        {
-          kinds: [33400, 33401],
-          since: Math.floor(this.lastSyncTimestamp / 1000) || undefined,
-        },
-      ],
+      {
+        kinds: [33400, 33401],
+        since: Math.floor(this.lastSyncTimestamp / 1000) || undefined,
+      },
       {
         onevent: async (event: any) => {
           if (event.kind === 33400 && validateManifest(event)) {

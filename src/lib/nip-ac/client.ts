@@ -689,12 +689,10 @@ export class CreditLifecycleManager {
       const pool = new SimplePool();
       sub = pool.subscribeMany(
         [relayUrl],
-        [
-          {
-            kinds: [39241, 39244, 39245, 1985],
-            authors: [envelopePubkey],
-          },
-        ],
+        {
+          kinds: [39241, 39244, 39245, 1985],
+          authors: [envelopePubkey],
+        },
         {
           onevent(event) {
             const eTag = event.tags.find((t: string[]) => t[0] === 'e');

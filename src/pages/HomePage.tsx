@@ -338,7 +338,7 @@ export default function HomePage() {
   // Hooks (data may be empty — hooks handle their own loading states)
   const { agents } = useAgentProfile();
   const { activeJobs, providers } = useMarketplace([]);
-  const { envelopes } = useCreditLifecycle();
+  const { activeEnvelopes: envelopes } = useCreditLifecycle(null, null, null);
   const { balance } = useNwc();
   const { groups } = useFrost();
 
@@ -351,9 +351,9 @@ export default function HomePage() {
 
   // Recent combined activity (mock until real event stream)
   const recentActivity = [
-    ...(agents.length > 0 ? [{ Icon: Bot, text: `Agent "${agents[0].name}" is ${agents[0].status}`, time: '2m ago', color: 'text-green-500' }] : []),
-    ...(activeJobs.length > 0 ? [{ Icon: Store, text: `Job ${activeJobs[0].requestEventId.slice(0, 8)} — ${activeJobs[0].result ? 'completed' : 'pending'}`, time: '5m ago', color: 'text-blue-400' }] : []),
-    ...(groups.length > 0 ? [{ Icon: Shield, text: `Group "${groups[0].metadata.name}" active`, time: '1h ago', color: 'text-[#ffd700]' }] : []),
+    ...(agents.length > 0 ? [{ Icon: Bot, text: `Agent "${agents[0]!.name}" is ${agents[0]!.status}`, time: '2m ago', color: 'text-green-500' }] : []),
+    ...(activeJobs.length > 0 ? [{ Icon: Store, text: `Job ${activeJobs[0]!.requestEventId.slice(0, 8)} — ${activeJobs[0]!.result ? 'completed' : 'pending'}`, time: '5m ago', color: 'text-blue-400' }] : []),
+    ...(groups.length > 0 ? [{ Icon: Shield, text: `Group "${groups[0]!.metadata.name}" active`, time: '1h ago', color: 'text-[#ffd700]' }] : []),
   ];
 
   return (

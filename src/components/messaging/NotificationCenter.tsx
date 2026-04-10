@@ -230,7 +230,7 @@ export default function NotificationCenter({
               <div className="space-y-0.5">
                 {sortedThreadIds.map(threadId => {
                   const group = grouped.get(threadId)!;
-                  const first = group[0];
+                  const first = group[0]!;
                   const derivedThreadName = first.threadType === 'group'
                     ? (first.threadId.slice(0, 8) + '…')
                     : (first.senderDisplayName ?? first.senderPubkey.slice(0, 8));

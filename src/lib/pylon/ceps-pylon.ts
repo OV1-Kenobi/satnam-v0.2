@@ -165,7 +165,7 @@ export class PylonCepsClient {
   ): () => void {
     const relays = [PYLON_RELAY_URL, ...this.fallbackRelays];
 
-    const sub = this.pool.subscribeMany(relays, [filter as NostrFilter], {
+    const sub = this.pool.subscribeMany(relays, filter as NostrFilter, {
       onevent(event: NostrEvent) {
         callback(event);
       },
@@ -192,7 +192,8 @@ export class PylonCepsClient {
   ): Promise<NostrEvent[]> {
     const relays = relayOverride ?? [PYLON_RELAY_URL, ...this.fallbackRelays];
     // querySync accepts relays as first arg, filters as second
-    return this.pool.querySync(relays, filters[0] ?? {} as NostrFilter) as Promise<NostrEvent[]>;
+    const filter: NostrFilter = filters[0] ?? {};
+    return this.pool.querySync(relays, filter) as Promise<NostrEvent[]>;
   }
 
   /**

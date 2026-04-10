@@ -18,6 +18,7 @@ import type { AgentProfileContent, AgentProfile, AgentWalletPolicy } from '../li
 import type { BuildAgentProfileParams } from '../lib/nip-sa/profile-builder.js';
 import type { AgentOperationalState } from '../lib/nip-sa/agent-state.js';
 import type { CepsClient } from '../lib/ceps/ceps-client.js';
+import { getDefaultRelays } from '../lib/ceps/ceps-client.js';
 import type { AgentSpendPolicy } from '../lib/agent/wallet/spend-policy.js';
 
 // Re-exports for component consumers
@@ -227,7 +228,7 @@ export function useAgentProfile(
           '#d': ['profile'],
           limit: 1,
         },
-        relayUrl ? [relayUrl] : undefined,
+        relayUrl ? [relayUrl] : getDefaultRelays(),
         { eoseTimeout: 5000 }
       );
 
