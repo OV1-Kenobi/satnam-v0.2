@@ -180,8 +180,10 @@ describe('AgentCard', () => {
 
   it('renders heartbeat time', () => {
     render(React.createElement(AgentCard, { agent: MOCK_AGENT }));
-    // 30s ago
-    expect(screen.getByText('30s ago')).toBeTruthy();
+    // lastHeartbeat is set to Date.now()/1000 - 30, but test execution
+    // time means the rendered value can be 30s, 31s, etc. Use a regex
+    // to match any number followed by "s ago".
+    expect(screen.getByText(/\d+s ago/)).toBeTruthy();
   });
 });
 

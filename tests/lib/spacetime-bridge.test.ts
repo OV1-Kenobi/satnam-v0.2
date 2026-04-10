@@ -429,8 +429,11 @@ describe('SpacetimeBridge', () => {
       // Stop the repeating interval so fake-timer advancement is finite
       bridge.stopHeartbeatInterval();
 
-      // Flush all pending microtasks/promises (the immediate publish)
-      await vi.runAllTicksAsync();
+      // Flush all pending microtasks/promises (the immediate publish).
+      // vi.runAllTicksAsync does NOT exist in Vitest 2.x — use
+      // vi.advanceTimersByTimeAsync(0) which advances zero ms but still
+      // drains the microtask queue associated with fake timers.
+      await vi.advanceTimersByTimeAsync(0);
 
       expect(mockCeps.publish).toHaveBeenCalled();
     });

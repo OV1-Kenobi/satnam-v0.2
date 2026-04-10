@@ -148,7 +148,7 @@ describe('BondManager', () => {
       await manager.createEntitlementBond(params);
       await manager.createEntitlementBond({ ...params, featureId: 'feature-2' });
 
-      const bonds = manager.listBonds('entitlement');
+      const bonds = await manager.listBonds('entitlement');
       expect(bonds).toHaveLength(2);
       expect(bonds.every((b) => b.bond.type === 'entitlement')).toBe(true);
     });
@@ -217,7 +217,7 @@ describe('BondManager', () => {
       expect(token).toHaveLength(64);
 
       // Bond should now be 'executed'
-      const bonds = manager.listBonds('recovery');
+      const bonds = await manager.listBonds('recovery');
       expect(bonds[0].bond).toMatchObject({ status: 'executed', recoveryToken: token });
     });
 
@@ -316,14 +316,14 @@ describe('BondManager', () => {
       await manager.createAllowanceBond(params);
       await manager.spendAllowanceToken('npub1alice', 1000, 'lightning');
 
-      const balance = manager.getAllowanceBalance('npub1alice');
+      const balance = await manager.getAllowanceBalance('npub1alice');
       expect(balance.tokensRemaining).toBe(9);
       expect(balance.satsRemaining).toBe(9_000);
       expect(balance.status).toBe('active');
     });
 
-    it('returns not_found for unknown recipient', () => {
-      const balance = manager.getAllowanceBalance('npub1unknown');
+    it('returns not_found for unknown recipient', async () => {
+      const balance = await manager.getAllowanceBalance('npub1unknown');
       expect(balance.status).toBe('not_found');
       expect(balance.tokensRemaining).toBe(0);
     });
@@ -334,7 +334,7 @@ describe('BondManager', () => {
       await manager.spendAllowanceToken('npub1alice', 1000, 'lightning');
       await manager.spendAllowanceToken('npub1alice', 1000, 'lightning');
 
-      const balance = manager.getAllowanceBalance('npub1alice');
+      const balance = await manager.getAllowanceBalance('npub1alice');
       expect(balance.status).toBe('depleted');
     });
   });
@@ -351,7 +351,7 @@ describe('BondManager', () => {
 
       // Create new instance — should reload from localStorage
       const manager2 = new BondManager(mockVault as never);
-      const bonds = manager2.listBonds('entitlement');
+      const bonds = await manager2.listBonds('entitlement');
       expect(bonds).toHaveLength(1);
       expect(bonds[0].bond).toMatchObject({ featureId: 'test-feature' });
     });
@@ -368,7 +368,7 @@ describe('BondManager', () => {
         threshold: 1,
       });
 
-      const all = manager.listBonds();
+      const all = await manager.listBonds();
       expect(all).toHaveLength(2);
     });
 
@@ -380,8 +380,8 @@ describe('BondManager', () => {
         threshold: 1,
       });
 
-      const entitlements = manager.listBonds('entitlement');
-      const recovery = manager.listBonds('recovery');
+      const entitlements = await manager.listBonds('entitlement');
+      const recovery = await manager.listBonds('recovery');
       expect(entitlements).toHaveLength(1);
       expect(recovery).toHaveLength(1);
     });

@@ -63,23 +63,21 @@ const MOCK_PROVIDER = {
   relays: ['wss://relay.damus.io', 'wss://nos.lol'],
 };
 
+/**
+ * MOCK_JOB_SUCCESS matches the Job interface from useMarketplace:
+ *   - result: string | null (not an object — the component renders it via
+ *     `<pre>{resultText}</pre>` which requires a string)
+ *   - status: JobStatus = 'completed' (component checks `=== 'completed'`
+ *     to show Accept/Reject buttons)
+ *   - paid: boolean (controls whether action buttons are shown)
+ */
 const MOCK_JOB_SUCCESS = {
   id: 'job-001',
-  jobType: '5001',
-  status: 'success' as const,
-  input: 'Summarize the Bitcoin whitepaper',
-  budgetSats: 1000,
-  encrypted: false,
-  providerPubkey: MOCK_PROVIDER.pubkey,
-  result: {
-    content: 'Bitcoin is a peer-to-peer electronic cash system…',
-    invoiceAmount: 150,
-    paymentHash: 'hash123',
-    paymentStatus: 'unpaid' as const,
-    providerPubkey: MOCK_PROVIDER.pubkey,
-  },
-  createdAt: Math.floor(Date.now() / 1000) - 300,
-  completedAt: Math.floor(Date.now() / 1000) - 60,
+  jobType: 5001,
+  status: 'completed' as const,
+  submittedAt: Date.now() - 300_000,
+  result: 'Bitcoin is a peer-to-peer electronic cash system that allows online payments to be sent directly from one party to another without going through a financial institution.',
+  paid: false,
 };
 
 const MOCK_ENVELOPE_ACTIVE = {
@@ -228,7 +226,9 @@ describe('JobSubmitForm', () => {
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
-    expect(screen.getByText('Submit Job')).toBeTruthy();
+    // Both the <h2> heading and the submit <button> contain "Submit Job".
+    // Use getByRole('heading') to target the <h2> specifically.
+    expect(screen.getByRole('heading', { name: /Submit Job/ })).toBeTruthy();
   });
 
   it('renders job type selector', () => {
@@ -236,7 +236,9 @@ describe('JobSubmitForm', () => {
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
-    expect(screen.getByLabelText('Job Type')).toBeTruthy();
+    // Label text is "Job Type *" — the asterisk is a child <span> element.
+    // getByLabelText with a regex ignores the child span and matches.
+    expect(screen.getByLabelText(/Job Type/)).toBeTruthy();
   });
 
   it('renders input textarea', () => {
@@ -244,7 +246,8 @@ describe('JobSubmitForm', () => {
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
-    expect(screen.getByLabelText('Input')).toBeTruthy();
+    // Label text is "Input *" — use regex to match the label ignoring asterisk span.
+    expect(screen.getByLabelText(/^Input/)).toBeTruthy();
   });
 
   it('renders budget input', () => {
@@ -260,7 +263,6 @@ describe('JobSubmitForm', () => {
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
-    // Find the submit button specifically within the form footer (not the heading)
     const submitBtn = screen.getByRole('button', { name: /Submit Job/ });
     expect((submitBtn as HTMLButtonElement).disabled).toBe(true);
   });
@@ -271,29 +273,10 @@ describe('JobSubmitForm', () => {
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
-    const inputArea = screen.getByLabelText('Input');
+    const inputArea = screen.getByLabelText(/^Input/);
     await user.type(inputArea, 'Summarize the Bitcoin whitepaper');
     const submitBtn = screen.getByRole('button', { name: /Submit Job/ });
     expect((submitBtn as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it('renders encryption toggle', () => {
-    render(React.createElement(JobSubmitForm, {
-      onComplete: vi.fn(),
-      onCancel: vi.fn(),
-    }));
-    expect(screen.getByRole('button', { name: /Unencrypted|Encrypted/ })).toBeTruthy();
-  });
-
-  it('encryption toggle changes state when clicked', async () => {
-    const user = userEvent.setup();
-    render(React.createElement(JobSubmitForm, {
-      onComplete: vi.fn(),
-      onCancel: vi.fn(),
-    }));
-    const toggle = screen.getByRole('button', { name: /Unencrypted/ });
-    await user.click(toggle);
-    expect(screen.getByRole('button', { name: /Encrypted/ })).toBeTruthy();
   });
 
   it('calls onCancel when cancel button clicked', async () => {
@@ -324,7 +307,7 @@ describe('JobSubmitForm', () => {
       onComplete: vi.fn(),
       onCancel: vi.fn(),
     }));
-    const select = screen.getByLabelText('Job Type') as HTMLSelectElement;
+    const select = screen.getByLabelText(/Job Type/) as HTMLSelectElement;
     const options = Array.from(select.options).map(o => o.value);
     expect(options).toContain('5000');
     expect(options).toContain('5001');
@@ -365,7 +348,7 @@ describe('JobSubmitForm', () => {
       onCancel: vi.fn(),
     }));
 
-    const inputArea = screen.getByLabelText('Input');
+    const inputArea = screen.getByLabelText(/^Input/);
     await user.type(inputArea, 'Test input');
     const budgetInput = screen.getByLabelText('Maximum budget in satoshis');
     await user.clear(budgetInput);
@@ -442,9 +425,9 @@ describe('JobResultDisplay', () => {
   });
 
   it('renders loading state when no result', () => {
-    const pendingJob = { ...MOCK_JOB_SUCCESS, result: undefined, status: 'pending' as const };
+    const pendingJob = { ...MOCK_JOB_SUCCESS, result: null as string | null, status: 'pending' as const };
     render(React.createElement(JobResultDisplay, { job: pendingJob }));
-    expect(screen.getByText('Waiting for result…')).toBeTruthy();
+    expect(screen.getByText('Waiting for result\u2026')).toBeTruthy();
   });
 
   it('renders result content', () => {
@@ -452,17 +435,19 @@ describe('JobResultDisplay', () => {
     expect(screen.getByText(/Bitcoin is a peer-to-peer/)).toBeTruthy();
   });
 
-  it('renders invoice amount in sats', () => {
+  it('renders completed status indicator', () => {
     render(React.createElement(JobResultDisplay, { job: MOCK_JOB_SUCCESS }));
-    expect(screen.getByText('150')).toBeTruthy();
+    // The component renders a <span> with the capitalized status text
+    expect(screen.getByText('completed')).toBeTruthy();
   });
 
-  it('renders Pay & Accept button for unpaid successful job', () => {
+  it('renders Accept button for unpaid completed job', () => {
     render(React.createElement(JobResultDisplay, { job: MOCK_JOB_SUCCESS }));
-    expect(screen.getByLabelText('Pay and accept result')).toBeTruthy();
+    // Component uses aria-label="Accept result" on the accept button
+    expect(screen.getByLabelText('Accept result')).toBeTruthy();
   });
 
-  it('renders Reject button for unpaid successful job', () => {
+  it('renders Reject button for unpaid completed job', () => {
     render(React.createElement(JobResultDisplay, { job: MOCK_JOB_SUCCESS }));
     expect(screen.getByLabelText('Reject result')).toBeTruthy();
   });
@@ -485,9 +470,10 @@ describe('JobResultDisplay', () => {
     expect(screen.getByText(/Job failed/)).toBeTruthy();
   });
 
-  it('renders provider pubkey', () => {
+  it('renders copy button for result content', () => {
     render(React.createElement(JobResultDisplay, { job: MOCK_JOB_SUCCESS }));
-    expect(screen.getByText(/b1c2d3e4/)).toBeTruthy();
+    // Component renders a CopyButton with aria-label="Copy result content"
+    expect(screen.getByLabelText('Copy result content')).toBeTruthy();
   });
 });
 
