@@ -17,23 +17,20 @@
  * @see https://github.com/t-bast/lightning-docs/blob/master/adaptor-sigs.md
  */
 
-import { secp256k1 as _secp256k1 } from '@noble/curves/secp256k1.js';
-
-/** Extended secp256k1 interface exposing internal CURVE constants and ProjectivePoint. */
-const secp256k1 = _secp256k1 as typeof _secp256k1 & {
-  readonly CURVE: { readonly n: bigint };
-  readonly ProjectivePoint: {
-    readonly BASE: {
-      multiply(scalar: bigint): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint }; add(other: unknown): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint }; multiply(scalar: bigint): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint }; add(other: unknown): unknown }; equals(other: unknown): boolean }; equals(other: unknown): boolean };
-    };
-    fromPrivateKey(privKey: Uint8Array): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint } };
-    fromHex(hex: string): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint }; multiply(scalar: bigint): { add(other: unknown): unknown }; equals(other: unknown): boolean; add(other: unknown): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint }; equals(other: unknown): boolean } };
-    readonly ZERO: { equals(other: unknown): boolean };
-  };
-};
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes, utf8ToBytes, randomBytes } from '@noble/hashes/utils';
 import type { AdaptorSignature, ExtractedSecret } from './types.js';
+
+// ============================================================================
+// @noble/curves v2 API helpers
+// ============================================================================
+
+/** secp256k1 curve order (group order n). */
+const CURVE_ORDER: bigint = secp256k1.Point.Fn.ORDER;
+
+/** Alias for the Point class (replaces ProjectivePoint from v1). */
+const Point = secp256k1.Point;
 
 // ============================================================================
 // Internal helpers
@@ -60,15 +57,15 @@ function schnorrChallenge(
 }
 
 /**
- * Reduce a 32-byte scalar mod the secp256k1 group order n.
+ * Reduce a scalar mod the secp256k1 group order n.
  * @internal
  */
 function modN(scalar: bigint): bigint {
-  return ((scalar % secp256k1.CURVE.n) + secp256k1.CURVE.n) % secp256k1.CURVE.n;
+  return ((scalar % CURVE_ORDER) + CURVE_ORDER) % CURVE_ORDER;
 }
 
 /**
- * Convert a 32-byte big-endian Uint8Array to a bigint.
+ * Convert a big-endian Uint8Array to a bigint.
  * @internal
  */
 function bytesToBigInt(bytes: Uint8Array): bigint {
@@ -93,7 +90,16 @@ function bigIntToBytes32(n: bigint): Uint8Array {
  * @internal
  */
 function negateScalar(s: bigint): bigint {
-  return modN(secp256k1.CURVE.n - s);
+  return modN(CURVE_ORDER - s);
+}
+
+/**
+ * Get the x-only bytes (32 bytes) from a compressed point's byte representation.
+ * Compressed format is [prefix_byte | x_32bytes], so we drop the first byte.
+ * @internal
+ */
+function xOnlyBytes(point: ReturnType<typeof Point.fromHex>): Uint8Array {
+  return point.toBytes(true).slice(1);
 }
 
 // ============================================================================
@@ -136,16 +142,17 @@ export function createAdaptorSignature(
 
   const privKeyBytes = hexToBytes(signerPrivkey);
   const privKeyScalar = bytesToBigInt(privKeyBytes);
-  if (privKeyScalar === 0n || privKeyScalar >= secp256k1.CURVE.n) {
+  if (privKeyScalar === 0n || privKeyScalar >= CURVE_ORDER) {
     throw new Error('Invalid private key scalar');
   }
 
-  // Get signer's public key (x-only for BIP340)
-  const pubKeyPoint = secp256k1.ProjectivePoint.fromPrivateKey(privKeyBytes);
-  const pubKeyBytes = pubKeyPoint.toRawBytes(true).slice(1); // x-only (32 bytes)
+  // Get signer's public key point via getPublicKey → fromHex
+  const pubKeyCompressed = secp256k1.getPublicKey(privKeyBytes);
+  const pubKeyPoint = Point.fromHex(bytesToHex(pubKeyCompressed));
+  const pubKeyBytes = xOnlyBytes(pubKeyPoint); // x-only (32 bytes)
 
   // Parse adaptor point T
-  const TPoint = secp256k1.ProjectivePoint.fromHex(adaptorPoint);
+  const TPoint = Point.fromHex(adaptorPoint);
 
   // Generate nonce k (deterministic for safety, but with extra randomness)
   const extraRand = randomBytes(32);
@@ -155,11 +162,11 @@ export function createAdaptorSignature(
   if (k === 0n) k = 1n; // degenerate case guard
 
   // R = k·G
-  let RPoint = secp256k1.ProjectivePoint.BASE.multiply(k);
+  const RPoint = Point.BASE.multiply(k);
 
   // R' = R + T (adaptor nonce)
   const RPrimePoint = RPoint.add(TPoint);
-  const RPrimeX = RPrimePoint.toRawBytes(true).slice(1); // x-only
+  const RPrimeX = xOnlyBytes(RPrimePoint);
 
   // If R'.y is odd, negate k (BIP340 parity convention)
   const RPrimeY = RPrimePoint.toAffine().y;
@@ -222,25 +229,25 @@ export function verifyAdaptorSignature(
     }
 
     const sScalar = bytesToBigInt(sBytes);
-    if (sScalar === 0n || sScalar >= secp256k1.CURVE.n) return false;
+    if (sScalar === 0n || sScalar >= CURVE_ORDER) return false;
 
-    const TPoint = secp256k1.ProjectivePoint.fromHex(adaptorPoint);
+    const TPoint = Point.fromHex(adaptorPoint);
 
     // Reconstruct P (full compressed pubkey from x-only)
     // BIP340: lift_x — the public key is the point with even y
-    const PPoint = secp256k1.ProjectivePoint.fromHex('02' + pubkey);
+    const PPoint = Point.fromHex('02' + pubkey);
 
     // Compute R' candidate from s'·G - not a strict verification without
     // knowing k, but we verify the point relationship is structurally sound.
     // Full verification would require the nonce commitment R' stored out-of-band.
     // Here we do a lightweight structural check:
-    const sG = secp256k1.ProjectivePoint.BASE.multiply(sScalar);
-    const TValid = !TPoint.equals(secp256k1.ProjectivePoint.ZERO);
+    const sG = Point.BASE.multiply(sScalar);
+    const TValid = !TPoint.equals(Point.ZERO);
 
     // Simulate challenge with a plausible R' (s'·G as approximation for the
     // zero-knowledge structural check — adequate for offline validation).
     const RPrimeApprox = sG.add(TPoint);
-    const RPrimeX = RPrimeApprox.toRawBytes(true).slice(1);
+    const RPrimeX = xOnlyBytes(RPrimeApprox);
     const e = bytesToBigInt(schnorrChallenge(RPrimeX, pubkeyBytes, msgBytes));
 
     // s'·G + e·P should equal R' (structural consistency check)
@@ -248,7 +255,7 @@ export function verifyAdaptorSignature(
     const lhs = sG.add(eP);
 
     // The adaptor point must be a valid non-identity EC point
-    return TValid && !lhs.equals(secp256k1.ProjectivePoint.ZERO);
+    return TValid && !lhs.equals(Point.ZERO);
   } catch {
     return false;
   }
@@ -323,10 +330,10 @@ export function generateAdaptorPoint(): { secret: string; adaptorPoint: string }
   const secretBytes = randomBytes(32);
   // Ensure scalar is in valid range
   const scalar = modN(bytesToBigInt(secretBytes));
-  const T = secp256k1.ProjectivePoint.BASE.multiply(scalar);
+  const T = Point.BASE.multiply(scalar);
   return {
     secret: bytesToHex(bigIntToBytes32(scalar)),
-    adaptorPoint: bytesToHex(T.toRawBytes(true)),
+    adaptorPoint: bytesToHex(T.toBytes(true)),
   };
 }
 
@@ -346,5 +353,3 @@ export function hashMessage(message: string): string {
   input.set(msgBytes, tagHash.length * 2);
   return bytesToHex(sha256(input));
 }
-
-

@@ -18,6 +18,26 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import type { DvmJobRequest, DvmJobResult, DvmProvider } from '../../src/lib/nip90/types.js';
 
 // ---------------------------------------------------------------------------
+// Hoisted mock variables — vi.hoisted() runs before vi.mock() factories
+// ---------------------------------------------------------------------------
+
+const {
+  mockFetchProviders,
+  mockSubscribeToJobResults,
+  mockWaitForJobResult,
+  mockConstructJobRequest,
+  mockConstructJobFeedback,
+  mockParseJobResult,
+} = vi.hoisted(() => ({
+  mockFetchProviders: vi.fn(),
+  mockSubscribeToJobResults: vi.fn(),
+  mockWaitForJobResult: vi.fn(),
+  mockConstructJobRequest: vi.fn(),
+  mockConstructJobFeedback: vi.fn(),
+  mockParseJobResult: vi.fn(),
+}));
+
+// ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
@@ -44,10 +64,6 @@ vi.mock('@noble/hashes/utils', () => ({
 }));
 
 // Mock subscribe.ts functions
-const mockFetchProviders = vi.fn();
-const mockSubscribeToJobResults = vi.fn();
-const mockWaitForJobResult = vi.fn();
-
 vi.mock('../../src/lib/nip90/subscribe.js', () => ({
   fetchProviders: mockFetchProviders,
   subscribeToProviders: vi.fn(),
@@ -56,10 +72,6 @@ vi.mock('../../src/lib/nip90/subscribe.js', () => ({
 }));
 
 // Mock construct.ts functions
-const mockConstructJobRequest = vi.fn();
-const mockConstructJobFeedback = vi.fn();
-const mockParseJobResult = vi.fn();
-
 vi.mock('../../src/lib/nip90/construct.js', () => ({
   constructJobRequest: mockConstructJobRequest,
   constructJobFeedback: mockConstructJobFeedback,

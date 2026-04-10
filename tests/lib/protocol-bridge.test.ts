@@ -44,17 +44,28 @@ import {
 import type { KeyPackageEvent } from '../../src/lib/messaging/mls-types.js';
 
 // ============================================================================
-// Mocks
+// Hoisted mock variables — vi.hoisted() runs before vi.mock() factories
 // ============================================================================
 
-const mockSendGiftwrapped = vi.fn().mockResolvedValue('gift-wrap-event-id');
-const mockPublishEvent = vi.fn().mockResolvedValue('published-event-id');
-const mockSignEvent = vi.fn().mockImplementation(async (e: any) => ({
-  ...e,
-  id: 'signed-event-id',
-  sig: 'mock-sig',
+const {
+  mockSendGiftwrapped,
+  mockPublishEvent,
+  mockSignEvent,
+  mockListEvents,
+} = vi.hoisted(() => ({
+  mockSendGiftwrapped: vi.fn().mockResolvedValue('gift-wrap-event-id'),
+  mockPublishEvent: vi.fn().mockResolvedValue('published-event-id'),
+  mockSignEvent: vi.fn().mockImplementation(async (e: any) => ({
+    ...e,
+    id: 'signed-event-id',
+    sig: 'mock-sig',
+  })),
+  mockListEvents: vi.fn().mockResolvedValue([]),
 }));
-const mockListEvents = vi.fn().mockResolvedValue([]);
+
+// ============================================================================
+// Mocks
+// ============================================================================
 
 vi.mock('../../src/lib/ceps/ceps-client.js', () => ({
   sendGiftwrappedMessageWithCeps: mockSendGiftwrapped,

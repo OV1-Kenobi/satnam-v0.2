@@ -183,7 +183,7 @@ describe('check-username', () => {
     // Verify the source file contains the required comment for S10 invariant
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../netlify/functions/check-username.ts', import.meta.url).pathname,
+      'netlify/functions/check-username.ts',
       'utf-8'
     );
     expect(src).toContain('NIP-98 not required');
@@ -513,7 +513,7 @@ describe('issuer-registry', () => {
     it('source file contains NIP-98-not-required comment (S10 invariant)', async () => {
       const fs = await import('fs');
       const src = fs.readFileSync(
-        new URL('../../netlify/functions/issuer-registry.ts', import.meta.url).pathname,
+        'netlify/functions/issuer-registry.ts',
         'utf-8'
       );
       expect(src).toContain('NIP-98 not required');
