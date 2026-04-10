@@ -2,6 +2,7 @@
 // Stripped: Supabase DB reads, JWT auth, direct relay connection boilerplate
 // v2: Queries relay for kind:39200 events, caches with 5-minute TTL
 // Netlify function count: this is function #2 of 8 (nip05-resolver is #1)
+// Auth: NIP-98 not required — public agent discovery endpoint
 
 /**
  * Well-Known Agent Endpoint — Netlify Function

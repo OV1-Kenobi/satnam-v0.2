@@ -55,6 +55,14 @@ vi.mock('../../src/lib/nip98/verify', () => ({
 import { verifyNip98 } from '../../src/lib/nip98/verify';
 
 // ============================================================================
+// Global cleanup — prevent mock call counts from leaking between describes
+// ============================================================================
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
+// ============================================================================
 // Test Helpers
 // ============================================================================
 
@@ -145,10 +153,33 @@ describe('check-username', () => {
     expect(body.reason).toMatch(/reserved/i);
   });
 
-  it('returns available: false for username with invalid chars', async () => {
+  it('normalizes username to lowercase before validation', async () => {
+    // Source lowercases input before validation — 'UPPERCASE' becomes 'uppercase' which is valid
+    const { createClient } = await import('@supabase/supabase-js');
+    vi.mocked(createClient).mockReturnValue({
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          eq: vi.fn().mockReturnThis(),
+          gt: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        })),
+      })),
+    } as never);
+
     const result = await handler(
       makeEvent({ httpMethod: 'GET', queryStringParameters: { name: 'UPPERCASE' } }),
-      {} as any
+      {} as never
+    );
+    const body = JSON.parse(result?.body || '{}');
+    // After lowercasing, 'uppercase' is a valid username and DB returns null = available
+    expect(body.available).toBe(true);
+  });
+
+  it('returns available: false for username with invalid chars', async () => {
+    // Symbols are rejected even after lowercasing
+    const result = await handler(
+      makeEvent({ httpMethod: 'GET', queryStringParameters: { name: 'bad@name!' } }),
+      {} as never
     );
     const body = JSON.parse(result?.body || '{}');
     expect(body.available).toBe(false);

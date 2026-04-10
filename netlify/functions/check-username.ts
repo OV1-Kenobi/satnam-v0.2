@@ -1,4 +1,5 @@
 // Netlify function #3 of 8 (ceiling: S9 invariant)
+// Auth: NIP-98 not required — public username availability check
 // Ported pattern: nip05-resolver.ts (public function template)
 
 /**

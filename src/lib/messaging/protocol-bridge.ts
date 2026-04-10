@@ -214,7 +214,7 @@ export class ProtocolBridge {
     // Phase 2: replace with real marmot-ts KeyPackage TLV generation.
     const stubKeyPackageTlv = btoa(
       JSON.stringify({
-        _note: 'Satnam v2 Phase-1 KeyPackage stub — not a real MLS KeyPackage',
+        _note: 'Satnam v2 Phase-1 KeyPackage stub - not a real MLS KeyPackage',
         pubkey: this.localPubkeyHex,
         ciphersuite,
         issuedAt: now,

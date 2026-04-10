@@ -43,6 +43,20 @@ Object.defineProperty(global, 'localStorage', {
 });
 
 // ============================================================================
+// Vault mock — BondManager requires a Vault with sig4sats storage methods
+// ============================================================================
+
+function createMockVault() {
+  let bondStore: string | null = null;
+  return {
+    storeSig4SatsBonds: vi.fn(async (bondsJson: string) => {
+      bondStore = bondsJson;
+    }),
+    getSig4SatsBonds: vi.fn(async () => bondStore),
+  };
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -55,10 +69,12 @@ const TEST_PRIVKEY_VALID = '0101010101010101010101010101010101010101010101010101
 
 describe('BondManager', () => {
   let manager: BondManager;
+  let mockVault: ReturnType<typeof createMockVault>;
 
   beforeEach(() => {
     localStorageMock.clear();
-    manager = new BondManager();
+    mockVault = createMockVault();
+    manager = new BondManager(mockVault as never);
   });
 
   afterEach(() => {
@@ -334,7 +350,7 @@ describe('BondManager', () => {
       });
 
       // Create new instance — should reload from localStorage
-      const manager2 = new BondManager();
+      const manager2 = new BondManager(mockVault as never);
       const bonds = manager2.listBonds('entitlement');
       expect(bonds).toHaveLength(1);
       expect(bonds[0].bond).toMatchObject({ featureId: 'test-feature' });

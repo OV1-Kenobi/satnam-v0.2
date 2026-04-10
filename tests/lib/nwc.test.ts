@@ -173,7 +173,7 @@ vi.mock('nostr-tools', async () => {
 
   return {
     SimplePool: vi.fn().mockImplementation(() => ({
-      publish: vi.fn().mockResolvedValue(undefined),
+      publish: vi.fn().mockReturnValue([Promise.resolve('ok')]),
       subscribeMany: vi.fn().mockReturnValue({ close: vi.fn() }),
       querySync: vi.fn().mockResolvedValue([]),
       close: vi.fn(),
@@ -440,7 +440,7 @@ describe('NwcConnectionManager.getBalance()', () => {
   it('returns balance as bigint from NWC response', async () => {
     const { SimplePool } = await import('nostr-tools');
     const mockPool = {
-      publish: vi.fn().mockResolvedValue(undefined),
+      publish: vi.fn().mockReturnValue([Promise.resolve('ok')]),
       subscribeMany: vi.fn().mockImplementation((_relays, _filters, { onevent }: { onevent: (e: unknown) => void }) => {
         // Simulate async wallet response
         setTimeout(() => {
@@ -474,7 +474,7 @@ describe('NwcConnectionManager.payInvoice()', () => {
   it('returns PaymentResult with preimage and fees', async () => {
     const { SimplePool } = await import('nostr-tools');
     const mockPool = {
-      publish: vi.fn().mockResolvedValue(undefined),
+      publish: vi.fn().mockReturnValue([Promise.resolve('ok')]),
       subscribeMany: vi.fn().mockImplementation((_relays, _filters, { onevent }: { onevent: (e: unknown) => void }) => {
         setTimeout(() => {
           onevent({
@@ -512,7 +512,7 @@ describe('NwcConnectionManager.makeInvoice()', () => {
   it('returns BOLT-11 invoice string', async () => {
     const { SimplePool } = await import('nostr-tools');
     const mockPool = {
-      publish: vi.fn().mockResolvedValue(undefined),
+      publish: vi.fn().mockReturnValue([Promise.resolve('ok')]),
       subscribeMany: vi.fn().mockImplementation((_relays, _filters, { onevent }: { onevent: (e: unknown) => void }) => {
         setTimeout(() => {
           onevent({
@@ -541,7 +541,7 @@ describe('NwcConnectionManager.lookupInvoice()', () => {
   it('returns InvoiceStatus with isPaid true when settled_at is present', async () => {
     const { SimplePool } = await import('nostr-tools');
     const mockPool = {
-      publish: vi.fn().mockResolvedValue(undefined),
+      publish: vi.fn().mockReturnValue([Promise.resolve('ok')]),
       subscribeMany: vi.fn().mockImplementation((_relays, _filters, { onevent }: { onevent: (e: unknown) => void }) => {
         setTimeout(() => {
           onevent({
@@ -579,7 +579,7 @@ describe('NwcConnectionManager.listTransactions()', () => {
   it('returns mapped Transaction array from NWC response', async () => {
     const { SimplePool } = await import('nostr-tools');
     const mockPool = {
-      publish: vi.fn().mockResolvedValue(undefined),
+      publish: vi.fn().mockReturnValue([Promise.resolve('ok')]),
       subscribeMany: vi.fn().mockImplementation((_relays, _filters, { onevent }: { onevent: (e: unknown) => void }) => {
         setTimeout(() => {
           onevent({
@@ -630,7 +630,7 @@ describe('NwcConnectionManager.listTransactions()', () => {
   it('returns empty array when wallet returns no transactions', async () => {
     const { SimplePool } = await import('nostr-tools');
     const mockPool = {
-      publish: vi.fn().mockResolvedValue(undefined),
+      publish: vi.fn().mockReturnValue([Promise.resolve('ok')]),
       subscribeMany: vi.fn().mockImplementation((_relays, _filters, { onevent }: { onevent: (e: unknown) => void }) => {
         setTimeout(() => {
           onevent({
@@ -695,7 +695,7 @@ describe('NwcConnectionManager — NWC error propagation', () => {
   it('throws with NWC error code when wallet returns error response', async () => {
     const { SimplePool } = await import('nostr-tools');
     const mockPool = {
-      publish: vi.fn().mockResolvedValue(undefined),
+      publish: vi.fn().mockReturnValue([Promise.resolve('ok')]),
       subscribeMany: vi.fn().mockImplementation((_relays, _filters, { onevent }: { onevent: (e: unknown) => void }) => {
         setTimeout(() => {
           onevent({
