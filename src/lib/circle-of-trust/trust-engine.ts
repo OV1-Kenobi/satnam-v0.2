@@ -327,8 +327,8 @@ export class TrustEngine {
   private _computeTimeSpanDays(contact: TrustedContact): number {
     if (contact.meetings.length <= 1) return 0;
     const timestamps = contact.meetings.map((m) => m.timestamp).sort();
-    const first = timestamps[0];
-    const last = timestamps[timestamps.length - 1];
+    const first = timestamps[0] ?? 0;
+    const last = timestamps[timestamps.length - 1] ?? 0;
     return Math.floor((last - first) / 86400);
   }
 
@@ -407,7 +407,7 @@ export function createTrustEngine(
  * @param contact - The TrustedContact to score
  * @returns Numeric score in range 0–100
  */
-export function calculateTrustScore(contact: TrustedContact): number {
+export function calculateTrustScore(contact: TrustedContact): TrustScore {
   const engine = new TrustEngine(
     new Map([[contact.pubkey, contact]]),
   );
@@ -462,4 +462,5 @@ export function getHandshakeLedger(
     .filter((e) => e.contactPubkey === contactPubkey)
     .sort((a, b) => b.timestamp - a.timestamp);
 }
+
 

@@ -184,19 +184,6 @@ function OutputBlock({
   );
 }
 
-// ---------------------------------------------------------------------------
-// FileChangeStatus icon
-// ---------------------------------------------------------------------------
-
-function FileStatusIcon({ status }: { status: FileChange['status'] }) {
-  switch (status) {
-    case 'added':    return <Plus size={11} className="text-green-400" aria-hidden="true" />;
-    case 'deleted':  return <Minus size={11} className="text-red-400" aria-hidden="true" />;
-    case 'modified': return <Edit2 size={11} className="text-blue-400" aria-hidden="true" />;
-    case 'renamed':  return <Edit2 size={11} className="text-purple-400" aria-hidden="true" />;
-    default:         return <FileText size={11} className="text-slate-400" aria-hidden="true" />;
-  }
-}
 
 function fileStatusLabel(status: FileChange['status']): string {
   switch (status) {
@@ -535,4 +522,5 @@ export default function ExecutionResultPanel({
     </div>
   );
 }
+
 

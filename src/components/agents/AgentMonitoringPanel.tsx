@@ -172,11 +172,11 @@ function BarChart({ bars, title }: { bars: MetricBar[]; title: string }) {
 
 export default function AgentMonitoringPanel({ agent, onRefresh }: AgentMonitoringPanelProps) {
   const [refreshing, setRefreshing] = useState(false);
-  const [now, setNow] = useState(Date.now());
+  const [, setTick] = useState(0);
 
-  // Update clock every 10s for heartbeat freshness
+  // Re-render every 10s for heartbeat freshness
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 10_000);
+    const id = setInterval(() => setTick(t => t + 1), 10_000);
     return () => clearInterval(id);
   }, []);
 
@@ -283,4 +283,5 @@ export default function AgentMonitoringPanel({ agent, onRefresh }: AgentMonitori
     </div>
   );
 }
+
 

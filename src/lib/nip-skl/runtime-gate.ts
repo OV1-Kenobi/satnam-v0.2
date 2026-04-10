@@ -400,7 +400,7 @@ function timingSafeArrayBufferEqual(a: ArrayBuffer, b: ArrayBuffer): boolean {
   if (va.length !== vb.length) return false;
   let diff = 0;
   for (let i = 0; i < va.length; i++) {
-    diff |= va[i] ^ vb[i];
+    diff |= (va[i] ?? 0) ^ (vb[i] ?? 0);
   }
   return diff === 0;
 }
@@ -409,3 +409,4 @@ function timingSafeArrayBufferEqual(a: ArrayBuffer, b: ArrayBuffer): boolean {
 // Re-exports (used by skill-registration.ts and tests)
 // ---------------------------------------------------------------------------
 export { parseTierFromLabel };
+

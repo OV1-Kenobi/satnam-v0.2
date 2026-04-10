@@ -22,7 +22,7 @@ import {
   useState,
   useCallback,
   useRef,
-  type } from 'react';
+} from 'react';
 
 import { PinGate, createPinGate } from '../lib/nfc/pin-gate.js';
 import { ProofOfLifeService } from '../lib/nfc/proof-of-life.js';
@@ -30,7 +30,7 @@ import {
   getNfcMethod,
   isIos,
   isWebNfcAvailable,
-  type } from '../lib/nfc/ios-fallback.js';
+} from '../lib/nfc/ios-fallback.js';
 import type {
   PolCeremony,
   PeerScanResult,
@@ -428,4 +428,5 @@ export function useNfc(options: UseNfcOptions = {}): UseNfcReturn {
 }
 
 export default useNfc;
+
 

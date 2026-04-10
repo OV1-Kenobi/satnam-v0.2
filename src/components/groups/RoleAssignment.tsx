@@ -89,7 +89,7 @@ export default function RoleAssignment({
   const [selectedRole, setSelectedRole] = useState<RoleType | null>(
     assignableRoles[0] ?? null,
   );
-  const [expiryOffset, setExpiryOffset] = useState(EXPIRY_OPTIONS[2].value); // 1 year default
+  const [expiryOffset, setExpiryOffset] = useState(EXPIRY_OPTIONS[2]?.value); // 1 year default
   const [signerNsec, setSignerNsec] = useState('');
   const [status, setStatus] = useState<'idle' | 'signing' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
@@ -286,4 +286,5 @@ export default function RoleAssignment({
     </div>
   );
 }
+
 

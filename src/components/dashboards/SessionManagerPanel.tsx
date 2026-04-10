@@ -37,6 +37,7 @@ import type {
   SessionChannel,
   SessionEventType,
   SessionStatus,
+  SessionType,
 } from '../../lib/agent/session/types.js';
 import { useProbeSession } from '../../hooks/useProbeSession.js';
 
@@ -49,13 +50,6 @@ function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${h}h ${m}m`;
-}
-
-function formatRelative(iso: string): string {
-  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  return `${Math.floor(secs / 3600)}h ago`;
 }
 
 const CHANNEL_CONFIG: Record<SessionChannel, { Icon: typeof Radio; label: string; cls: string }> = {
@@ -133,7 +127,8 @@ function HorizontalTimeline({
   }
 
   const startMs = new Date(sessionStarted).getTime();
-  const endMs   = Math.max(Date.now(), new Date(events[events.length - 1].created_at).getTime());
+  const lastEvent = events[events.length - 1];
+  const endMs   = Math.max(Date.now(), lastEvent ? new Date(lastEvent.created_at).getTime() : 0);
   const spanMs  = endMs - startMs || 1;
 
   return (
@@ -196,7 +191,7 @@ function SessionCard({
   const handleAction = useCallback(async (action: 'pause' | 'resume' | 'terminate') => {
     setActing(action);
     try {
-      await onAction(session.session_id);
+      await onAction(session.session_id, action);
     } finally {
       setActing(null);
     }
@@ -373,25 +368,33 @@ export default function SessionManagerPanel({
   // Cast sessions to ActiveSessionSummary for display (hook returns AgentSession)
   const activeSessions = sessions;
 
-  const allEvents: SessionEventTimeline[] = trajectory.map(e => ({
-    event_id: e.id,
-    session_id: e.session_id,
-    agent_id: '',
-    agent_name: '',
-    creator_id: null,
-    session_status: 'ACTIVE' as const,
-    channel: 'nostr' as const,
-    event_type: e.event_type,
-    event_data_summary: JSON.stringify(e.event_data).slice(0, 60),
-    sats_cost: e.sats_cost,
-    input_tokens: e.input_tokens,
-    output_tokens: e.output_tokens,
-    total_tokens: e.input_tokens + e.output_tokens,
-    tool_name: e.tool_name,
-    tool_parameters: e.tool_parameters,
-    created_at: e.timestamp,
-    minutes_ago: Math.floor((Date.now() - new Date(e.timestamp).getTime()) / 60000),
-  }));
+  const allEvents: SessionEventTimeline[] = trajectory.map(e => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolName: string | null = e.eventType === 'tool_call' ? ((e.data as any).toolName as string | undefined) ?? null : null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toolParams: Record<string, any> | null = e.eventType === 'tool_call' ? ((e.data as any).parameters as Record<string, any> | undefined) ?? null : null;
+    const eventTypeUpper = e.eventType.toUpperCase() as SessionEventType;
+    const createdAt = new Date(e.timestamp * 1000).toISOString();
+    return {
+      event_id: `${e.sessionId}_${e.timestamp}`,
+      session_id: e.sessionId,
+      agent_id: '',
+      agent_name: '',
+      creator_id: null,
+      session_status: 'ACTIVE' as const,
+      channel: 'nostr' as const,
+      event_type: eventTypeUpper,
+      event_data_summary: JSON.stringify(e.data).slice(0, 100),
+      sats_cost: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      total_tokens: 0,
+      tool_name: toolName,
+      tool_parameters: toolParams,
+      created_at: createdAt,
+      minutes_ago: Math.floor((Date.now() - e.timestamp * 1000) / 60000),
+    };
+  });
 
   const filteredEvents = filterType === 'ALL'
     ? allEvents
@@ -445,44 +448,51 @@ export default function SessionManagerPanel({
 
       {/* Session list */}
       <div className="space-y-3" role="list" aria-label="Active sessions">
-        {activeSessions.map(session => (
-          <div key={session.session_id} role="listitem">
-            <SessionCard
-              session={{
-                session_id: session.session_id,
-                agent_id: session.agent_id,
-                agent_name: session.agent_id.slice(0, 8),
-                creator_id: session.human_creator_id,
-                status: session.status,
-                channel: session.primary_channel,
-                primary_channel: session.primary_channel,
-                session_type: session.session_type,
-                total_messages: session.total_messages,
-                total_tool_calls: session.total_tool_calls,
-                total_tokens: session.tokens_consumed,
-                total_sats_cost: session.sats_spent,
-                started_at: session.started_at,
-                last_activity_at: session.last_activity_at,
-                duration_minutes: Math.floor(
-                  (Date.now() - new Date(session.started_at).getTime()) / 60000,
-                ),
-                last_activity_ago_minutes: Math.floor(
-                  (Date.now() - new Date(session.last_activity_at).getTime()) / 60000,
-                ),
-                auto_hibernate_remaining_minutes: null,
-                avg_response_time_ms: 0,
-                error_count: 0,
-                warning_count: 0,
-                current_compute_load_percent: 0,
-                active_task_count: 0,
-                available_budget_sats: 0,
-                accepts_new_tasks: session.status === 'ACTIVE',
-              }}
-              events={allEvents.filter(e => e.session_id === session.session_id)}
-              onAction={handleAction}
-            />
-          </div>
-        ))}
+        {activeSessions.map(session => {
+          const sessionStatus = session.status.toUpperCase() as SessionStatus;
+          const primaryChannel = (session.metadata['channel'] ?? 'nostr') as SessionChannel;
+          const sessionType = (session.metadata['type'] ?? 'INTERACTIVE') as SessionType;
+          const startedAtIso = new Date(session.startedAt * 1000).toISOString();
+          const lastActivityAt = session.metadata['lastActivityAt'] ?? startedAtIso;
+          return (
+            <div key={session.sessionId} role="listitem">
+              <SessionCard
+                session={{
+                  session_id: session.sessionId,
+                  agent_id: session.agentPubkey,
+                  agent_name: session.agentPubkey.slice(0, 8),
+                  creator_id: session.metadata['creator'] ?? null,
+                  status: sessionStatus,
+                  channel: primaryChannel,
+                  primary_channel: primaryChannel,
+                  session_type: sessionType,
+                  total_messages: Number(session.metadata['totalMessages'] ?? 0),
+                  total_tool_calls: Number(session.metadata['totalToolCalls'] ?? 0),
+                  total_tokens: Number(session.metadata['tokensConsumed'] ?? 0),
+                  total_sats_cost: Number(session.metadata['satsSpent'] ?? 0),
+                  started_at: startedAtIso,
+                  last_activity_at: lastActivityAt,
+                  duration_minutes: Math.floor(
+                    (Date.now() - session.startedAt * 1000) / 60000,
+                  ),
+                  last_activity_ago_minutes: Math.floor(
+                    (Date.now() - new Date(lastActivityAt).getTime()) / 60000,
+                  ),
+                  auto_hibernate_remaining_minutes: null,
+                  avg_response_time_ms: 0,
+                  error_count: 0,
+                  warning_count: 0,
+                  current_compute_load_percent: 0,
+                  active_task_count: 0,
+                  available_budget_sats: 0,
+                  accepts_new_tasks: session.status === 'active',
+                }}
+                events={allEvents.filter(e => e.session_id === session.sessionId)}
+                onAction={handleAction}
+              />
+            </div>
+          );
+        })}
       </div>
 
       {/* Event log */}
@@ -553,5 +563,6 @@ export default function SessionManagerPanel({
     </div>
   );
 }
+
 
 

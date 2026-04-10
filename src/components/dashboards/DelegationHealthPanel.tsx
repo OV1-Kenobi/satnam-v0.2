@@ -23,7 +23,6 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
-  Link2,
   Link2Off,
   Zap,
   Users,
@@ -58,6 +57,28 @@ export interface DelegationNode {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Map a role string to the DelegationNode role union. */
+function roleStringToNodeRole(role: string): DelegationNode['role'] {
+  if (role === 'guardian') return 'guardian';
+  if (role === 'steward') return 'delegate';
+  return 'sub-delegate';
+}
+
+/** Synthesize a full DelegationNode from a chain item. */
+function chainItemToNode(item: { pubkey: string; role: { toString(): string } }): DelegationNode {
+  return {
+    id: item.pubkey,
+    agentId: item.pubkey,
+    agentName: `${item.pubkey.slice(0, 8)}…`,
+    role: roleStringToNodeRole(String(item.role)),
+    status: 'valid',
+    delegatedAt: new Date().toISOString(),
+    expiresAt: null,
+    capacity: 10,
+    activeCount: 0,
+  };
+}
 
 function formatExpiry(iso: string): string {
   const d = new Date(iso);
@@ -315,13 +336,16 @@ export interface DelegationHealthPanelProps {
 export default function DelegationHealthPanel({ className }: DelegationHealthPanelProps) {
   const { delegationChain, isLoading, lastUpdated, refresh } = useDelegation();
 
+  // Convert chain items to DelegationNode for stats and rendering
+  const chainNodes: DelegationNode[] = (delegationChain ?? []).map(chainItemToNode);
+
   // Compute aggregate stats
   const allNodes: DelegationNode[] = [];
   const flatten = (node: DelegationNode) => {
     allNodes.push(node);
     node.children?.forEach(flatten);
   };
-  delegationChain?.forEach(flatten);
+  chainNodes.forEach(flatten);
 
   const validCount    = allNodes.filter(n => n.status === 'valid').length;
   const expiredCount  = allNodes.filter(n => n.status === 'expired').length;
@@ -415,7 +439,7 @@ export default function DelegationHealthPanel({ className }: DelegationHealthPan
       )}
 
       {/* Empty state */}
-      {!isLoading && (!delegationChain || delegationChain.length === 0) && (
+      {!isLoading && chainNodes.length === 0 && (
         <div className="rounded-xl bg-slate-900 border border-slate-800 p-8 text-center">
           <Link2Off size={28} className="mx-auto text-slate-700 mb-3" aria-hidden="true" />
           <p className="text-sm text-slate-500">No delegation chain found</p>
@@ -426,13 +450,13 @@ export default function DelegationHealthPanel({ className }: DelegationHealthPan
       )}
 
       {/* Tree */}
-      {!isLoading && delegationChain && delegationChain.length > 0 && (
+      {!isLoading && chainNodes.length > 0 && (
         <div
           role="tree"
           aria-label="Delegation chain tree"
           className="space-y-0"
         >
-          {delegationChain.map(node => (
+          {chainNodes.map(node => (
             <DelegationNodeCard key={node.id} node={node} depth={0} />
           ))}
         </div>
@@ -440,4 +464,5 @@ export default function DelegationHealthPanel({ className }: DelegationHealthPan
     </div>
   );
 }
+
 

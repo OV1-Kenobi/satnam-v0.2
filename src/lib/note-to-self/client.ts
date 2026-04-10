@@ -133,3 +133,4 @@ export class NoteToSelfClient {
     return notes[idx] ?? null;
   }
 }
+

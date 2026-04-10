@@ -16,7 +16,7 @@ import {
   MicOff,
   Video,
   VideoOff,
-  PhoneOffOff,
+  PhoneOff,
 } from 'lucide-react';
 import type { CallSession } from '../../lib/calls/types.js';
 
@@ -150,7 +150,7 @@ function QualityDot({ state }: { state: string }) {
 // ---------------------------------------------------------------------------
 
 function AudioOnlyDisplay({ peerLabel, peerPubkey }: { peerLabel?: string; peerPubkey: string }) {
-  const initial = peerLabel ? peerLabel[0].toUpperCase() : peerPubkey[0].toUpperCase();
+  const initial = peerLabel ? (peerLabel[0] ?? '?').toUpperCase() : (peerPubkey[0] ?? '?').toUpperCase();
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-[#0f0f0f]" aria-label="Audio call active">
       <div
@@ -272,4 +272,5 @@ export default function ActiveCallPanel({
     </div>
   );
 }
+
 

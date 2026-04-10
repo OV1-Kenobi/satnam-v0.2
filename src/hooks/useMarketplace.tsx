@@ -34,7 +34,6 @@
 
 import {
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -45,6 +44,7 @@ import { getVault } from '../lib/vault/vault.js';
 import { NwcConnectionManager } from '../lib/nwc/connection-manager.js';
 import { DvmMarketplace } from '../lib/nip90/marketplace.js';
 import type { ActiveJob } from '../lib/nip90/marketplace.js';
+export type { ActiveJob };
 import type { PaymentResult } from '../lib/nwc/connection-manager.js';
 import type { DvmJobRequest, DvmJobResult, DvmProvider, DvmFeedbackStatus } from '../lib/nip90/types.js';
 
@@ -372,6 +372,7 @@ export function useMarketplace(defaultRelayUrls?: string[]): UseMarketplaceRetur
     () => ({
       isLoading,
       error,
+      providers,
       activeJobs,
       discoverProviders,
       submitJob,
@@ -384,6 +385,7 @@ export function useMarketplace(defaultRelayUrls?: string[]): UseMarketplaceRetur
     [
       isLoading,
       error,
+      providers,
       activeJobs,
       discoverProviders,
       submitJob,
@@ -395,5 +397,6 @@ export function useMarketplace(defaultRelayUrls?: string[]): UseMarketplaceRetur
     ]
   );
 }
+
 
 

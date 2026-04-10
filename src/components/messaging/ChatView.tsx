@@ -133,11 +133,8 @@ function MessageBubble({
   const self = isSelf(message.senderPubkey);
   const isEphemeral = !!message.ephemeral;
 
-  // Find sender info
-  const sender = !self
-    ? thread.participants.find(p => p.pubkey === message.senderPubkey)
-    : null;
-  const senderName = sender?.displayName ?? (self ? 'You' : message.senderPubkey.slice(5, 13) + '…');
+  // Find sender info (participants list not available on MessageThread; use pubkey abbreviation)
+  const senderName = self ? 'You' : message.senderPubkey.slice(0, 8) + '…';
   const hue = avatarHue(message.senderPubkey);
 
   return (
@@ -237,7 +234,7 @@ function EmptyChat({ thread }: { thread: MessageThread }) {
       </div>
       <div className="text-center">
         <p className="text-sm font-medium text-slate-300">
-          {thread.type === 'self' ? 'Your private notebook' : `Message ${thread.name}`}
+          {thread.type === 'self' ? 'Your private notebook' : `Message ${thread.type === 'group' ? thread.config.name : thread.type === 'direct' ? (thread.recipientDisplayName ?? thread.recipientPubkey.slice(0, 8)) : ''}`}
         </p>
         <p className="text-xs text-slate-600 mt-1">
           {thread.type === 'self'
@@ -413,19 +410,17 @@ export default function ChatView({
               style={{ background: thread.type === 'self' ? '#f7931a' : `hsl(${avatarHue(thread.id)},50%,38%)` }}
               aria-hidden="true"
             >
-              {thread.name.slice(0, 2).toUpperCase()}
+              {(thread.type === "group" ? thread.config.name : thread.type === "direct" ? (thread.recipientDisplayName ?? thread.recipientPubkey.slice(0, 8)) : "You").slice(0, 2).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-slate-200 truncate">{thread.name}</span>
-                <ProtocolIndicator protocol={thread.protocol} />
+                <span className="text-sm font-semibold text-slate-200 truncate">{thread.type === "group" ? thread.config.name : thread.type === "direct" ? (thread.recipientDisplayName ?? thread.recipientPubkey.slice(0, 8)) : "Note to Self"}</span>
+                <ProtocolIndicator protocol="nip17" />
               </div>
-              {isDm && thread.participants[0]?.polTrustScore != null && (
+              {isDm && (thread as { polVerified?: boolean }).polVerified === true && (
                 <div className="flex items-center gap-1 mt-0.5">
                   <Shield size={9} className="text-[#f7931a]" aria-hidden="true" />
-                  <span className="text-[10px] text-slate-500">
-                    PoL {thread.participants[0].polTrustScore}
-                  </span>
+                  <span className="text-[10px] text-slate-500">PoL verified</span>
                 </div>
               )}
             </div>
@@ -495,3 +490,4 @@ export default function ChatView({
     </div>
   );
 }
+

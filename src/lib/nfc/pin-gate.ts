@@ -19,6 +19,18 @@
  * @see SPECIFICATION.md §5.3 — PIN Gate
  */
 
+// argon2-browser is loaded at runtime via CDN / bundler — declare minimal interface
+declare module 'argon2-browser' {
+  interface Argon2HashResult { hash: Uint8Array; encoded: string; }
+  interface Argon2HashOptions {
+    pass: string; salt: string; time: number; mem: number;
+    parallelism: number; hashLen: number; type: number;
+  }
+  const ArgonType: { Argon2id: number };
+  function hash(opts: Argon2HashOptions): Promise<Argon2HashResult>;
+  const _default: { hash: typeof hash; ArgonType: typeof ArgonType };
+  export = _default;
+}
 import argon2 from 'argon2-browser';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
@@ -66,15 +78,7 @@ const ARGON2_PARAMS = { m: 65536, t: 3, p: 4 } as const;
 /** Derived key length (bytes) */
 const KEY_LEN = 32;
 
-/** Vault path for the PIN verifier: nfc/{card_uid}.pin_verifier */
-function pinVerifierPath(cardUid: string): string {
-  return `nfc/${cardUid}.pin_verifier`;
-}
 
-/** Vault path for attempt counter: nfc/{card_uid}.pin_attempts */
-function pinAttemptsPath(cardUid: string): string {
-  return `nfc/${cardUid}.pin_attempts`;
-}
 
 // ---------------------------------------------------------------------------
 // Attempt state persistence helpers
@@ -341,7 +345,7 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) {
-    diff |= a[i] ^ b[i];
+    diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
   }
   return diff === 0;
 }
@@ -357,4 +361,5 @@ export function createPinGate(vault: VaultOps, cardUid: string): PinGate {
     lockoutDuration: 5 * 60 * 1000, // 5 minutes
   });
 }
+
 

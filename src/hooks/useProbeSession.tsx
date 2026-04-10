@@ -43,7 +43,6 @@
 
 import {
   useCallback,
-  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -172,7 +171,7 @@ export function useProbeSession(client?: ProbeSessionClient | null): ProbeSessio
       setTrajectory([]);
       setError(null);
 
-      const unsub = clientRef.current.subscribeAll(
+      const unsub = clientRef.current!.subscribeAll(
         agentPubkey,
         // Trajectory event handler
         (event: TrajectoryEvent) => {
@@ -217,7 +216,7 @@ export function useProbeSession(client?: ProbeSessionClient | null): ProbeSessio
 
   const respondToToolCall = useCallback(
     async (params: RespondToToolCallParams): Promise<string> => {
-      const eventId = await clientRef.current.respondToToolCall(params);
+      const eventId = await clientRef.current!.respondToToolCall(params);
 
       // Mark the call as resolved so it disappears from pendingApprovals
       resolvedCallIds.current.add(params.callId);
@@ -237,13 +236,13 @@ export function useProbeSession(client?: ProbeSessionClient | null): ProbeSessio
     setError(null);
 
     try {
-      const activeSessions = await clientRef.current.getActiveSessions(agentPubkey);
+      const activeSessions = await clientRef.current!.getActiveSessions(agentPubkey);
       setSessions(activeSessions);
 
       // If there's an active session, fetch its trajectory
       const active = activeSessions.find((s) => s.status === 'active');
       if (active) {
-        const events = await clientRef.current.getSessionTrajectory(
+        const events = await clientRef.current!.getSessionTrajectory(
           active.sessionId,
           agentPubkey
         );
@@ -269,4 +268,5 @@ export function useProbeSession(client?: ProbeSessionClient | null): ProbeSessio
     refresh,
   };
 }
+
 

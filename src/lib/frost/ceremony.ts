@@ -144,10 +144,12 @@ async function loadBifrost(): Promise<{
       generateRound1Package(participantIndex, threshold, totalShares) {
         // Dealer-keygen: generate a new group + shares for the given parameters.
         // The calling node acts as the trusted dealer in the first round.
-        const { group, shares } = libLib.generate_dealer_pkg(threshold, totalShares);
+        const bifLib = libLib as unknown as Record<string, (...args: unknown[]) => unknown>;
+        const { group, shares } = bifLib['generate_dealer_package'](threshold, totalShares) as { group: unknown; shares: unknown[] };
         // Serialize group as commitments bytes and this participant's secret
-              const commitments = encoder.encode(libLib.encode_group_pkg(group));
-        const secretPackage = encoder.encode(libLib.encode_share_pkg(shares[participantIndex]));
+        const enc = new TextEncoder();
+        const commitments = enc.encode(bifLib['encode_group_pkg'](group) as string);
+        const secretPackage = enc.encode(bifLib['encode_share_pkg'](shares[participantIndex]) as string);
         return { commitments, secretPackage };
       },
 
@@ -168,7 +170,7 @@ async function loadBifrost(): Promise<{
         const decoder = new TextDecoder();
         const groupPkgStr = decoder.decode(round2Packages[0]?.encryptedShare ?? mySecretPackage);
         // Extract group pubkey as bytes (first 33 bytes of group package represent group pubkey)
-              const groupPubkey = encoder.encode(groupPkgStr.slice(0, 64)); // hex group pubkey
+        const groupPubkey = new TextEncoder().encode(groupPkgStr.slice(0, 64)); // hex group pubkey
         return {
           secretShare: mySecretPackage,
           publicShare: round2Packages[0]?.encryptedShare ?? new Uint8Array(32),
@@ -954,7 +956,7 @@ async function simulateAggregation(
 
   // Produce a deterministic 64-byte output based on the partial sigs and message
   const combined = sha256(
-    new Uint8Array([...Array.from(partialSigs.values()).flat(), ...message]),
+    new Uint8Array([...Array.from(partialSigs.values()).reduce<number[]>((acc, arr) => [...acc, ...Array.from(arr)], []), ...message]),
   );
   // Pad to 64 bytes (Schnorr sig length)
   const sig64 = new Uint8Array(64);
@@ -1127,5 +1129,6 @@ export type {
   GroupMetadata,
   FrostConfig,
 };
+
 
 

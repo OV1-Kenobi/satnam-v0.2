@@ -216,7 +216,7 @@ export class LNbitsClient {
    */
   async createInvoice(amountSats: number, memo: string): Promise<string> {
     const key = await this.getApiKey('invoice');
-    const body = {
+    const _body = {
       out: false,
       amount: amountSats,
       memo: memo || '',
@@ -299,7 +299,7 @@ export class LNbitsClient {
    */
   async createLnurlPay(username: string): Promise<import('./types.js').LNURLPayConfig> {
     const key = await this.getApiKey('admin');
-    const body = {
+    const _body = {
       description: `Lightning Address for ${username}`,
       min: 1,
       max: 1_000_000, // 1M sats
@@ -654,5 +654,6 @@ declare module '../vault/vault.js' {
     // ignore — key may not exist
   }
 };
+
 
 

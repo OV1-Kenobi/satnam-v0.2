@@ -11,7 +11,7 @@
  * Spec §8.2
  */
 
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   Wrench,
@@ -74,7 +74,7 @@ function highlightJSON(json: string): React.ReactNode[] {
       // String (key or value)
       const strMatch = remaining.match(/^("(?:[^"\\]|\\.)*")/);
       if (strMatch) {
-        const s = strMatch[1];
+        const s = strMatch[1]!;
         // Check if it's a key (followed by colon)
         const afterStr = remaining.slice(s.length).trimStart();
         const isKey = afterStr.startsWith(':');
@@ -91,9 +91,9 @@ function highlightJSON(json: string): React.ReactNode[] {
       const numMatch = remaining.match(/^(-?\d+\.?\d*(?:[eE][+-]?\d+)?)/);
       if (numMatch) {
         tokens.push(
-          <span key={tokenIdx++} className="text-yellow-400">{numMatch[1]}</span>
+          <span key={tokenIdx++} className="text-yellow-400">{numMatch[1]!}</span>
         );
-        remaining = remaining.slice(numMatch[1].length);
+        remaining = remaining.slice(numMatch[1]!.length);
         continue;
       }
 
@@ -101,9 +101,9 @@ function highlightJSON(json: string): React.ReactNode[] {
       const boolMatch = remaining.match(/^(true|false|null)/);
       if (boolMatch) {
         tokens.push(
-          <span key={tokenIdx++} className="text-purple-400">{boolMatch[1]}</span>
+          <span key={tokenIdx++} className="text-purple-400">{boolMatch[1]!}</span>
         );
-        remaining = remaining.slice(boolMatch[1].length);
+        remaining = remaining.slice(boolMatch[1]!.length);
         continue;
       }
 
@@ -111,7 +111,7 @@ function highlightJSON(json: string): React.ReactNode[] {
       const punctMatch = remaining.match(/^([{}\[\],:])/);
       if (punctMatch) {
         tokens.push(
-          <span key={tokenIdx++} className="text-slate-400">{punctMatch[1]}</span>
+          <span key={tokenIdx++} className="text-slate-400">{punctMatch[1]!}</span>
         );
         remaining = remaining.slice(1);
         continue;
@@ -120,8 +120,8 @@ function highlightJSON(json: string): React.ReactNode[] {
       // Whitespace
       const wsMatch = remaining.match(/^(\s+)/);
       if (wsMatch) {
-        tokens.push(<span key={tokenIdx++}>{wsMatch[1]}</span>);
-        remaining = remaining.slice(wsMatch[1].length);
+        tokens.push(<span key={tokenIdx++}>{wsMatch[1]!}</span>);
+        remaining = remaining.slice(wsMatch[1]!.length);
         continue;
       }
 
@@ -275,7 +275,14 @@ function ToolCallCard({
     setDeciding(true);
     try {
       const params = decision === 'modified' ? modifiedParams : request.parameters;
-      await respondToToolCall(request.id, decision, params);
+      await respondToToolCall({
+        callId: request.id,
+        approved: decision === 'approved' || decision === 'modified',
+        sessionId: request.session_id,
+        agentPubkey: '',
+        signerNsec: '',
+        modifiedParameters: decision === 'modified' ? params : undefined,
+      });
       onDecide(request.id, decision, params);
     } finally {
       setDeciding(false);
@@ -603,4 +610,5 @@ export default function ToolCallApproval({
     </div>
   );
 }
+
 

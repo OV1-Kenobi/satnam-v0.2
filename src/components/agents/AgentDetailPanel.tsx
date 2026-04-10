@@ -11,7 +11,7 @@
  * - Delegation (governor, group membership, role)
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import clsx from 'clsx';
 import {
   ArrowLeft,
@@ -202,7 +202,7 @@ function WalletTab({ agent }: { agent: AgentViewModel }) {
 
 function SkillsTab({ agent }: { agent: AgentViewModel }) {
   const { skills } = useSkillManager();
-  const agentSkills = skills.filter(s => agent.skills.includes(s.manifestEventId));
+  const agentSkills = skills.filter(s => agent.skills.includes(s.manifest.manifestEventId));
 
   const tierColors: Record<string, string> = {
     tier1: 'bg-slate-600',
@@ -225,20 +225,20 @@ function SkillsTab({ agent }: { agent: AgentViewModel }) {
       {agentSkills.length > 0 ? agentSkills.map(skill => {
         const topAttestation = skill.attestations
           /* revoked field not on GuardianAttestation — all attestations shown */
-          .sort((a, b) => Number(b.tier.replace('tier', '')) - Number(a.tier.replace('tier', '')))[0];
+          .sort((a, b) => Number((b.tier ?? 'tier0').replace('tier', '')) - Number((a.tier ?? 'tier0').replace('tier', '')))[0];
 
         return (
-          <div key={skill.manifestEventId} className="flex items-start gap-3 px-4 py-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+          <div key={skill.manifest.manifestEventId} className="flex items-start gap-3 px-4 py-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <p className="font-medium text-sm text-[#f5f5f5] truncate">{skill.name}</p>
-                {topAttestation && (
+                <p className="font-medium text-sm text-[#f5f5f5] truncate">{skill.manifest.name}</p>
+                {topAttestation?.tier && (
                   <span className={clsx('px-1.5 py-0.5 rounded text-[10px] font-bold text-white', tierColors[topAttestation.tier] ?? 'bg-slate-600')}>
                     {topAttestation.tier.toUpperCase()}
                   </span>
                 )}
               </div>
-              <p className="text-xs text-[#555555]">v{skill.version} · {skill.attestations/* revoked field not on GuardianAttestation — all attestations shown */.length} attestations</p>
+              <p className="text-xs text-[#555555]">v{skill.manifest.version} · {skill.attestations.length} attestations</p>
             </div>
           </div>
         );
@@ -300,11 +300,11 @@ function CreditsTab({ agent }: { agent: AgentViewModel }) {
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-[#555555]">Budget</span>
-            <span className="font-mono text-[#f5f5f5]">{formatSats(env.maxBudgetSats)} sats</span>
+            <span className="font-mono text-[#f5f5f5]">{formatSats(env.maxSats)} sats</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-[#555555]">Spent</span>
-            <span className="font-mono text-[#f5f5f5]">{formatSats(env.spentSats)} sats</span>
+            <span className="text-[#555555]">Expires</span>
+            <span className="font-mono text-[#f5f5f5]">{formatTimestamp(env.expiresAt)}</span>
           </div>
         </div>
       ))}
@@ -465,4 +465,5 @@ export default function AgentDetailPanel({ agent, onBack, onEdit }: AgentDetailP
     </div>
   );
 }
+
 

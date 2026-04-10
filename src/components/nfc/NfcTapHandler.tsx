@@ -173,7 +173,7 @@ export function NfcStatusBadge({ className }: { className?: string }) {
     'none':          { label: '⊘ No NFC',       color: 'text-[#555555]' },
   };
 
-  const { label, color } = config[method];
+  const { label, color } = config[method] ?? { label: '⊘ No NFC', color: 'text-[#555555]' };
 
   return (
     <span className={`text-xs ${color} ${className ?? ''}`} aria-label={`NFC status: ${label}`}>
@@ -244,4 +244,5 @@ export default function NfcTapHandler({
 
   return <>{children}</>;
 }
+
 

@@ -4,7 +4,7 @@
  *
  * Displays:
  * - Job type, status, provider
- * - Created/completed timestamps
+ * - Submitted timestamp
  * - Payment amount
  * - Result preview
  */
@@ -20,10 +20,9 @@ import {
   Zap,
   ChevronDown,
   ChevronUp,
-  RefreshCw,
 } from 'lucide-react';
 import { useMarketplace } from '../../hooks/useMarketplace.js';
-import type { Job, JobStatus } from '../../hooks/useMarketplace.js';
+import type { Job, JobStatus, ActiveJob } from '../../hooks/useMarketplace.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,20 +36,9 @@ interface ActiveJobsListProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatSats(sats: number): string {
-  return sats.toLocaleString();
-}
-
 function formatTimestamp(ts: number): string {
   const d = new Date(ts * 1000);
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-function formatDuration(start: number, end?: number): string {
-  const diff = ((end ?? Date.now() / 1000) - start);
-  if (diff < 60) return `${Math.floor(diff)}s`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ${Math.floor(diff % 60)}s`;
-  return `${Math.floor(diff / 3600)}h ${Math.floor((diff % 3600) / 60)}m`;
 }
 
 const JOB_TYPE_LABELS: Record<string, string> = {
@@ -67,8 +55,27 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   '5900': 'Classification',
 };
 
-function jobTypeLabel(jobType: string): string {
-  return JOB_TYPE_LABELS[jobType] ?? `kind:${jobType}`;
+function jobTypeLabel(jobType: number): string {
+  return JOB_TYPE_LABELS[String(jobType)] ?? `kind:${jobType}`;
+}
+
+// ---------------------------------------------------------------------------
+// Map ActiveJob → Job (UI-ready shape)
+// ---------------------------------------------------------------------------
+
+function activeJobToJob(aj: ActiveJob): Job {
+  const hasResult = !!aj.result;
+  const isPaid = !!aj.paymentResult;
+  const status: JobStatus = (hasResult || isPaid) ? 'completed' : 'pending';
+
+  return {
+    id: aj.requestEventId,
+    jobType: aj.request.kind,
+    status,
+    submittedAt: aj.submittedAt,
+    result: aj.result ? aj.result.content : null,
+    paid: isPaid,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -93,29 +100,23 @@ const STATUS_CONFIG: Record<JobStatus, {
     className: 'text-blue-400',
     badgeClass: 'bg-blue-600 text-white',
   },
-  partial: {
-    label: 'Partial',
-    Icon: RefreshCw,
-    className: 'text-yellow-400',
-    badgeClass: 'bg-yellow-600 text-white',
-  },
-  success: {
+  completed: {
     label: 'Complete',
     Icon: CheckCircle,
     className: 'text-green-400',
     badgeClass: 'bg-green-600 text-white',
+  },
+  failed: {
+    label: 'Failed',
+    Icon: XCircle,
+    className: 'text-red-400',
+    badgeClass: 'bg-red-600 text-white',
   },
   error: {
     label: 'Error',
     Icon: XCircle,
     className: 'text-red-400',
     badgeClass: 'bg-red-600 text-white',
-  },
-  cancelled: {
-    label: 'Cancelled',
-    Icon: XCircle,
-    className: 'text-slate-500',
-    badgeClass: 'bg-slate-700 text-slate-400',
   },
 };
 
@@ -169,30 +170,20 @@ function JobRow({
             </span>
           </div>
           <div className="flex items-center gap-2 mt-0.5">
-            {job.providerPubkey && (
-              <code className="font-mono text-[10px] text-[#555555] truncate max-w-[120px]">
-                {job.providerPubkey.slice(0, 12)}…
-              </code>
-            )}
             <span className="text-[10px] text-[#555555]">
-              {formatTimestamp(job.createdAt)}
+              {formatTimestamp(job.submittedAt)}
             </span>
           </div>
         </div>
 
-        {/* Budget + duration */}
+        {/* Paid indicator */}
         <div className="text-right flex-shrink-0">
-          <div className="flex items-center gap-1 justify-end">
-            <Zap size={11} className="text-[#f7931a]" />
-            <span className="font-mono text-xs font-bold text-[#f7931a]">
-              {job.result?.invoiceAmount !== undefined
-                ? formatSats(job.result.invoiceAmount)
-                : formatSats(job.budgetSats)}
-            </span>
-          </div>
-          <span className="text-[10px] text-[#555555]">
-            {formatDuration(job.createdAt, job.completedAt)}
-          </span>
+          {job.paid && (
+            <div className="flex items-center gap-1 justify-end">
+              <Zap size={11} className="text-[#f7931a]" />
+              <span className="font-mono text-xs font-bold text-[#f7931a]">Paid</span>
+            </div>
+          )}
         </div>
 
         {/* Expand toggle */}
@@ -214,29 +205,12 @@ function JobRow({
             <span className="text-[#555555]">Job ID</span>
             <code className="font-mono text-[#a0a0a0]">{job.id.slice(0, 20)}…</code>
           </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-[#555555]">Encrypted</span>
-            <span className="text-[#a0a0a0]">{job.encrypted ? 'Yes (NIP-44)' : 'No'}</span>
-          </div>
-          {job.envelopeId && (
-            <div className="flex justify-between text-xs">
-              <span className="text-[#555555]">Envelope</span>
-              <code className="font-mono text-[#a0a0a0]">{job.envelopeId.slice(0, 16)}…</code>
-            </div>
-          )}
-          {/* Input preview */}
-          <div>
-            <p className="text-xs text-[#555555] mb-1">Input Preview</p>
-            <p className="text-xs text-[#a0a0a0] line-clamp-2 font-mono bg-[#1a1a1a] rounded px-2 py-1">
-              {job.input.slice(0, 120)}{job.input.length > 120 ? '…' : ''}
-            </p>
-          </div>
           {/* Result preview */}
-          {job.result?.content && (
+          {job.result && (
             <div>
               <p className="text-xs text-[#555555] mb-1">Result Preview</p>
               <p className="text-xs text-[#a0a0a0] line-clamp-2 font-mono bg-[#1a1a1a] rounded px-2 py-1">
-                {job.result.content.slice(0, 120)}{job.result.content.length > 120 ? '…' : ''}
+                {job.result.slice(0, 120)}{job.result.length > 120 ? '…' : ''}
               </p>
             </div>
           )}
@@ -274,7 +248,7 @@ function FilterBar({
     { id: 'all', label: 'All' },
     { id: 'pending', label: 'Pending' },
     { id: 'processing', label: 'Processing' },
-    { id: 'success', label: 'Complete' },
+    { id: 'completed', label: 'Complete' },
     { id: 'error', label: 'Error' },
   ];
 
@@ -316,13 +290,16 @@ export default function ActiveJobsList({ onSelectJob }: ActiveJobsListProps) {
   const { activeJobs, isLoading } = useMarketplace();
   const [filter, setFilter] = useState<FilterStatus>('all');
 
+  // Map ActiveJob[] → Job[]
+  const jobs: Job[] = activeJobs.map(activeJobToJob);
+
   const filteredJobs = filter === 'all'
-    ? activeJobs
-    : activeJobs.filter(j => j.status === filter);
+    ? jobs
+    : jobs.filter(j => j.status === filter);
 
   // Compute counts
-  const counts: Partial<Record<FilterStatus, number>> = { all: activeJobs.length };
-  for (const job of activeJobs) {
+  const counts: Partial<Record<FilterStatus, number>> = { all: jobs.length };
+  for (const job of jobs) {
     counts[job.status] = (counts[job.status] ?? 0) + 1;
   }
 
@@ -365,4 +342,3 @@ export default function ActiveJobsList({ onSelectJob }: ActiveJobsListProps) {
     </div>
   );
 }
-

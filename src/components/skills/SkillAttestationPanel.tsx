@@ -78,18 +78,17 @@ function AttestationRow({
   canRevoke,
 }: {
   attestation: SkillAttestation;
-  onRevoke?: (attesterPubkey: string) => void;
+  onRevoke?: (guardianPubkey: string) => void;
   canRevoke?: boolean;
 }) {
-  const config = TIER_CONFIG[attestation.tier];
+  const tier = attestation.tier ?? 'tier1';
+  const config = TIER_CONFIG[tier];
 
   return (
     <div
       className={clsx(
         'flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors',
-        attestation.revoked
-          ? 'bg-[#111111] border-[#222222] opacity-50'
-          : 'bg-[#1a1a1a] border-[#2a2a2a]',
+        'bg-[#1a1a1a] border-[#2a2a2a]',
       )}
     >
       {/* Tier badge */}
@@ -100,29 +99,25 @@ function AttestationRow({
         )}
       >
         <Shield size={9} />
-        {attestation.tier.toUpperCase()}
+        {tier.toUpperCase()}
       </span>
 
       {/* Attester info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <code className="font-mono text-xs text-[#a0a0a0] truncate">
-            {attestation.attesterPubkey.slice(0, 16)}…
+            {attestation.guardianPubkey.slice(0, 16)}…
           </code>
-          {attestation.revoked ? (
-            <span className="text-[10px] text-red-400 font-medium">REVOKED</span>
-          ) : (
-            <CheckCircle size={11} className="text-green-500 flex-shrink-0" />
-          )}
+          <CheckCircle size={11} className="text-green-500 flex-shrink-0" />
         </div>
         <p className="text-[10px] text-[#555555]">{formatTimestamp(attestation.timestamp)}</p>
       </div>
 
       {/* Revoke button */}
-      {canRevoke && !attestation.revoked && onRevoke && (
+      {canRevoke && onRevoke && (
         <button
           type="button"
-          onClick={() => onRevoke(attestation.attesterPubkey)}
+          onClick={() => onRevoke(attestation.guardianPubkey)}
           aria-label="Revoke attestation"
           className="flex-shrink-0 p-1 rounded text-[#555555] hover:text-red-400 hover:bg-red-900/20 transition-colors"
         >
@@ -211,10 +206,9 @@ export default function SkillAttestationPanel({
   const [attestSuccess, setAttestSuccess] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
-  const activeAttestations = skill.attestations.filter(a => !a.revoked);
-  const revokedAttestations = skill.attestations.filter(a => a.revoked);
+  const allAttestations = skill.attestations;
   const userHasAttested = currentUserPubkey
-    ? skill.attestations.some(a => a.attesterPubkey === currentUserPubkey && !a.revoked)
+    ? allAttestations.some(a => a.guardianPubkey === currentUserPubkey)
     : false;
 
   const handleAttest = async () => {
@@ -229,10 +223,10 @@ export default function SkillAttestationPanel({
     }
   };
 
-  const handleRevoke = async (attesterPubkey: string) => {
+  const handleRevoke = async (guardianPubkey: string) => {
     setRevokeError(null);
     try {
-      await revokeSkill(skill.manifestEventId, '' /* signerNsec provided by vault */, attesterPubkey);
+      await revokeSkill(skill.manifestEventId, '' /* signerNsec provided by vault */, guardianPubkey);
     } catch (err) {
       setRevokeError(err instanceof Error ? err.message : 'Revocation failed');
     }
@@ -246,14 +240,13 @@ export default function SkillAttestationPanel({
         <div className="flex items-center gap-2">
           <Shield size={12} className="text-[#555555]" />
           <span className="text-xs text-[#a0a0a0]">
-            {activeAttestations.length} active
-            {revokedAttestations.length > 0 && `, ${revokedAttestations.length} revoked`}
+            {allAttestations.length} attestation{allAttestations.length !== 1 ? 's' : ''}
           </span>
         </div>
       </div>
 
-      {/* Active attestations */}
-      {activeAttestations.length === 0 ? (
+      {/* Attestations */}
+      {allAttestations.length === 0 ? (
         <div className="text-center py-6 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a]">
           <Shield size={24} className="mx-auto text-[#555555] mb-2" />
           <p className="text-sm text-[#555555]">No active attestations</p>
@@ -261,25 +254,12 @@ export default function SkillAttestationPanel({
         </div>
       ) : (
         <div className="space-y-2">
-          {activeAttestations.map((attestation, i) => (
+          {allAttestations.map((attestation, i) => (
             <AttestationRow
-              key={`${attestation.attesterPubkey}-${i}`}
+              key={`${attestation.guardianPubkey}-${i}`}
               attestation={attestation}
               onRevoke={handleRevoke}
-              canRevoke={currentUserPubkey === attestation.attesterPubkey}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Revoked attestations (collapsed) */}
-      {revokedAttestations.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[10px] text-[#555555] uppercase tracking-widest">Revoked</p>
-          {revokedAttestations.map((attestation, i) => (
-            <AttestationRow
-              key={`revoked-${attestation.attesterPubkey}-${i}`}
-              attestation={attestation}
+              canRevoke={currentUserPubkey === attestation.guardianPubkey}
             />
           ))}
         </div>

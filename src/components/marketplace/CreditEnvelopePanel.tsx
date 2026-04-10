@@ -3,13 +3,13 @@
  * Phase 3: CEPS credit envelope monitoring
  *
  * Displays:
- * - Envelope status (Intent → Offer → Envelope → SpendAuth → Settlement)
+ * - Envelope status (intent → offer → envelope → spend_auth → settlement)
  * - Visual state machine progress indicator
- * - Max budget vs. spent
- * - Performance bond status
+ * - Max budget vs. authorized spend
  * - Settlement/default actions
  */
 
+import React from 'react';
 import clsx from 'clsx';
 import {
   FileText,
@@ -19,12 +19,10 @@ import {
   CheckCircle2,
   XCircle,
   Zap,
-  Shield,
   Loader2,
-  ChevronRight,
 } from 'lucide-react';
 import { useCreditLifecycle } from '../../hooks/useCreditLifecycle.js';
-import type { CreditEnvelope, CreditState } from '../../hooks/useCreditLifecycle.js';
+import type { CreditEnvelope, CreditState as CreditLifecycleState } from '../../hooks/useCreditLifecycle.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,11 +34,13 @@ interface CreditEnvelopePanelProps {
 }
 
 // ---------------------------------------------------------------------------
-// State machine config
+// State machine config — maps to actual CreditLifecycleState values
 // ---------------------------------------------------------------------------
 
+type UiStateId = CreditLifecycleState;
+
 const STATES: Array<{
-  id: CreditState;
+  id: UiStateId;
   label: string;
   description: string;
   Icon: typeof FileText;
@@ -48,7 +48,7 @@ const STATES: Array<{
   textColor: string;
 }> = [
   {
-    id: 'Intent',
+    id: 'intent_published',
     label: 'Intent',
     description: 'Job request announced',
     Icon: FileText,
@@ -56,7 +56,7 @@ const STATES: Array<{
     textColor: 'text-slate-400',
   },
   {
-    id: 'Offer',
+    id: 'offer_received',
     label: 'Offer',
     description: 'Provider offered terms',
     Icon: Users2,
@@ -64,7 +64,7 @@ const STATES: Array<{
     textColor: 'text-blue-400',
   },
   {
-    id: 'Envelope',
+    id: 'envelope_constructed',
     label: 'Envelope',
     description: 'Credit committed',
     Icon: Package,
@@ -72,7 +72,7 @@ const STATES: Array<{
     textColor: 'text-[#f7931a]',
   },
   {
-    id: 'SpendAuth',
+    id: 'spend_authorized',
     label: 'Spend Auth',
     description: 'Spend authorized',
     Icon: CreditCard,
@@ -80,7 +80,7 @@ const STATES: Array<{
     textColor: 'text-yellow-400',
   },
   {
-    id: 'Settlement',
+    id: 'settled',
     label: 'Settled',
     description: 'Payment complete',
     Icon: CheckCircle2,
@@ -89,13 +89,14 @@ const STATES: Array<{
   },
 ];
 
-const STATE_ORDER: Record<CreditState, number> = {
-  Intent: 0,
-  Offer: 1,
-  Envelope: 2,
-  SpendAuth: 3,
-  Settlement: 4,
-  Default: -1, // terminal failure state
+const STATE_ORDER: Partial<Record<CreditLifecycleState, number>> = {
+  intent_published: 0,
+  offer_received: 1,
+  envelope_constructed: 2,
+  spend_authorized: 3,
+  settled: 4,
+  defaulted: -1,
+  revoked: -1,
 };
 
 // ---------------------------------------------------------------------------
@@ -115,7 +116,7 @@ function formatTimestamp(ts: number): string {
   });
 }
 
-function getStateIndex(state: CreditState): number {
+function getStateIndex(state: CreditLifecycleState): number {
   return STATE_ORDER[state] ?? -1;
 }
 
@@ -123,14 +124,20 @@ function getStateIndex(state: CreditState): number {
 // State machine visualization
 // ---------------------------------------------------------------------------
 
-function StateMachineViz({ currentState }: { currentState: CreditState }) {
-  if (currentState === 'Default') {
+function StateMachineViz({ currentState }: { currentState: CreditLifecycleState }) {
+  if (currentState === 'defaulted' || currentState === 'revoked') {
     return (
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-900/10 border border-red-900/30">
         <XCircle size={16} className="text-red-500 flex-shrink-0" />
         <div>
-          <p className="text-sm font-medium text-red-400">Default</p>
-          <p className="text-xs text-red-500/70">Envelope defaulted — performance bond may be claimed</p>
+          <p className="text-sm font-medium text-red-400">
+            {currentState === 'defaulted' ? 'Default' : 'Revoked'}
+          </p>
+          <p className="text-xs text-red-500/70">
+            {currentState === 'defaulted'
+              ? 'Envelope defaulted — performance bond may be claimed'
+              : 'Envelope revoked'}
+          </p>
         </div>
       </div>
     );
@@ -243,23 +250,18 @@ function EnvelopeCard({
   onSettle?: (id: string) => void;
   isLoading?: boolean;
 }) {
-  const budgetPct = envelope.maxBudgetSats > 0
-    ? Math.min(100, (envelope.spentSats / envelope.maxBudgetSats) * 100)
-    : 0;
+  const maxSats = envelope.maxSats;
 
   return (
     <div className="card space-y-5">
       {/* Envelope ID + timestamp */}
       <div className="flex items-center justify-between">
         <div>
-          <code className="font-mono text-xs text-[#555555]">{envelope.id.slice(0, 20)}…</code>
-          <p className="text-[10px] text-[#555555] mt-0.5">Created {formatTimestamp(envelope.createdAt)}</p>
-        </div>
-        {envelope.expiresAt && (
-          <p className="text-[10px] text-[#555555]">
+          <code className="font-mono text-xs text-[#555555]">{envelope.eventId.slice(0, 20)}…</code>
+          <p className="text-[10px] text-[#555555] mt-0.5">
             Expires {formatTimestamp(envelope.expiresAt)}
           </p>
-        )}
+        </div>
       </div>
 
       {/* State machine */}
@@ -268,55 +270,36 @@ function EnvelopeCard({
       {/* Budget visualization */}
       <div>
         <div className="flex justify-between text-sm mb-2">
-          <span className="text-[#555555]">Budget usage</span>
+          <span className="text-[#555555]">Max budget</span>
           <span className="font-mono text-[#f5f5f5]">
-            {formatSats(envelope.spentSats)} / {formatSats(envelope.maxBudgetSats)} sats
+            {formatSats(maxSats)} sats
           </span>
         </div>
         <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
           <div
-            className={clsx(
-              'h-full rounded-full transition-all duration-500',
-              budgetPct > 90 ? 'bg-red-600' : budgetPct > 70 ? 'bg-yellow-600' : 'bg-[#f7931a]',
-            )}
-            style={{ width: `${budgetPct}%` }}
+            className="h-full rounded-full bg-[#f7931a]"
+            style={{ width: '100%' }}
             role="progressbar"
-            aria-valuenow={envelope.spentSats}
-            aria-valuemax={envelope.maxBudgetSats}
-            aria-label="Budget usage"
+            aria-valuenow={maxSats}
+            aria-valuemax={maxSats}
+            aria-label="Budget"
           />
-        </div>
-        <div className="flex justify-between text-xs text-[#555555] mt-1">
-          <span>{budgetPct.toFixed(1)}% used</span>
-          <span>{formatSats(envelope.maxBudgetSats - envelope.spentSats)} sats remaining</span>
         </div>
       </div>
 
-      {/* Performance bond */}
-      {envelope.performanceBond !== undefined && (
-        <div className="flex items-center gap-2">
-          <Shield size={13} className="text-[#555555]" />
-          <span className="text-xs text-[#555555]">
-            Performance bond: <span className="text-[#a0a0a0] font-mono">{formatSats(envelope.performanceBond)} sats</span>
-          </span>
-        </div>
-      )}
-
       {/* Provider link */}
-      {envelope.providerPubkey && (
-        <div className="flex items-center gap-2">
-          <Zap size={13} className="text-[#f7931a]" />
-          <span className="text-xs text-[#555555]">
-            Provider: <code className="font-mono text-[#a0a0a0]">{envelope.providerPubkey.slice(0, 16)}…</code>
-          </span>
-        </div>
-      )}
+      <div className="flex items-center gap-2">
+        <Zap size={13} className="text-[#f7931a]" />
+        <span className="text-xs text-[#555555]">
+          Agent: <code className="font-mono text-[#a0a0a0]">{envelope.agentPubkey.slice(0, 16)}…</code>
+        </span>
+      </div>
 
       {/* Actions */}
-      {envelope.state === 'Envelope' && onSettle && (
+      {envelope.state === 'envelope_constructed' && onSettle && (
         <button
           type="button"
-          onClick={() => onSettle(envelope.id)}
+          onClick={() => onSettle(envelope.eventId)}
           disabled={isLoading}
           aria-label="Settle envelope"
           className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -333,15 +316,18 @@ function EnvelopeCard({
 // Main Component
 // ---------------------------------------------------------------------------
 
-export default function CreditEnvelopePanel({ agentId, jobId }: CreditEnvelopePanelProps) {
-  const { envelopes, settleEnvelope, isLoading } = useCreditLifecycle();
+export default function CreditEnvelopePanel({ agentId, jobId: _jobId }: CreditEnvelopePanelProps) {
+  const { envelopes, settleEnvelope, isLoading } = useCreditLifecycle(null, null, null);
 
-  // Filter to relevant envelopes if agentId or jobId provided
+  // Filter to relevant envelopes if agentId provided
   const relevantEnvelopes = envelopes.filter(e => {
-    if (agentId && e.agentId !== agentId) return false;
-    if (jobId && e.jobId !== jobId) return false;
+    if (agentId && e.agentPubkey !== agentId) return false;
     return true;
   });
+
+  const handleSettle = async (id: string) => {
+    await settleEnvelope(id, 5, 0n);
+  };
 
   if (isLoading) {
     return (
@@ -373,13 +359,13 @@ export default function CreditEnvelopePanel({ agentId, jobId }: CreditEnvelopePa
         </div>
         <div className="px-3 py-2 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] text-center">
           <p className="font-bold text-lg text-green-400">
-            {relevantEnvelopes.filter(e => e.state === 'Settlement').length}
+            {relevantEnvelopes.filter(e => e.state === 'settled').length}
           </p>
           <p className="text-[10px] text-[#555555] uppercase tracking-widest">Settled</p>
         </div>
         <div className="px-3 py-2 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] text-center">
           <p className="font-bold text-lg text-red-400">
-            {relevantEnvelopes.filter(e => e.state === 'Default').length}
+            {relevantEnvelopes.filter(e => e.state === 'defaulted').length}
           </p>
           <p className="text-[10px] text-[#555555] uppercase tracking-widest">Defaulted</p>
         </div>
@@ -389,9 +375,9 @@ export default function CreditEnvelopePanel({ agentId, jobId }: CreditEnvelopePa
       <div className="space-y-4">
         {relevantEnvelopes.map(envelope => (
           <EnvelopeCard
-            key={envelope.id}
+            key={envelope.eventId}
             envelope={envelope}
-            onSettle={settleEnvelope}
+            onSettle={handleSettle}
             isLoading={isLoading}
           />
         ))}
@@ -399,4 +385,3 @@ export default function CreditEnvelopePanel({ agentId, jobId }: CreditEnvelopePa
     </div>
   );
 }
-

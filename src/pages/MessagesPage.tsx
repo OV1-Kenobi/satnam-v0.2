@@ -61,7 +61,7 @@ function MessagesContent() {
     selectedThreadId,
     messages,
     selectThread,
-  } = useMessaging();
+  } = useMessaging({ selfPubkey: '' });
 
   // Mobile: track if we're showing the chat (vs thread list)
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
@@ -182,4 +182,5 @@ export default function MessagesPage() {
     </NotificationsProvider>
   );
 }
+
 

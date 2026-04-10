@@ -30,7 +30,6 @@
 
 import type {
   SignalingMessage,
-  SignalingMessageType,
   CallType,
 } from './types.js';
 import {
@@ -53,7 +52,7 @@ export class NostrSignaling {
    * @param selfPubkey - Hex-encoded public key of this participant
    * @param cepsSessionId - Active CEPS session ID (from SatnamPrivacyFirstCommunications.createFromVault)
    */
-  constructor(selfPubkey: string, cepsSessionId: string) {
+  constructor(selfPubkey: string, cepsSessionId: string = '') {
     this.selfPubkey = selfPubkey;
     this.messaging = new SatnamPrivacyFirstCommunications(cepsSessionId);
   }
@@ -154,4 +153,5 @@ export class NostrSignaling {
     this.listeners.length = 0;
   }
 }
+
 

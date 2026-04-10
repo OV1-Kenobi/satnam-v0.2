@@ -48,7 +48,7 @@ const RETRY_BASE_DELAY_MS = 1_000;
 const RETRY_MAX_ATTEMPTS = 5;
 
 /** EOSE timeout for list queries (ms). */
-const LIST_EOSE_TIMEOUT_MS = 8_000;
+const _LIST_EOSE_TIMEOUT_MS = 8_000;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,11 +66,7 @@ interface RetryEntry {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
-/** Subscription handle returned by subscribe(). */
-interface SubscriptionHandle {
-  /** Unsubscribe from the relay(s). */
-  unsub: () => void;
-}
+// SubscriptionHandle reserved for future use
 
 // ---------------------------------------------------------------------------
 // PylonCepsClient
@@ -168,7 +164,7 @@ export class PylonCepsClient {
   ): () => void {
     const relays = [PYLON_RELAY_URL, ...this.fallbackRelays];
 
-    const sub = this.pool.subscribeMany(relays, [filter as any], {
+    const sub = this.pool.subscribeMany(relays, [filter as NostrFilter], {
       onevent(event: NostrEvent) {
         callback(event);
       },
@@ -195,7 +191,7 @@ export class PylonCepsClient {
   ): Promise<NostrEvent[]> {
     const relays = relayOverride ?? [PYLON_RELAY_URL, ...this.fallbackRelays];
     // querySync accepts relays as first arg, filters as second
-    return this.pool.querySync(relays, filters as any[]) as Promise<NostrEvent[]>;
+    return this.pool.querySync(relays, filters[0] ?? {} as NostrFilter) as Promise<NostrEvent[]>;
   }
 
   /**
@@ -364,3 +360,4 @@ export class PylonCepsClient {
     );
   }
 }
+

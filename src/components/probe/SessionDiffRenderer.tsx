@@ -437,8 +437,8 @@ export function parseUnifiedDiff(raw: string): DiffFile[] {
     if (line.startsWith('@@') && currentFile) {
       const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/);
       if (match) {
-        oldLineNum = parseInt(match[1], 10);
-        newLineNum = parseInt(match[2], 10);
+        oldLineNum = parseInt(match[1] ?? '0', 10);
+        newLineNum = parseInt(match[2] ?? '0', 10);
         currentHunk = { header: line, lines: [] };
         currentFile.hunks.push(currentHunk);
       }
@@ -529,4 +529,5 @@ export default function SessionDiffRenderer({
     </div>
   );
 }
+
 

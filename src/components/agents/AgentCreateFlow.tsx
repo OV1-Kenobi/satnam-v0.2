@@ -12,7 +12,7 @@
  *   7. Review + create (publishes kind:39200 via CEPS)
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback } Fragment } from 'react';
 import clsx from 'clsx';
 import {
   User,
@@ -125,7 +125,7 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
         const isCurrent = current === step.id;
         const Icon = step.icon;
         return (
-          <React.Fragment key={step.id}>
+          <Fragment key={step.id}>
             <div
               className={clsx(
                 'flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold transition-all duration-200',
@@ -140,7 +140,7 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
             {idx < STEPS.length - 1 && (
               <div className={clsx('flex-1 h-0.5 transition-colors', isCompleted ? 'bg-green-600' : 'bg-slate-800')} />
             )}
-          </React.Fragment>
+          </Fragment>
         );
       })}
     </div>
@@ -743,4 +743,5 @@ export default function AgentCreateFlow({ onComplete, onCancel }: AgentCreateFlo
     </div>
   );
 }
+
 

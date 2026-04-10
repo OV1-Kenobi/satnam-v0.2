@@ -30,7 +30,7 @@ import type { VaultOps } from '../vault/types.js';
 // ---------------------------------------------------------------------------
 
 /** Role hierarchy levels (lower number = higher authority) */
-const ROLE_LEVEL: Record<RoleType, number> = {
+const _ROLE_LEVEL: Record<RoleType, number> = {
   [RoleType.Guardian]: 0,
   [RoleType.Steward]: 1,
   [RoleType.Adult]: 2,
@@ -114,7 +114,7 @@ export class DelegationGraph {
     if (existingIdx >= 0) {
       // Replace if newer
       const existing = delegateeList[existingIdx];
-      if (new Date(event.createdAt) >= new Date(existing.createdAt)) {
+      if (new Date(event.createdAt) >= new Date(existing!.createdAt)) {
         delegateeList[existingIdx] = event;
       }
     } else {
@@ -129,7 +129,7 @@ export class DelegationGraph {
     );
     if (existingDelegatorIdx >= 0) {
       const existing = delegatorList[existingDelegatorIdx];
-      if (new Date(event.createdAt) >= new Date(existing.createdAt)) {
+      if (new Date(event.createdAt) >= new Date(existing!.createdAt)) {
         delegatorList[existingDelegatorIdx] = event;
       }
     } else {
@@ -280,10 +280,10 @@ export class DelegationGraph {
     if (chain.length === 0) return null;
 
     const leaf = chain[0];
-    if (leaf.role) return leaf.role;
+    if (leaf!.role) return leaf!.role;
 
     // Infer role from the delegator's role
-    const delegatorRole = this.getRole(leaf.delegatorPubkey);
+    const delegatorRole = this.getRole(leaf!.delegatorPubkey);
     if (delegatorRole === null) return null;
 
     // Infer delegatee role: one level below delegator
@@ -614,4 +614,5 @@ export class DelegationGraph {
     return Array.from(pubkeys);
   }
 }
+
 

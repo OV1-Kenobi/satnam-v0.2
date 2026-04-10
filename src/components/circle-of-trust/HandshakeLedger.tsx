@@ -8,8 +8,7 @@
  * - Each entry: icon + type + timestamp + details
  */
 
-import React from 'react';
-import clsx from 'clsx';
+
 import {
   Users2,
   MessageSquare,
@@ -239,4 +238,5 @@ export default function HandshakeLedger({
     </section>
   );
 }
+
 

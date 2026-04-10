@@ -19,6 +19,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getBondManager } from '../lib/sig4sats/bond-manager.js';
+import { getVault } from '../lib/vault/vault.js';
 import type {
   EntitlementBond,
   RecoveryBond,
@@ -89,7 +90,7 @@ export type UseSig4SatsReturn = Sig4SatsState & Sig4SatsActions;
  * @returns Combined state and action object for all bond operations
  */
 export function useSig4Sats(): UseSig4SatsReturn {
-  const manager = getBondManager();
+  const manager = getBondManager(getVault());
   const mountedRef = useRef(true);
 
   const [state, setState] = useState<Sig4SatsState>({
@@ -107,29 +108,33 @@ export function useSig4Sats(): UseSig4SatsReturn {
   const refresh = useCallback(() => {
     if (!mountedRef.current) return;
 
-    // Expire stale bonds first
-    manager.expireStaleBonds();
+    void (async () => {
+      // Expire stale bonds first
+      await manager.expireStaleBonds();
 
-    const allBonds = manager.listBonds();
+      const allBonds = await manager.listBonds();
 
-    const entitlements = allBonds
-      .filter((b) => b.bond.type === 'entitlement')
-      .map((b) => b.bond as EntitlementBond);
+      const entitlements = allBonds
+        .filter((b) => b.bond.type === 'entitlement')
+        .map((b) => b.bond as EntitlementBond);
 
-    const recoveryBonds = allBonds
-      .filter((b) => b.bond.type === 'recovery')
-      .map((b) => b.bond as RecoveryBond);
+      const recoveryBonds = allBonds
+        .filter((b) => b.bond.type === 'recovery')
+        .map((b) => b.bond as RecoveryBond);
 
-    const allowances = allBonds
-      .filter((b) => b.bond.type === 'allowance')
-      .map((b) => b.bond as AllowanceBond);
+      const allowances = allBonds
+        .filter((b) => b.bond.type === 'allowance')
+        .map((b) => b.bond as AllowanceBond);
 
-    setState((prev) => ({
-      ...prev,
-      entitlements,
-      recoveryBonds,
-      allowances,
-    }));
+      if (mountedRef.current) {
+        setState((prev) => ({
+          ...prev,
+          entitlements,
+          recoveryBonds,
+          allowances,
+        }));
+      }
+    })();
   }, [manager]);
 
   // Hydrate on mount
@@ -252,3 +257,4 @@ export function useSig4Sats(): UseSig4SatsReturn {
 }
 
 export default useSig4Sats;
+

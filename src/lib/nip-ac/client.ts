@@ -121,7 +121,7 @@ export type CreditLifecycleCallback = (event: {
  * Decode an nsec bech32 or hex secret key to raw bytes.
  * @internal
  */
-function decodeSecretKey(nsecOrHex: string): Uint8Array {
+function _decodeSecretKey(nsecOrHex: string): Uint8Array {
   if (/^[0-9a-fA-F]{64}$/.test(nsecOrHex)) {
     return hexToBytes(nsecOrHex);
   }
@@ -726,7 +726,7 @@ export class CreditLifecycleManager {
             const eTag = event.tags.find((t: string[]) => t[0] === 'e');
             const envelopeId = eTag?.[1] ?? '';
 
-            const typeMap: Record<number, CreditLifecycleCallback extends (e: infer E) => void ? E['type'] : never> = {
+            const typeMap: Record<number, CreditLifecycleCallback extends (e: infer E) => void ? E['type' as keyof typeof e] ?? '' : never> = {
               39241: 'offer',
               39244: 'settlement',
               39245: 'default',
@@ -811,5 +811,6 @@ export class CreditLifecycleManager {
       .filter((e): e is CreditEnvelope => e !== null && e.expiresAt > now);
   }
 }
+
 
 

@@ -46,36 +46,23 @@ export function getDefaultRelays(): string[] {
           .filter(Boolean)
       : [...FALLBACK_RELAYS];
   }
-  return _cachedDefaultRelays;
+  return _cachedDefaultRelays!;
 }
 
 // Legacy proxy alias for backward compatibility
-const DEFAULT_RELAYS: string[] = new Proxy([] as string[], {
-  get(_target, prop) {
-    const relays = getDefaultRelays();
-    if (prop === "length") return relays.length;
-    if (typeof prop === "string" && !isNaN(Number(prop))) {
-      return relays[Number(prop)];
-    }
-    if (prop === Symbol.iterator) return relays[Symbol.iterator].bind(relays);
-    if (typeof prop === "string" && prop in Array.prototype) {
-      const method = (relays as any)[prop];
-      return typeof method === "function" ? method.bind(relays) : method;
-    }
-    return undefined;
-  },
-});
-
 // ============================================================================
 // Types
 // ============================================================================
 
+import type { Filter as NostrFilter } from 'nostr-tools';
+
 type CepsModule = typeof import("./central-event-publishing-service");
+
 type CepsInstance = CepsModule["central_event_publishing_service"];
 
 export type CepsClient = CepsInstance;
 export type CepsEvent = Parameters<CepsInstance["publishEvent"]>[0];
-export type CepsFilter = Parameters<CepsInstance["subscribeMany"]>[1][number];
+export type CepsFilter = NostrFilter;
 export type CepsSubscription = ReturnType<CepsInstance["subscribeMany"]>;
 
 export interface MessageSendResult {
@@ -382,3 +369,4 @@ export async function verifyEventWithCeps(event: CepsEvent): Promise<boolean> {
   const ceps = await loadCeps();
   return ceps.verifyEvent(event);
 }
+

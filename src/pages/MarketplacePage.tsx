@@ -111,7 +111,7 @@ function DiscoverTab() {
     ? providers.filter(p =>
         p.name?.toLowerCase().includes(search.toLowerCase()) ||
         p.pubkey.includes(search.toLowerCase()) ||
-        p.supportedJobTypes.some(jt => jt.includes(search))
+        p.supportedJobKinds.some((jt: number) => String(jt).includes(search))
       )
     : providers;
 
@@ -274,10 +274,10 @@ function MyJobsTab() {
 // ---------------------------------------------------------------------------
 
 function CreditsTab() {
-  const { envelopes } = useCreditLifecycle();
+  const { envelopes } = useCreditLifecycle(null, null, null);
 
-  const totalCommitted = envelopes.reduce((s, e) => s + e.maxBudgetSats, 0);
-  const totalSpent = envelopes.reduce((s, e) => s + e.spentSats, 0);
+  const totalCommitted = envelopes.reduce((s, e) => s + e.maxSats, 0);
+  const totalSpent = envelopes.reduce((s, _e) => s, 0);
   const activeCount = envelopes.filter(e => !['Settlement', 'Default'].includes(e.state)).length;
 
   return (
@@ -312,7 +312,7 @@ function CreditsTab() {
 
 export default function MarketplacePage() {
   const { providers, activeJobs, isLoading } = useMarketplace();
-  const { envelopes } = useCreditLifecycle();
+  const { envelopes } = useCreditLifecycle(null, null, null);
   const [activeTab, setActiveTab] = useState<MainTab>('discover');
 
   const counts = {
@@ -362,4 +362,5 @@ export default function MarketplacePage() {
     </>
   );
 }
+
 

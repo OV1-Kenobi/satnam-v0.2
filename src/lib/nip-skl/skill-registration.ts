@@ -350,8 +350,8 @@ export interface SkillVersionUpdateParams {
 export class SkillManager {
   constructor(
     private readonly ceps: CepsClient,
-    private readonly vault: Vault
-  ) {}
+    _vault: Vault
+  ) { void _vault; }
 
   // -------------------------------------------------------------------------
   // Register
@@ -479,6 +479,7 @@ export class SkillManager {
       expiryTimestamp: newManifest.expiryTimestamp,
       inputSchema: newManifest.inputSchema,
       outputSchema: newManifest.outputSchema,
+      signerNsec,
       relayUrls,
     });
 
@@ -611,3 +612,4 @@ export class SkillManager {
     };
   }
 }
+

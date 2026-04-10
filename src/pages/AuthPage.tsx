@@ -60,7 +60,7 @@ function hasNip07Extension(): boolean {
 function detectExtensionName(): string {
   const w = window as Window & { nostr?: { _alby?: boolean; _nos2x?: boolean; name?: string } };
   if (w.nostr?.name) return w.nostr.name;
-  if ((window as Record<string, unknown>).alby) return 'Alby';
+  if ((window as unknown as Record<string, unknown>).alby) return 'Alby';
   return 'Your Nostr Extension';
 }
 
@@ -1073,3 +1073,4 @@ function EyeOffIcon(): React.JSX.Element {
     </svg>
   );
 }
+

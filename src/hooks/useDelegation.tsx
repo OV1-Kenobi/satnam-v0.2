@@ -18,7 +18,7 @@
  * ```
  */
 
-import React, {
+import {
   createContext,
   useContext,
   useState,
@@ -278,4 +278,5 @@ export function useDelegation(options: UseDelegationOptions = {}): UseDelegation
 }
 
 export default useDelegation;
+
 

@@ -20,7 +20,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { NostrSignaling }       from '../lib/calls/signaling.js';
 import { PeerConnectionManager } from '../lib/calls/peer-connection.js';
-import type { CallSession, CallState, CallType, SignalingMessage } from '../lib/calls/types.js';
+import type { CallSession, CallType, SignalingMessage } from '../lib/calls/types.js';
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -249,3 +249,4 @@ export function useCalls(selfPubkey?: string) {
 }
 
 export default useCalls;
+

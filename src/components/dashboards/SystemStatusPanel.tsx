@@ -30,6 +30,7 @@ import {
 
 import { usePylon } from '../../hooks/usePylon.js';
 import { useSpacetimeBridge } from '../../hooks/useSpacetimeBridge.js';
+import type { SpacetimeBridge } from '../../lib/bridge/spacetime-bridge.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -224,14 +225,17 @@ export interface SystemStatusPanelProps {
   /** Compact mode: no relay details, reduced spacing */
   compact?: boolean;
   className?: string;
+  /** SpacetimeBridge instance for presence/heartbeat monitoring */
+  bridge: SpacetimeBridge;
 }
 
 export default function SystemStatusPanel({
   compact = false,
   className,
+  bridge,
 }: SystemStatusPanelProps) {
   const { isConnected, isAuthenticated } = usePylon();
-  const { presenceStatus, computeAssignments, heartbeatActive } = useSpacetimeBridge();
+  const { presenceStatus, computeAssignments, heartbeatActive } = useSpacetimeBridge(bridge);
 
   const [showRelays, setShowRelays] = useState(!compact);
   const [swStatus]   = useState<ServiceWorkerStatus>(getSWStatus);
@@ -366,7 +370,7 @@ export default function SystemStatusPanel({
         <StatusRow
           label="SpacetimeBridge"
           value={heartbeatActive ? `${presenceStatus ?? 'Active'}` : 'Inactive'}
-          detail={computeAssignments > 0 ? `${computeAssignments} compute assignments` : undefined}
+          detail={computeAssignments.length > 0 ? `${computeAssignments.length} compute assignments` : undefined}
           dotVariant={spacetimeDot}
           icon={GitMerge}
           iconCls={heartbeatActive ? 'text-blue-400' : 'text-slate-500'}
@@ -393,4 +397,5 @@ export default function SystemStatusPanel({
     </div>
   );
 }
+
 

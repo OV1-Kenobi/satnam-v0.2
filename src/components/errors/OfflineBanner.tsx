@@ -20,18 +20,11 @@ import {
   useState,
   useEffect,
   useCallback,
-  type } from 'react';
+} from 'react';
 
 // ============================================================================
 // Types
 // ============================================================================
-
-interface QueueStatus {
-  /** Number of Nostr events queued for delivery. */
-  count: number;
-  /** Whether the service worker background sync is registered. */
-  syncRegistered: boolean;
-}
 
 // ============================================================================
 // Hook: useOnlineStatus
@@ -126,7 +119,7 @@ interface OfflineBannerProps {
  * Offline detection banner. Renders nothing when the user is online.
  * Displays a sticky top banner when offline, with queued event count.
  */
-export function OfflineBanner({ className = '' }: OfflineBannerProps): React.JSX.Element | null {
+export function OfflineBanner({ className = '' }: OfflineBannerProps): JSX.Element | null {
   const isOnline = useOnlineStatus();
   const queuedCount = useQueuedEventCount();
   const [justCameOnline, setJustCameOnline] = useState(false);
@@ -199,7 +192,7 @@ export function OfflineBanner({ className = '' }: OfflineBannerProps): React.JSX
 // Inline SVG Icons (no external dep)
 // ============================================================================
 
-function WifiOffIcon({ className = '' }: { className?: string }): React.JSX.Element {
+function WifiOffIcon({ className = '' }: { className?: string }): JSX.Element {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -223,7 +216,7 @@ function WifiOffIcon({ className = '' }: { className?: string }): React.JSX.Elem
   );
 }
 
-function CheckCircleIcon({ className = '' }: { className?: string }): React.JSX.Element {
+function CheckCircleIcon({ className = '' }: { className?: string }): JSX.Element {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -257,7 +250,7 @@ function CheckCircleIcon({ className = '' }: { className?: string }): React.JSX.
  * <main>...</main>
  * ```
  */
-export function OfflineBannerSpacer(): React.JSX.Element {
+export function OfflineBannerSpacer(): JSX.Element {
   const isOnline = useOnlineStatus();
 
   if (isOnline) return <></>;
@@ -266,4 +259,5 @@ export function OfflineBannerSpacer(): React.JSX.Element {
 }
 
 export default OfflineBanner;
+
 

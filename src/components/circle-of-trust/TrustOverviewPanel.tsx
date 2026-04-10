@@ -13,7 +13,6 @@
  */
 
 import { useMemo } from 'react';
-import clsx from 'clsx';
 import { Users, Shield, Clock, TrendingUp } from 'lucide-react';
 import type { TrustedContact, CircleOfTrustStats } from '../../lib/circle-of-trust/types.js';
 
@@ -36,17 +35,6 @@ function truncateNpub(pubkey: string): string {
   return `${pubkey.slice(0, 6)}…${pubkey.slice(-4)}`;
 }
 
-function scoreColor(score: number): string {
-  if (score > 70) return '#ffd700';
-  if (score >= 30) return '#f7931a';
-  return '#3b82f6';
-}
-
-function scoreLabel(score: number): string {
-  if (score > 70) return 'High Trust';
-  if (score >= 30) return 'Medium Trust';
-  return 'New Contact';
-}
 
 /** Place a dot on a ring. Returns CSS top/left as percent of the 300×300 container. */
 function ringPosition(
@@ -309,4 +297,5 @@ export default function TrustOverviewPanel({
     </section>
   );
 }
+
 

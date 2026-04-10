@@ -17,7 +17,6 @@ import clsx from 'clsx';
 import {
   X,
   Crown,
-  Shield,
   Edit2,
   Bell,
   BellOff,
@@ -27,19 +26,19 @@ import {
   UserPlus,
   Check,
 } from 'lucide-react';
-import type { MessageThread } from '../../hooks/useMessaging.js';
+import type { GroupThread } from '../../hooks/useMessaging.js';
 import { useMessaging } from '../../hooks/useMessaging.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface GroupSettingsPanelProps {
-  thread: MessageThread;
+  thread: GroupThread;
   onClose: () => void;
   /** Current user pubkey to check admin status */
   currentUserPubkey?: string;
 }
 
-type NotifPref = MessageThread['notificationPreference'];
+type NotifPref = GroupThread['notificationPreference'];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +56,8 @@ const NOTIF_OPTIONS: Array<{ value: NotifPref; label: string; Icon: typeof Bell 
 
 // ── MemberRow ──────────────────────────────────────────────────────────────────
 
+interface ParticipantInfo { pubkey: string; isAdmin: boolean; displayName?: string; }
+
 function MemberRow({
   participant,
   isCurrentUser,
@@ -65,7 +66,7 @@ function MemberRow({
   onTransferAdmin,
   isAdmin,
 }: {
-  participant: MessageThread['participants'][0];
+  participant: ParticipantInfo;
   isCurrentUser: boolean;
   canRemove: boolean;
   onRemove: () => void;
@@ -73,7 +74,7 @@ function MemberRow({
   isAdmin: boolean;
 }) {
   const hue = avatarHue(participant.pubkey);
-  const displayName = participant.displayName ?? participant.npub ?? `${participant.pubkey.slice(0, 8)}…`;
+  const displayName = participant.displayName ?? `${participant.pubkey.slice(0, 8)}…`;
 
   return (
     <div className="flex items-center gap-3 py-2">
@@ -83,9 +84,7 @@ function MemberRow({
         style={{ background: `hsl(${hue},50%,38%)` }}
         aria-hidden="true"
       >
-        {participant.avatarUrl
-          ? <img src={participant.avatarUrl} alt={displayName} className="w-full h-full rounded-full object-cover" />
-          : displayName.slice(0, 2).toUpperCase()}
+        {displayName.slice(0, 2).toUpperCase()}
       </div>
 
       {/* Name */}
@@ -99,12 +98,7 @@ function MemberRow({
             <span className="text-[9px] text-slate-600 font-medium">(you)</span>
           )}
         </div>
-        {participant.polTrustScore != null && (
-          <div className="flex items-center gap-1 mt-0.5">
-            <Shield size={9} className="text-[#f7931a]" aria-hidden="true" />
-            <span className="text-[10px] text-slate-600">PoL {participant.polTrustScore}</span>
-          </div>
-        )}
+
       </div>
 
       {/* Actions */}
@@ -143,16 +137,14 @@ export default function GroupSettingsPanel({
   onClose,
   currentUserPubkey = 'self',
 }: GroupSettingsPanelProps) {
-  const { addMember, removeMember, leaveGroup, updateGroupConfig, setNotificationPreference } = useMessaging();
+  const { addMember, removeMember, leaveGroup, updateGroupConfig, setNotificationPreference } = useMessaging({ localPubkeyHex: currentUserPubkey });
 
   const [editingName, setEditingName] = useState(false);
-  const [nameInput, setNameInput] = useState(thread.name);
+  const [nameInput, setNameInput] = useState(thread.config.name);
   const [addPubkeyInput, setAddPubkeyInput] = useState('');
   const [isLeaving, setIsLeaving] = useState(false);
 
-  const isAdmin = thread.participants.some(
-    p => p.pubkey === currentUserPubkey && p.isAdmin
-  );
+  const isAdmin = thread.config.admins.includes(currentUserPubkey);
 
   const handleSaveName = useCallback(async () => {
     if (nameInput.trim() && thread.groupId) {
@@ -224,7 +216,7 @@ export default function GroupSettingsPanel({
               </button>
               <button
                 type="button"
-                onClick={() => { setEditingName(false); setNameInput(thread.name); }}
+                onClick={() => { setEditingName(false); setNameInput(thread.config.name); }}
                 aria-label="Cancel"
                 className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors"
               >
@@ -233,7 +225,7 @@ export default function GroupSettingsPanel({
             </div>
           ) : (
             <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-200">{thread.name}</span>
+              <span className="text-sm text-slate-200">{thread.config.name}</span>
               {isAdmin && (
                 <button
                   type="button"
@@ -252,19 +244,19 @@ export default function GroupSettingsPanel({
         <section className="px-4 py-4 border-b border-slate-800/60">
           <div className="flex items-center justify-between mb-3">
             <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">
-              Members ({thread.participants.length})
+              Members ({thread.config.members.length})
             </p>
           </div>
 
           <div className="space-y-0.5 divide-y divide-slate-800/40">
-            {thread.participants.map(p => (
+            {thread.config.members.map(pubkey => (
               <MemberRow
-                key={p.pubkey}
-                participant={p}
-                isCurrentUser={p.pubkey === currentUserPubkey}
+                key={pubkey}
+                participant={{ pubkey, isAdmin: thread.config.admins.includes(pubkey) }}
+                isCurrentUser={pubkey === currentUserPubkey}
                 canRemove={isAdmin}
                 isAdmin={isAdmin}
-                onRemove={() => handleRemoveMember(p.pubkey)}
+                onRemove={() => handleRemoveMember(pubkey)}
                 onTransferAdmin={() => {
                   // In production: update group config to change admin
                   alert(`Transfer admin to ${p.displayName ?? p.pubkey}? (Not implemented in dev mode)`);
@@ -347,4 +339,5 @@ export default function GroupSettingsPanel({
     </div>
   );
 }
+
 

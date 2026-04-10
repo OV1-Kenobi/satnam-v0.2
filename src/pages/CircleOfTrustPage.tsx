@@ -235,11 +235,11 @@ export default function CircleOfTrustPage() {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
 
   // Placeholder handlers — wired to real routing/modals in later phases
-  const handleMessage    = useCallback((pub: string) => { console.info('Message'); }, []);
-  const handleZap        = useCallback((pub: string) => { console.info('Zap'); }, []);
-  const handleCall       = useCallback((pub: string) => { console.info('Call'); }, []);
-  const handleViewProfile = useCallback((pub: string) => { console.info('View profile'); }, []);
-  const handleContactClick = useCallback((pub: string) => {
+  const handleMessage    = useCallback((_pub: string) => { console.info('Message'); }, []);
+  const handleZap        = useCallback((_pub: string) => { console.info('Zap'); }, []);
+  const handleCall       = useCallback((_pub: string) => { console.info('Call'); }, []);
+  const handleViewProfile = useCallback((_pub: string) => { console.info('View profile'); }, []);
+  const handleContactClick = useCallback((_pub: string) => {
     setActiveTab('contacts');
   }, []);
 
@@ -315,4 +315,5 @@ export default function CircleOfTrustPage() {
     </>
   );
 }
+
 

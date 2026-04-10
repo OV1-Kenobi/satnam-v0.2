@@ -433,7 +433,7 @@ export class AdaptiveDelegationCoordinator {
       if (!isAgentAvailable(fallbackState, now)) continue;
 
       // Record the transfer
-      const transferId = await this.repo.recordTaskTransfer({
+      const _transferId = await this.repo.recordTaskTransfer({
         task_id: taskId,
         strategy_id: strategy.id,
         from_agent_id: strategy.current_agent_id,
@@ -510,3 +510,4 @@ export class AdaptiveDelegationCoordinator {
     }
   }
 }
+

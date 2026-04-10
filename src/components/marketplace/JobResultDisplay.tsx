@@ -4,9 +4,7 @@
  *
  * Displays:
  * - Result content (text, structured data)
- * - Payment info (invoice amount, payment status)
- * - Provider info
- * - "Pay & Accept" / "Reject" buttons
+ * - Job status indicator
  * - Feedback form
  */
 
@@ -15,7 +13,6 @@ import clsx from 'clsx';
 import {
   CheckCircle,
   XCircle,
-  Zap,
   Copy,
   CheckCheck,
   MessageSquare,
@@ -23,7 +20,6 @@ import {
   AlertTriangle,
   Loader2,
 } from 'lucide-react';
-import { useMarketplace } from '../../hooks/useMarketplace.js';
 import type { Job } from '../../hooks/useMarketplace.js';
 
 // ---------------------------------------------------------------------------
@@ -34,14 +30,6 @@ interface JobResultDisplayProps {
   job: Job;
   onAccepted?: (jobId: string) => void;
   onRejected?: (jobId: string) => void;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatSats(sats: number): string {
-  return sats.toLocaleString();
 }
 
 // ---------------------------------------------------------------------------
@@ -169,8 +157,6 @@ export default function JobResultDisplay({
   onAccepted,
   onRejected,
 }: JobResultDisplayProps) {
-  const { payForResult, isLoading } = useMarketplace();
-  const [payError, setPayError] = useState<string | null>(null);
   const [showFeedback, setShowFeedback] = useState(false);
   const [accepted, setAccepted] = useState(false);
 
@@ -183,19 +169,13 @@ export default function JobResultDisplay({
     );
   }
 
-  const result = job.result;
-  const isPaid = result.paymentStatus === 'paid';
-  const hasInvoice = !!result.paymentHash;
+  const resultText = job.result;
+  const isCompleted = job.status === 'completed';
+  const isError = job.status === 'error' || job.status === 'failed';
 
-  const handlePay = async () => {
-    setPayError(null);
-    try {
-      await payForResult(job.id);
-      setAccepted(true);
-      onAccepted?.(job.id);
-    } catch (err) {
-      setPayError(err instanceof Error ? err.message : 'Payment failed');
-    }
+  const handleAccept = () => {
+    setAccepted(true);
+    onAccepted?.(job.id);
   };
 
   const handleReject = () => {
@@ -214,117 +194,73 @@ export default function JobResultDisplay({
         <div className="flex items-center gap-1.5">
           <span className={clsx(
             'w-2 h-2 rounded-full',
-            job.status === 'success' ? 'bg-green-500' : job.status === 'error' ? 'bg-red-500' : 'bg-yellow-500',
+            isCompleted ? 'bg-green-500' : isError ? 'bg-red-500' : 'bg-yellow-500',
           )} aria-hidden="true" />
           <span className="text-xs text-[#a0a0a0] capitalize">{job.status}</span>
         </div>
       </div>
 
-      {/* Provider info */}
-      {result.providerPubkey && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
-          <span className="text-xs text-[#555555]">Provider:</span>
-          <code className="font-mono text-xs text-[#a0a0a0] flex-1 truncate">
-            {result.providerPubkey.slice(0, 20)}…
-          </code>
-        </div>
-      )}
-
       {/* Result content */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs text-[#555555] uppercase tracking-widest">Result</p>
-          <CopyButton text={result.content} label="Copy result content" />
+          <CopyButton text={resultText} label="Copy result content" />
         </div>
         <pre className="whitespace-pre-wrap text-sm text-[#f5f5f5] font-mono leading-relaxed overflow-x-auto max-h-64 overflow-y-auto">
-          {result.content}
+          {resultText}
         </pre>
       </div>
 
-      {/* Payment info */}
-      {hasInvoice && (
-        <div className="card">
-          <p className="text-xs text-[#555555] uppercase tracking-widest mb-3">Payment</p>
-          <div className="space-y-2">
-            {result.invoiceAmount !== undefined && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-[#555555]">Amount</span>
-                <div className="flex items-center gap-1">
-                  <Zap size={13} className="text-[#f7931a]" />
-                  <span className="font-mono font-bold text-[#f7931a]">
-                    {formatSats(result.invoiceAmount)} sats
-                  </span>
-                </div>
-              </div>
-            )}
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-[#555555]">Status</span>
-              <span className={clsx(
-                'text-sm font-medium',
-                isPaid ? 'text-green-500' : 'text-yellow-500',
-              )}>
-                {isPaid ? 'Paid' : 'Unpaid'}
-              </span>
-            </div>
-          </div>
+      {/* Payment status */}
+      {job.paid && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-green-900/10 border border-green-900/30 text-green-400">
+          <CheckCircle size={16} />
+          <span className="text-sm font-medium">Payment confirmed</span>
         </div>
       )}
 
       {/* Error info */}
-      {job.status === 'error' && (
+      {isError && (
         <div className="flex items-start gap-2 px-4 py-3 rounded-lg bg-red-900/10 border border-red-900/30">
           <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
           <p className="text-sm text-red-400">Job failed. No payment required.</p>
         </div>
       )}
 
-      {/* Pay error */}
-      {payError && (
-        <div className="px-4 py-3 rounded-lg bg-red-600/10 border border-red-600/30 text-red-400 text-sm" role="alert">
-          {payError}
-        </div>
-      )}
-
       {/* Actions */}
-      {!accepted && !isPaid && job.status === 'success' && (
+      {!accepted && !job.paid && isCompleted && (
         <div className="flex gap-3">
           <button
             type="button"
             onClick={handleReject}
-            disabled={isLoading}
             aria-label="Reject result"
-            className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium disabled:opacity-50 transition-colors"
+            className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition-colors"
           >
             <XCircle size={15} />
             Reject
           </button>
           <button
             type="button"
-            onClick={handlePay}
-            disabled={isLoading}
-            aria-label="Pay and accept result"
-            className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-[#f7931a] hover:bg-[#e8841a] text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            onClick={handleAccept}
+            aria-label="Accept result"
+            className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-[#f7931a] hover:bg-[#e8841a] text-white text-sm font-medium transition-colors"
           >
-            {isLoading ? (
-              <Loader2 size={15} className="animate-spin" />
-            ) : (
-              <Zap size={15} />
-            )}
-            {isLoading ? 'Paying…' : 'Pay & Accept'}
+            <CheckCircle size={15} />
+            Accept
           </button>
         </div>
       )}
 
       {/* Accepted state */}
-      {(accepted || isPaid) && (
+      {(accepted || job.paid) && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-green-900/10 border border-green-900/30 text-green-400">
           <CheckCircle size={16} />
-          <span className="text-sm font-medium">Result accepted and payment sent</span>
+          <span className="text-sm font-medium">Result accepted</span>
         </div>
       )}
 
       {/* Feedback */}
-      {(accepted || isPaid) && (
+      {(accepted || job.paid) && (
         <div className="card">
           {!showFeedback ? (
             <button

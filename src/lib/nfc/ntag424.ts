@@ -157,7 +157,9 @@ export class NTAG424ProductionManager {
    */
   async verifyPIN(pin: string, storedHash: string): Promise<boolean> {
     try {
-      const [saltHex, hashHex] = storedHash.split(":");
+      const parts = storedHash.split(":");
+      const saltHex = parts[0] ?? '';
+      const hashHex = parts[1] ?? '';
       const salt = hexToBytes(saltHex);
 
       const keyMaterial = await crypto.subtle.importKey(
@@ -171,7 +173,7 @@ export class NTAG424ProductionManager {
       const hashBuffer = await crypto.subtle.deriveBits(
         {
           name: "PBKDF2",
-          salt,
+          salt: salt as unknown as BufferSource,
           iterations: 100000,
           hash: "SHA-256",
         },
@@ -256,7 +258,8 @@ export class NTAG424ProductionManager {
     sunKeyHex: string
   ): Promise<boolean> {
     try {
-      const { cmac } = await import("@noble/ciphers/aes");
+      const aesModule = await import("@noble/ciphers/aes");
+      const cmac = (aesModule as unknown as { cmac: (key: Uint8Array, data: Uint8Array) => Uint8Array }).cmac;
 
       const sunKey = hexToBytes(sunKeyHex);
       const uidBytes = hexToBytes(uid);
@@ -278,7 +281,7 @@ export class NTAG424ProductionManager {
       if (computedCmac.length !== expectedCmac.length) return false;
       let diff = 0;
       for (let i = 0; i < computedCmac.length; i++) {
-        diff |= computedCmac[i] ^ expectedCmac[i];
+        diff |= (computedCmac[i] ?? 0) ^ (expectedCmac[i] ?? 0);
       }
       return diff === 0;
     } catch (error) {
@@ -309,7 +312,7 @@ export class NTAG424ProductionManager {
     // Counter is 3-byte little-endian hex
     const ctrBytes = hexToBytes(ctrHex.padStart(6, "0"));
     const counter =
-      ctrBytes[0] | (ctrBytes[1] << 8) | (ctrBytes[2] << 16);
+      (ctrBytes[0] ?? 0) | ((ctrBytes[1] ?? 0) << 8) | ((ctrBytes[2] ?? 0) << 16);
 
     return {
       uid,
@@ -512,3 +515,4 @@ export class NTAG424ProductionManager {
 
 // Singleton export
 export const ntag424Manager = new NTAG424ProductionManager();
+

@@ -188,7 +188,7 @@ function AgentsTab() {
     await deactivateAgent(id);
   }, [deactivateAgent]);
 
-  const handleAgentCreated = (agentId: string) => {
+  const handleAgentCreated = (_agentId: string) => {
     setView('list');
     // In production: select the newly created agent
   };
@@ -303,9 +303,9 @@ function SkillsTab() {
 
   const filtered = search
     ? skills.filter(s =>
-        s.name.toLowerCase().includes(search.toLowerCase()) ||
-        s.scopeId.toLowerCase().includes(search.toLowerCase()) ||
-        s.capabilities.some(c => c.includes(search.toLowerCase()))
+        s.manifest.name.toLowerCase().includes(search.toLowerCase()) ||
+        s.manifest.skillScopeId.toLowerCase().includes(search.toLowerCase()) ||
+        (s.manifest.capabilities ?? []).some((c: string) => c.includes(search.toLowerCase()))
       )
     : skills;
 
@@ -400,15 +400,15 @@ function SkillsTab() {
         <div className="space-y-3">
           {filtered.map(skill => (
             <SkillCard
-              key={skill.id}
-              skill={skill}
+              key={skill.manifest.manifestEventId}
+              skill={skill.manifest}
               onAttest={id => {
-                const s = skills.find(sk => sk.id === id);
-                if (s) { setSelectedSkill(s); setView('attest'); }
+                const s = skills.find(sk => sk.manifest.manifestEventId === id);
+                if (s) { setSelectedSkill(s.manifest); setView('attest'); }
               }}
               onViewDetails={id => {
-                const s = skills.find(sk => sk.id === id);
-                if (s) { setSelectedSkill(s); setView('attest'); }
+                const s = skills.find(sk => sk.manifest.manifestEventId === id);
+                if (s) { setSelectedSkill(s.manifest); setView('attest'); }
               }}
               showAttestButton
             />
@@ -424,11 +424,11 @@ function SkillsTab() {
 // ---------------------------------------------------------------------------
 
 function CreditsTab() {
-  const { envelopes, isLoading } = useCreditLifecycle();
+  const { envelopes, isLoading } = useCreditLifecycle(null, null, null);
 
   // Summary stats
-  const totalCommitted = envelopes.reduce((s, e) => s + e.maxBudgetSats, 0);
-  const totalSpent = envelopes.reduce((s, e) => s + e.spentSats, 0);
+  const totalCommitted = envelopes.reduce((s, e) => s + e.maxSats, 0);
+  const totalSpent = envelopes.reduce((s, _e) => s, 0);
   const activeCount = envelopes.filter(e => !['Settlement', 'Default'].includes(e.state)).length;
 
   return (
@@ -571,7 +571,7 @@ function ProbeTab() {
 export default function AgentsPage() {
   const { agents } = useAgentProfile();
   const { skills } = useSkillManager();
-  const { envelopes } = useCreditLifecycle();
+  const { envelopes } = useCreditLifecycle(null, null, null);
   const [activeTab, setActiveTab] = useState<MainTab>('agents');
 
   const counts = {
@@ -621,4 +621,5 @@ export default function AgentsPage() {
     </>
   );
 }
+
 

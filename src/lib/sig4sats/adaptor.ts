@@ -17,7 +17,20 @@
  * @see https://github.com/t-bast/lightning-docs/blob/master/adaptor-sigs.md
  */
 
-import { secp256k1 } from '@noble/curves/secp256k1';
+import { secp256k1 as _secp256k1 } from '@noble/curves/secp256k1';
+
+/** Extended secp256k1 interface exposing internal CURVE constants and ProjectivePoint. */
+const secp256k1 = _secp256k1 as typeof _secp256k1 & {
+  readonly CURVE: { readonly n: bigint };
+  readonly ProjectivePoint: {
+    readonly BASE: {
+      multiply(scalar: bigint): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint }; add(other: unknown): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint }; multiply(scalar: bigint): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint }; add(other: unknown): unknown }; equals(other: unknown): boolean }; equals(other: unknown): boolean };
+    };
+    fromPrivateKey(privKey: Uint8Array): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint } };
+    fromHex(hex: string): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint }; multiply(scalar: bigint): { add(other: unknown): unknown }; equals(other: unknown): boolean; add(other: unknown): { toRawBytes(compressed: boolean): Uint8Array; toAffine(): { y: bigint }; equals(other: unknown): boolean } };
+    readonly ZERO: { equals(other: unknown): boolean };
+  };
+};
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes, utf8ToBytes, randomBytes } from '@noble/hashes/utils';
 import type { AdaptorSignature, ExtractedSecret } from './types.js';
@@ -333,4 +346,5 @@ export function hashMessage(message: string): string {
   input.set(msgBytes, tagHash.length * 2);
   return bytesToHex(sha256(input));
 }
+
 

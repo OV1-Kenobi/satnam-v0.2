@@ -249,10 +249,10 @@ export default function NotificationCenter({
             <div className="flex items-center gap-1.5">
               <div className={clsx(
                 'w-1.5 h-1.5 rounded-full',
-                pushRegistration.isOnline ? 'bg-green-500' : 'bg-slate-600',
+                pushRegistration?.isOnline ? 'bg-green-500' : 'bg-slate-600',
               )} aria-hidden="true" />
               <span className="text-[10px] text-slate-600">
-                {pushRegistration.isRegistered
+                {pushRegistration?.isRegistered
                   ? 'Push enabled'
                   : 'Push not configured'}
               </span>
@@ -266,4 +266,5 @@ export default function NotificationCenter({
     </div>
   );
 }
+
 

@@ -62,7 +62,7 @@ export function validateManifest(event: NostrEvent): boolean {
 
   if (!dTag || !nameTag || !versionTag) return false;
 
-  const version = versionTag[1];
+  const version = versionTag[1] ?? '';
   if (!/^\d+\.\d+\.\d+/.test(version)) return false;
 
   return true;
@@ -77,7 +77,7 @@ export function parseManifestContent(event: NostrEvent): SkillManifest {
   const getTag = (name: string): string | undefined =>
     event.tags.find((t) => t[0] === name)?.[1];
   const getAllTags = (name: string): string[] =>
-    event.tags.filter((t) => t[0] === name).map((t) => t[1]);
+    event.tags.filter((t) => t[0] === name).map((t) => t[1] ?? '');
 
   const dTag = getTag("d") || "";
   const version = getTag("version") || "0.0.0";
@@ -119,7 +119,7 @@ export function parseManifestContent(event: NostrEvent): SkillManifest {
  * @returns Hex-encoded SHA-256 hash
  */
 export async function computeManifestHash(payloadBytes: Uint8Array): Promise<string> {
-  const hashBuffer = await crypto.subtle.digest("SHA-256", payloadBytes);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", payloadBytes as BufferSource);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -138,3 +138,4 @@ export async function verifyManifestHash(
   const computedHash = await computeManifestHash(payloadBytes);
   return computedHash === manifest.manifestHash;
 }
+

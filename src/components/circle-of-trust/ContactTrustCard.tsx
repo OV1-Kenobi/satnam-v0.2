@@ -10,7 +10,6 @@
  * - Quick actions: Message, Zap, Call, View Profile
  */
 
-import { useMemo } from 'react';
 import clsx from 'clsx';
 import {
   MessageSquare,
@@ -327,4 +326,5 @@ export default function ContactTrustCard({
     </article>
   );
 }
+
 

@@ -7,7 +7,6 @@
  * - Skill growth over time (CSS bars)
  */
 
-import clsx from 'clsx';
 import {
   BookOpen,
   TrendingUp,
@@ -254,4 +253,5 @@ export default function SkillsTrustPanel({
     </section>
   );
 }
+
 

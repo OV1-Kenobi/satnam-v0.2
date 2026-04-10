@@ -13,7 +13,7 @@
  * 8. Analytics  — PaymentFlowDashboard
  */
 
-import React, { useState, useCallback, useId } from 'react';
+import { useState, useCallback } from 'react';
 import { Helmet } from 'react-helmet-async';
 import clsx from 'clsx';
 import {
@@ -451,7 +451,7 @@ export default function WalletPage() {
     return { success: true, preimage: '00'.repeat(32) };
   }, []);
 
-  const handleMakeInvoice = useCallback(async (amountMsats: bigint, description: string) => {
+  const handleMakeInvoice = useCallback(async (amountMsats: bigint, _description: string) => {
     await new Promise((r) => setTimeout(r, 1000));
     return {
       bolt11: 'lnbc' + Math.floor(Number(amountMsats) / 1000) + 'n1p' + 'x'.repeat(100),
@@ -625,3 +625,4 @@ export default function WalletPage() {
     </>
   );
 }
+

@@ -33,6 +33,7 @@ import {
   SimplePool,
   verifyEvent,
   type Event,
+  type Filter,
 } from "nostr-tools";
 
 // Encoding utilities (inline — avoids v1 path dependencies)
@@ -107,7 +108,7 @@ export class PrivacyUtils {
     encryptedData: string,
     sessionKey: string
   ): Promise<string> {
-    const [ivHex, cipherHex] = encryptedData.split(":");
+    const [ivHex, cipherHex] = encryptedData.split(":") as [string, string];
     const iv = hexToBytes(ivHex);
     const cipher = hexToBytes(cipherHex);
     const key = await this.importAesKey(sessionKey);
@@ -294,9 +295,6 @@ export class CentralEventPublishingService {
   private groupSessions: Map<string, PrivacyGroup> = new Map();
   private rateLimits: Map<string, { count: number; resetTime: number }> =
     new Map();
-  private relayCache: Map<string, { relays: string[]; expiresAt: number }> =
-    new Map();
-
   // Active nsec (hex) — set during initializeSession, cleared on destroySession
   // SECURITY: Never persisted. Lives only in heap for the session duration.
   private activeNsecHex: string | null = null;
@@ -523,11 +521,12 @@ export class CentralEventPublishingService {
   }
 
   async list(
-    filters: Parameters<SimplePool["querySync"]>[1],
+    filters: Filter | Filter[],
     relays: string[],
     _options?: { eoseTimeout?: number }
   ): Promise<Event[]> {
-    return this.getPool().querySync(relays, filters);
+    const filterArg = Array.isArray(filters) ? filters[0] ?? {} as Filter : filters;
+    return this.getPool().querySync(relays, filterArg);
   }
 
   // ---- Messaging (NIP-04 / NIP-17) ----
@@ -725,5 +724,6 @@ export class CentralEventPublishingService {
 
 export const central_event_publishing_service =
   new CentralEventPublishingService();
+
 
 

@@ -468,7 +468,7 @@ function StepWaiting({
             <div className={`w-3 h-3 rounded-full ${i < joined ? 'bg-green-500' : 'bg-[#2a2a2a]'}`} />
             <span className="text-sm text-[#a0a0a0] font-mono truncate">
               {i < config.participants.length
-                ? config.participants[i].slice(0, 20) + '…'
+                ? config.participants[i]?.slice(0, 20) + '…'
                 : `Participant ${i + 1}`
               }
             </span>
@@ -644,3 +644,4 @@ export default function GroupCreateFlow({ onComplete, onCancel }: GroupCreateFlo
     </div>
   );
 }
+

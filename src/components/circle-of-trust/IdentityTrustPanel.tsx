@@ -8,7 +8,7 @@
  * - Reputation score
  */
 
-import clsx from 'clsx';
+import { Fragment } from 'react';
 import {
   ShieldCheck,
   Link2,
@@ -141,7 +141,7 @@ function TrustChain({ depth }: { depth: number }) {
         </div>
 
         {Array.from({ length: nodes }).map((_, i) => (
-          <React.Fragment key={i}>
+          <Fragment key={i}>
             {/* Connector line */}
             <div className="w-4 h-px bg-[#2a2a2a] flex-shrink-0" aria-hidden="true" />
             {/* Chain node */}
@@ -157,7 +157,7 @@ function TrustChain({ depth }: { depth: number }) {
             >
               <Link2 size={12} aria-hidden="true" />
             </div>
-          </React.Fragment>
+          </Fragment>
         ))}
 
         {depth > 6 && (
@@ -305,4 +305,5 @@ export default function IdentityTrustPanel({
     </section>
   );
 }
+
 

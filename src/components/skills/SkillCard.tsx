@@ -35,13 +35,15 @@ function formatTimestamp(ts: number): string {
 }
 
 function getTopTier(skill: Skill): AttestationTier | null {
-  const active = skill.attestations.filter(a => !a.revoked);
-  if (active.length === 0) return null;
-  const sorted = [...active].sort((a, b) => {
-    const tierNum = (t: AttestationTier) => parseInt(t.replace('tier', ''));
+  const attestations = skill.attestations;
+  if (attestations.length === 0) return null;
+  const sorted = [...attestations].sort((a, b) => {
+    const tierNum = (t: AttestationTier | undefined) =>
+      t ? parseInt(t.replace('tier', '')) : 0;
     return tierNum(b.tier) - tierNum(a.tier);
   });
-  return sorted[0].tier;
+  const top = sorted[0];
+  return top?.tier ?? null;
 }
 
 function tierBadgeClass(tier: AttestationTier): string {
@@ -74,8 +76,9 @@ export default function SkillCard({
   compact = false,
 }: SkillCardProps) {
   const topTier = getTopTier(skill);
-  const activeAttestations = skill.attestations.filter(a => !a.revoked);
-  const isExpired = skill.expiresAt && skill.expiresAt < Date.now() / 1000;
+  const activeAttestations = skill.attestations;
+  const isExpired = skill.validUntilUnix != null && skill.validUntilUnix < Date.now() / 1000;
+  const capabilities = skill.capabilities ?? [];
 
   return (
     <article
@@ -84,7 +87,7 @@ export default function SkillCard({
         onViewDetails && 'cursor-pointer hover:border-[#f7931a]/40 active:scale-[0.99]',
         isExpired && 'opacity-60',
       )}
-      onClick={onViewDetails ? () => onViewDetails(skill.id) : undefined}
+      onClick={onViewDetails ? () => onViewDetails(skill.skillScopeId) : undefined}
       aria-label={`Skill: ${skill.name} v${skill.version}`}
     >
       {/* Header */}
@@ -117,7 +120,7 @@ export default function SkillCard({
           <div className="flex items-center gap-2 mt-0.5">
             <span className="font-mono text-xs text-[#555555]">v{skill.version}</span>
             <span className="text-[#2a2a2a]">·</span>
-            <span className="font-mono text-xs text-[#555555] truncate">{skill.scopeId}</span>
+            <span className="font-mono text-xs text-[#555555] truncate">{skill.skillScopeId}</span>
           </div>
         </div>
 
@@ -132,9 +135,9 @@ export default function SkillCard({
       )}
 
       {/* Capability chips */}
-      {skill.capabilities.length > 0 && (
+      {capabilities.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-3" aria-label="Capabilities">
-          {skill.capabilities.slice(0, compact ? 3 : 6).map(cap => (
+          {capabilities.slice(0, compact ? 3 : 6).map(cap => (
             <span
               key={cap}
               className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px] font-medium"
@@ -142,9 +145,9 @@ export default function SkillCard({
               {cap}
             </span>
           ))}
-          {skill.capabilities.length > (compact ? 3 : 6) && (
+          {capabilities.length > (compact ? 3 : 6) && (
             <span className="text-[10px] text-[#555555]">
-              +{skill.capabilities.length - (compact ? 3 : 6)} more
+              +{capabilities.length - (compact ? 3 : 6)} more
             </span>
           )}
         </div>
@@ -171,11 +174,11 @@ export default function SkillCard({
         </div>
 
         {/* Expiry */}
-        {skill.expiresAt && (
+        {skill.validUntilUnix != null && (
           <div className="flex items-center gap-1">
             <Calendar size={10} className="text-[#555555]" />
             <span className="text-[10px] text-[#555555]">
-              {isExpired ? 'Expired' : 'Expires'} {formatTimestamp(skill.expiresAt)}
+              {isExpired ? 'Expired' : 'Expires'} {formatTimestamp(skill.validUntilUnix)}
             </span>
           </div>
         )}
@@ -187,7 +190,7 @@ export default function SkillCard({
           type="button"
           onClick={e => {
             e.stopPropagation();
-            onAttest(skill.id);
+            onAttest(skill.skillScopeId);
           }}
           aria-label={`Attest skill ${skill.name}`}
           className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#f7931a]/20 hover:bg-[#f7931a]/30 text-[#f7931a] border border-[#f7931a]/30 text-xs font-medium transition-colors"

@@ -384,7 +384,7 @@ export class ProtocolBridge {
       const ciphersuite = extractCiphersuite(tags);
       const client = extractClientName(tags) ?? 'unknown';
       const expirationTag = tags.find((t) => t[0] === 'expiration');
-      const notAfter = expirationTag ? parseInt(expirationTag[1], 10) : 0;
+      const notAfter = expirationTag ? parseInt(expirationTag[1] ?? '0', 10) : 0;
 
       return {
         eventId: event.id,
@@ -422,3 +422,4 @@ export class ProtocolBridge {
     return incomingProtocol === 'mls' ? 'nip17' : incomingProtocol;
   }
 }
+

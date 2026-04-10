@@ -81,9 +81,11 @@ function nowUnix(): number {
 
 export class NotificationManager {
   constructor(
-    private readonly localPubkeyHex: string,
+    _localPubkeyHex: string,
     private readonly relays: string[] = getDefaultRelays(),
-  ) {}
+  ) {
+    void _localPubkeyHex; // kept for API compatibility
+  }
 
   // --------------------------------------------------------------------------
   // registerPushDevice
@@ -268,7 +270,7 @@ export class NotificationManager {
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: this._urlBase64ToUint8Array(vapidPublicKey),
+        applicationServerKey: this._urlBase64ToUint8Array(vapidPublicKey) as unknown as BufferSource,
       });
       return subscription;
     } catch (err) {
@@ -465,3 +467,4 @@ export class InAppNotificationCenter {
 // ============================================================================
 
 export const inAppNotificationCenter = new InAppNotificationCenter();
+

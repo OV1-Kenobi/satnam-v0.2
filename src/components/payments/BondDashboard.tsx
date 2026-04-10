@@ -68,7 +68,7 @@ function StatusPill({ status }: { status: string }) {
   };
   const cfg = configs[status] ?? configs.active;
   return (
-    <span className={clsx('text-[10px] px-2 py-0.5 rounded-full border', cfg.bg, cfg.text)}>
+    <span className={clsx('text-[10px] px-2 py-0.5 rounded-full border', cfg?.bg, cfg?.text)}>
       {status.replace('_', ' ')}
     </span>
   );
@@ -562,4 +562,5 @@ export default function BondDashboard({ className }: BondDashboardProps) {
     </div>
   );
 }
+
 

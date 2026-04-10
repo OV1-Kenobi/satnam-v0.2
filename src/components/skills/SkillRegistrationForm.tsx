@@ -225,10 +225,12 @@ export default function SkillRegistrationForm({ onComplete, onCancel }: SkillReg
         scopeId: form.scopeId.trim(),
         name: form.name.trim(),
         version: form.version.trim(),
-        description: form.description.trim() || undefined,
+        description: form.description.trim(),
         capabilities: form.capabilities,
-        categoryTags: form.categoryTags,
-        expiresAt: form.expiresAt,
+        tags: form.categoryTags,
+        expiryTimestamp: form.expiresAt,
+        signerNsec: '',
+        relayUrls: [],
       });
       onComplete?.(skillId);
     } catch (err) {
@@ -399,3 +401,4 @@ export default function SkillRegistrationForm({ onComplete, onCancel }: SkillReg
     </form>
   );
 }
+

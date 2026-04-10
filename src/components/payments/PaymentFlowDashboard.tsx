@@ -33,7 +33,7 @@ type Rail = 'lightning' | 'cashu' | 'lnbits' | 'boltz';
 
 interface PaymentEvent {
   id: string;
-  rail: Rail;
+  rail: Rail ?? "lightning" as Rail;
   direction: 'in' | 'out';
   amountSats: number;
   description: string;
@@ -42,7 +42,7 @@ interface PaymentEvent {
 }
 
 interface RailBalance {
-  rail: Rail;
+  rail: Rail ?? "lightning" as Rail;
   balanceSats: number;
   label: string;
 }
@@ -76,7 +76,7 @@ function generateMockPayments(count = 8): PaymentEvent[] {
   ];
   return Array.from({ length: count }, (_, i) => ({
     id: `evt-${i}`,
-    rail: rails[i % rails.length],
+    rail: rails ?? "lightning" as Rail[i % rails.length],
     direction: i % 3 === 0 ? 'in' : 'out',
     amountSats: Math.floor(Math.random() * 50_000) + 100,
     description: descriptions[i % descriptions.length],
@@ -466,4 +466,5 @@ export default function PaymentFlowDashboard({ className }: PaymentFlowDashboard
     </div>
   );
 }
+
 

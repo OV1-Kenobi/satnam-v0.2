@@ -267,10 +267,11 @@ export class DirectChatManager {
       readAt: nowUnix(),
     };
 
+    const existing = messages[idx]!;
     messages[idx] = {
-      ...messages[idx],
+      ...existing,
       status: 'read' as MessageStatus,
-      readReceipts: [...messages[idx].readReceipts, receipt],
+      readReceipts: [...existing.readReceipts, receipt],
     };
 
     writeMessages(contactPubkey, messages);
@@ -279,14 +280,14 @@ export class DirectChatManager {
     this._decrementUnread(contactPubkey);
 
     // Burn-after-read: if sender = local user and flag set, delete the wrapper
-    const msg = messages[idx];
+    const msg = messages[idx]!;
     if (
       msg.ephemeral?.burnAfterRead &&
       msg.senderPubkey === this.localPubkeyHex &&
       msg.wrapperEventId
     ) {
       await this._publishDeletion(msg.wrapperEventId, 'burn-after-read');
-      messages[idx] = { ...messages[idx], status: 'deleted', deleted: true };
+      messages[idx] = { ...messages[idx]!, status: 'deleted', deleted: true };
       writeMessages(contactPubkey, messages);
     }
   }
@@ -309,7 +310,7 @@ export class DirectChatManager {
     const idx = messages.findIndex((m) => m.id === messageId);
     if (idx < 0) throw new Error(`Message not found: ${messageId}`);
 
-    const msg = messages[idx];
+    const msg = messages[idx]!;
     if (msg.senderPubkey !== this.localPubkeyHex) {
       throw new Error('You can only delete your own messages');
     }
@@ -319,7 +320,7 @@ export class DirectChatManager {
       await this._publishDeletion(msg.wrapperEventId, 'user-deleted');
     }
 
-    messages[idx] = { ...messages[idx], status: 'deleted', deleted: true };
+    messages[idx] = { ...msg, status: 'deleted', deleted: true };
     writeMessages(contactPubkey, messages);
   }
 
@@ -377,10 +378,10 @@ export class DirectChatManager {
       polVerified,
       lastActivity: now,
       lastMessagePreview: lastMessage.content.slice(0, 100),
-      unreadCount: idx >= 0 ? threads[idx].unreadCount : 0,
-      notificationPreference: idx >= 0 ? threads[idx].notificationPreference : 'all',
+      unreadCount: idx >= 0 ? (threads[idx]?.unreadCount ?? 0) : 0,
+      notificationPreference: idx >= 0 ? (threads[idx]?.notificationPreference ?? 'all') : 'all',
       hasEphemeral: !!lastMessage.ephemeral,
-      muted: idx >= 0 ? threads[idx].muted : false,
+      muted: idx >= 0 ? (threads[idx]?.muted ?? false) : false,
     };
 
     if (idx >= 0) {
@@ -396,10 +397,11 @@ export class DirectChatManager {
   private _decrementUnread(contactPubkey: string): void {
     const threads = readThreads();
     const idx = threads.findIndex((t) => t.recipientPubkey === contactPubkey);
-    if (idx >= 0 && threads[idx].unreadCount > 0) {
+    if (idx >= 0 && (threads[idx]?.unreadCount ?? 0) > 0) {
+      const thread = threads[idx]!;
       threads[idx] = {
-        ...threads[idx],
-        unreadCount: threads[idx].unreadCount - 1,
+        ...thread,
+        unreadCount: thread.unreadCount - 1,
       };
       writeThreads(threads);
     }
@@ -444,3 +446,4 @@ export class DirectChatManager {
     writeThreads(threads);
   }
 }
+

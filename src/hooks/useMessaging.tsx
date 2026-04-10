@@ -33,13 +33,12 @@ import type {
   GroupThread,
 } from '../lib/messaging/types.js';
 
+// Re-export messaging types so components can import them from this hook
+export type { MessageThread, Message, EphemeralConfig, GroupConfig, DirectThread, GroupThread };
+
 import { GroupChatManager } from '../lib/messaging/group-chat.js';
 import { DirectChatManager } from '../lib/messaging/direct-chat.js';
-import {
-  ephemeralManager,
-  setMessageTtl,
-  setBurnAfterRead,
-} from '../lib/messaging/ephemeral.js';
+import { ephemeralManager } from '../lib/messaging/ephemeral.js';
 import type { PinGateCallback } from '../lib/messaging/direct-chat.js';
 
 // ============================================================================
@@ -107,11 +106,11 @@ export interface UseMessagingReturn {
 // ============================================================================
 
 export function useMessaging({
-  localPubkeyHex,
+  localPubkeyHex = '',
   relays,
   pinGate,
   refreshInterval = 30_000,
-}: UseMessagingOptions): UseMessagingReturn {
+}: Partial<UseMessagingOptions> = {}): UseMessagingReturn {
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
@@ -503,3 +502,4 @@ export function useMessaging({
 export function MessagingProvider({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
+

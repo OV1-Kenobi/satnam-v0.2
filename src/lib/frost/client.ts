@@ -105,9 +105,11 @@ export class FrostClient {
    * @param config - FROST protocol configuration
    */
   constructor(
-    private readonly vault: Vault,
+    _vault: Vault,
     private readonly config: FrostConfig = DEFAULT_FROST_CONFIG,
-  ) {}
+  ) {
+    void _vault; // vault is held for future direct vault operations
+  }
 
   // -------------------------------------------------------------------------
   // Group Creation (Guardian only)
@@ -559,3 +561,4 @@ export type {
   GroupMetadata,
   FrostConfig,
 };
+

@@ -63,6 +63,20 @@ function avatarHue(str: string): number {
   return h;
 }
 
+
+// Helper: get display name from MessageThread
+function threadDisplayName(thread: MessageThread): string {
+  if (thread.type === 'group') return thread.config.name;
+  if (thread.type === 'direct') return thread.recipientDisplayName ?? thread.recipientPubkey.slice(0, 8) + '…';
+  return 'Note to Self';
+}
+
+// Helper: get avatar URL from MessageThread (if available)
+function threadAvatarUrl(thread: MessageThread): string | undefined {
+  if (thread.type === 'group') return thread.config.avatar;
+  return undefined;
+}
+
 // ── Avatar ─────────────────────────────────────────────────────────────────────
 
 function ThreadAvatar({
@@ -70,7 +84,7 @@ function ThreadAvatar({
 }: {
   thread: MessageThread;
 }) {
-  const name = thread.name || 'Unknown';
+  const name = threadDisplayName(thread);
   const hue = avatarHue(thread.id);
   const isGroup = thread.type === 'group';
   const isSelf = thread.type === 'self';
@@ -84,8 +98,8 @@ function ThreadAvatar({
       >
         {isSelf
           ? <PenLine size={18} />
-          : thread.avatarUrl
-            ? <img src={thread.avatarUrl} alt={name} className="w-full h-full rounded-full object-cover" />
+          : threadAvatarUrl(thread)
+            ? <img src={threadAvatarUrl(thread)} alt={name} className="w-full h-full rounded-full object-cover" />
             : initials(name)}
       </div>
 
@@ -132,7 +146,7 @@ function ThreadRow({
       type="button"
       onClick={onSelect}
       aria-selected={isSelected}
-      aria-label={`Thread with ${thread.name}${thread.unreadCount > 0 ? `, ${thread.unreadCount} unread` : ''}`}
+      aria-label={`Thread with ${threadDisplayName(thread)}${thread.unreadCount > 0 ? `, ${thread.unreadCount} unread` : ''}`}
       className={clsx(
         'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 text-left',
         isSelected
@@ -148,7 +162,7 @@ function ThreadRow({
             'text-sm font-medium truncate',
             isSelected ? 'text-[#f7931a]' : 'text-slate-200',
           )}>
-            {thread.name}
+            {threadDisplayName(thread)}
           </span>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {thread.hasEphemeral && (
@@ -282,4 +296,5 @@ export default function ThreadList({
     </div>
   );
 }
+
 

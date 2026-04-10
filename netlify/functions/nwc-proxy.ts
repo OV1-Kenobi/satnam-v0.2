@@ -65,9 +65,9 @@ function corsHeaders(origin?: string): Record<string, string> {
     'http://localhost:5173',
     'http://localhost:8888',
   ];
-  const resolvedOrigin = (origin && allowedOrigins.some((o) => origin.startsWith(o)))
+  const resolvedOrigin: string = (origin && allowedOrigins.some((o) => origin.startsWith(o)))
     ? origin
-    : allowedOrigins[0];
+    : (allowedOrigins[0] ?? 'https://satnam.pub');
   return {
     'Access-Control-Allow-Origin': resolvedOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -365,5 +365,6 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(500, 'Internal server error', requestOrigin);
   }
 };
+
 
 

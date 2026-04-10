@@ -12,13 +12,13 @@
 
 import clsx from 'clsx';
 import { Settings, ChevronLeft, Users } from 'lucide-react';
-import type { MessageThread } from '../../hooks/useMessaging.js';
+import type { GroupThread } from '../../hooks/useMessaging.js';
 import ProtocolIndicator from './ProtocolIndicator.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface GroupChatHeaderProps {
-  thread: MessageThread;
+  thread: GroupThread;
   onOpenSettings: () => void;
   /** Mobile back navigation */
   onBack?: () => void;
@@ -43,32 +43,30 @@ function memberInitials(pubkey: string, displayName?: string): string {
 // ── Member Avatar Cluster ──────────────────────────────────────────────────────
 
 function MemberAvatarCluster({
-  participants,
+  members,
   totalCount,
 }: {
-  participants: MessageThread['participants'];
+  members: string[];
   totalCount: number;
 }) {
   const MAX_SHOWN = 4;
-  const shown = participants.slice(0, MAX_SHOWN);
+  const shown = members.slice(0, MAX_SHOWN);
   const overflow = totalCount - MAX_SHOWN;
 
   return (
     <div className="flex items-center -space-x-2" aria-label={`${totalCount} members`}>
-      {shown.map((p, i) => {
-        const hue = avatarHue(p.pubkey);
-        const label = memberInitials(p.pubkey, p.displayName);
+      {shown.map((pubkey, i) => {
+        const hue = avatarHue(pubkey);
+        const label = memberInitials(pubkey);
         return (
           <div
-            key={p.pubkey}
+            key={pubkey}
             className="w-6 h-6 rounded-full border-2 border-slate-950 flex items-center justify-center text-[9px] font-semibold text-white"
             style={{ background: `hsl(${hue},50%,38%)`, zIndex: MAX_SHOWN - i }}
             aria-hidden="true"
-            title={p.displayName ?? p.pubkey}
+            title={pubkey}
           >
-            {p.avatarUrl ? (
-              <img src={p.avatarUrl} alt={label} className="w-full h-full rounded-full object-cover" />
-            ) : label}
+            {label}
           </div>
         );
       })}
@@ -92,7 +90,10 @@ export default function GroupChatHeader({
   onBack,
   className,
 }: GroupChatHeaderProps) {
-  const memberCount = thread.participants.length;
+  const members = thread.config.members;
+  const memberCount = members.length;
+  const groupName = thread.config.name;
+  const avatarUrl = thread.config.avatar;
 
   return (
     <header
@@ -101,7 +102,7 @@ export default function GroupChatHeader({
         'bg-slate-950 border-b border-slate-800',
         className,
       )}
-      aria-label={`Group chat: ${thread.name}`}
+      aria-label={`Group chat: ${groupName}`}
     >
       {/* Mobile back button */}
       {onBack && (
@@ -117,20 +118,20 @@ export default function GroupChatHeader({
 
       {/* Group avatar */}
       <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
-        {thread.avatarUrl
-          ? <img src={thread.avatarUrl} alt={thread.name} className="w-full h-full rounded-full object-cover" />
+        {avatarUrl
+          ? <img src={avatarUrl} alt={groupName} className="w-full h-full rounded-full object-cover" />
           : <Users size={16} className="text-slate-400" aria-hidden="true" />}
       </div>
 
       {/* Name + meta */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <h1 className="text-sm font-semibold text-slate-200 truncate">{thread.name}</h1>
-          <ProtocolIndicator protocol={thread.protocol} />
+          <h1 className="text-sm font-semibold text-slate-200 truncate">{groupName}</h1>
+          <ProtocolIndicator protocol="nip17" />
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           <MemberAvatarCluster
-            participants={thread.participants}
+            members={members}
             totalCount={memberCount}
           />
           <span className="text-[10px] text-slate-500">
@@ -151,4 +152,5 @@ export default function GroupChatHeader({
     </header>
   );
 }
+
 

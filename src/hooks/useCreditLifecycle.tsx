@@ -45,8 +45,8 @@ import type {
   CreditOffer,
   CreditEnvelope,
   IntentParams,
-  CreditLifecycleCallback,
 } from '../lib/nip-ac/client.js';
+export type { CreditEnvelope };
 import type { CreditLifecycleState } from '../lib/nip-ac/types.js';
 
 /** CreditState is an alias for CreditLifecycleState — exported for component consumers. */
@@ -131,7 +131,7 @@ export function useCreditLifecycle(
   const [activeEnvelopes, setActiveEnvelopes] = useState<CreditEnvelope[]>([]);
   const [pendingOffers, setPendingOffers] = useState<CreditOffer[]>([]);
   const [lifecycleEvents, setLifecycleEvents] = useState<LifecycleEvent[]>([]);
-  const [lifecycleRecords, setLifecycleRecords] = useState<CreditLifecycleRecord[]>([]);
+  const [lifecycleRecords] = useState<CreditLifecycleRecord[]>([]);
   const [status, setStatus] = useState<CreditLifecycleHookStatus>('idle');
   const [error, setError] = useState<string | null>(null);
 
@@ -433,4 +433,5 @@ export function useCreditLifecycle(
     clearError,
   };
 }
+
 

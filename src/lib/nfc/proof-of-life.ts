@@ -163,8 +163,10 @@ export class ProofOfLifeService {
   constructor(
     private readonly vault: VaultOps,
     // pinGate kept in signature for backward compatibility — not used in ceremony
-    private readonly _pinGate?: unknown,
-  ) {}
+    _pinGate?: unknown,
+  ) {
+    void _pinGate; // kept for API compatibility
+  }
 
   // -------------------------------------------------------------------------
   // State machine transitions
@@ -811,3 +813,4 @@ export class ProofOfLifeService {
 export function hashCardUid(cardUid: string): string {
   return bytesToHex(sha256(utf8ToBytes(cardUid)));
 }
+

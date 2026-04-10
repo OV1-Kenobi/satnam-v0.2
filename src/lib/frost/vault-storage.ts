@@ -429,7 +429,7 @@ export async function restoreShareFromBackup(event: NostrEvent, userNsec: string
     throw frostErr(FrostError.InvalidBackup);
   }
 
-  const groupPubkey = dTag[1].replace('satnam:bfshare:', '');
+  const groupPubkey = (dTag[1] ?? '').replace('satnam:bfshare:', '');
   if (!groupPubkey) {
     throw frostErr(FrostError.InvalidBackup);
   }
@@ -465,14 +465,13 @@ export async function restoreShareFromBackup(event: NostrEvent, userNsec: string
         // Dynamic import to avoid hard dependency — caller provides nostr-tools
         const nostrTools = await import('nostr-tools');
         if ('nip44' in nostrTools && nostrTools.nip44) {
-          const conversationKey = (nostrTools.nip44 as {
+          type Nip44 = {
             getConversationKey: (privkey: Uint8Array, pubkey: string) => Uint8Array;
             decrypt: (key: Uint8Array, ciphertext: string) => string;
-          }).getConversationKey(hexToBytes(userNsec), event.pubkey);
-          decrypted = (nostrTools.nip44 as {
-            getConversationKey: (privkey: Uint8Array, pubkey: string) => Uint8Array;
-            decrypt: (key: Uint8Array, ciphertext: string) => string;
-          }).decrypt(conversationKey, event.content);
+          };
+          const nip44 = nostrTools.nip44 as unknown as Nip44;
+          const conversationKey = nip44.getConversationKey(hexToBytes(userNsec), event.pubkey);
+          decrypted = nip44.decrypt(conversationKey, event.content);
         } else {
           throw new Error('nip44-not-available');
         }
@@ -546,4 +545,5 @@ export function generateSessionId(): string {
 
 // Re-export helpers used by higher-level modules
 export { computeEventId };
+
 

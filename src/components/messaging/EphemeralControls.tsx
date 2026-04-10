@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Flame, ChevronDown, Check } from 'lucide-react';
-import type { EphemeralConfig } from '../../hooks/useMessaging.js';
+import type { EphemeralConfig } from '../../lib/messaging/types.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -289,4 +289,5 @@ export default function EphemeralControls({
     </div>
   );
 }
+
 

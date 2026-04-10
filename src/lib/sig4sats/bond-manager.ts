@@ -26,7 +26,6 @@ import type {
   CreateRecoveryParams,
   CreateAllowanceParams,
   SpendResult,
-  AllowanceConstraints,
 } from './types.js';
 import { generateAdaptorPoint } from './adaptor.js';
 
@@ -34,8 +33,7 @@ import { generateAdaptorPoint } from './adaptor.js';
 // Storage helpers
 // ============================================================================
 
-const VAULT_PATH_PREFIX = 'sig4sats';
-const BONDS_FILE = 'bonds.json';
+
 
 
 function generateId(prefix: string): string {
@@ -150,7 +148,8 @@ export class BondManager {
     const now = nowSecs();
 
     // Generate adaptor point (in production: provided by the service)
-    const { adaptorPoint } = generateAdaptorPoint();
+    const { adaptorPoint: _adaptorPoint } = generateAdaptorPoint();
+    void _adaptorPoint; // generated but not stored in this phase
 
     // Create a deterministic blinded token from featureId + timestamp + random
     const tokenMaterial = new Uint8Array([
@@ -311,12 +310,15 @@ export class BondManager {
       }
 
       const updatedGuardians = [...bond.guardianBonds];
-      updatedGuardians[guardianIndex] = {
-        ...updatedGuardians[guardianIndex],
+      const existingGuardian = updatedGuardians[guardianIndex]!;
+      const updatedGuardian: GuardianBond = {
+        guardianPubkey: existingGuardian.guardianPubkey,
+        bondAmount: existingGuardian.bondAmount,
         signed: true,
         bondProofId: bondProof,
         bondedAt: nowSecs(),
       };
+      updatedGuardians[guardianIndex] = updatedGuardian;
 
       const signedCount = updatedGuardians.filter((g) => g.signed).length;
       const newStatus = signedCount >= bond.threshold ? 'threshold_met' : 'collecting';
@@ -414,7 +416,7 @@ export class BondManager {
       weekly: 7 * 86400,
       monthly: 30 * 86400,
     };
-    const nextRefreshAt = now + refreshOffsets[cadence];
+    const nextRefreshAt = now + (refreshOffsets[cadence] ?? 86400);
 
     const bond: AllowanceBond = {
       type: 'allowance',
@@ -648,4 +650,5 @@ export function getBondManager(vault: Vault): BondManager {
   }
   return _bondManagerInstance;
 }
+
 

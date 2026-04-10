@@ -30,15 +30,6 @@ import type {
 const STORAGE_VERSION = 1;
 
 /**
- * Derive the vault storage path for a contact's pubkey.
- * Groups contacts by first 8 chars of pubkey (prefix bucket).
- */
-function contactStoragePath(pubkey: string): string {
-  const prefix = pubkey.slice(0, 8);
-  return `circle-of-trust/${prefix}.contacts`;
-}
-
-/**
  * Derive a unique prefix bucket for a pubkey.
  * Returns the first 8 hex chars used as a partition key.
  */
@@ -302,15 +293,6 @@ export class TrustStore {
    * Override _saveBucket to also register the bucket key.
    * This ensures listTrustedContacts() can discover all buckets.
    */
-  private async _saveBucketAndRegister(
-    pubkey: string,
-    blob: ContactStorageBlob,
-  ): Promise<void> {
-    const key = pubkeyPrefix(pubkey);
-    await this._registerBucketKey(key);
-    await this._saveBucket(pubkey, blob);
-  }
-
   // -------------------------------------------------------------------------
   // Re-export addTrustedContact with index registration
   // -------------------------------------------------------------------------
@@ -338,3 +320,4 @@ export function createTrustStore(vault: VaultOps): TrustStore {
  * Buckets are stored as: circle-of-trust/{pubkey_prefix}.contacts
  */
 export const CIRCLE_OF_TRUST_VAULT_PREFIX = 'circle-of-trust';
+

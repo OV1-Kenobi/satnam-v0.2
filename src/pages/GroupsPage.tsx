@@ -229,7 +229,7 @@ export default function GroupsPage() {
     setView('group');
   };
 
-  const handleRoleAssigned = (delegation: DelegationEvent) => {
+  const handleRoleAssigned = (_delegation: DelegationEvent) => {
     setView('group');
   };
 
@@ -316,4 +316,5 @@ export default function GroupsPage() {
     </>
   );
 }
+
 

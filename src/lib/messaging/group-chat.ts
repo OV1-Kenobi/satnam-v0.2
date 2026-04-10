@@ -34,12 +34,6 @@ import {
 
 /** kind:30078 — Parameterized replaceable application data (NIP-78) */
 const KIND_APP_DATA = 30078;
-/** kind:1059 — Gift-wrap wrapper (NIP-59) */
-const KIND_GIFT_WRAP = 1059;
-/** kind:14 — Sealed DM rumor (NIP-17) */
-const KIND_SEALED_DM = 14;
-/** kind:5 — Deletion event (NIP-09) */
-const KIND_DELETION = 5;
 
 const GROUP_DTAG_PREFIX = 'satnam:group:';
 
@@ -560,7 +554,9 @@ export class GroupChatManager {
     const groups = readGroupsFromStorage();
     const idx = groups.findIndex((g) => g.groupId === groupId);
     if (idx >= 0) {
-      groups[idx] = { ...groups[idx], config };
+      const existing = groups[idx]!;
+      const updated: GroupThread = { ...existing, config };
+      groups[idx] = updated;
       writeGroupsToStorage(groups);
     }
   }
@@ -574,13 +570,16 @@ export class GroupChatManager {
     const groups = readGroupsFromStorage();
     const idx = groups.findIndex((g) => g.groupId === groupId);
     if (idx >= 0) {
-      groups[idx] = {
-        ...groups[idx],
+      const existing = groups[idx]!;
+      const updated: GroupThread = {
+        ...existing,
         lastActivity: timestamp,
         lastMessagePreview: preview.slice(0, 100),
       };
+      groups[idx] = updated;
       writeGroupsToStorage(groups);
     }
   }
 }
+
 

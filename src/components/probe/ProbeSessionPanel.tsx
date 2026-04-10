@@ -14,46 +14,27 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import clsx from 'clsx';
 import {
   Activity,
-  Play,
-  Pause,
   Terminal,
   Clock,
-  Cpu,
   Zap,
   MessageSquare,
   Wrench,
   AlertTriangle,
   CheckCircle2,
-  XCircle,
   ChevronRight,
   Radio,
   Filter,
-  RefreshCw,
 } from 'lucide-react';
 
 import type { TrajectorySession, TrajectoryEvent, TrajectoryEventType } from '../../lib/probe/types.js';
 import { useProbeSession } from '../../hooks/useProbeSession.js';
 
 // ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface TrajectoryStep {
-  id: string;
-  type: TrajectoryEventType;
-  label: string;
-  timestamp: string;
-  sats_cost: number;
-  tool_name?: string | null;
-  success?: boolean;
-}
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatDuration(startedAt: string): string {
-  const ms = Date.now() - new Date(startedAt).getTime();
+function formatDuration(startedAt: number): string {
+  const ms = Date.now() - startedAt * 1000;
   const mins = Math.floor(ms / 60000);
   const hours = Math.floor(mins / 60);
   if (hours > 0) return `${hours}h ${mins % 60}m`;
@@ -61,100 +42,84 @@ function formatDuration(startedAt: string): string {
   return '<1m';
 }
 
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
+function formatTimestamp(ts: number): string {
+  const d = new Date(ts * 1000);
   return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 
-function formatRelative(iso: string): string {
-  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  return `${Math.floor(secs / 3600)}h ago`;
-}
+type SessionStatus = TrajectorySession['status'];
 
 function statusColor(status: SessionStatus): string {
   switch (status) {
-    case 'ACTIVE':     return 'text-green-400';
-    case 'PAUSED':     return 'text-yellow-400';
-    case 'HIBERNATED': return 'text-blue-400';
-    case 'TERMINATED': return 'text-slate-500';
+    case 'active':     return 'text-green-400';
+    case 'paused':     return 'text-yellow-400';
+    case 'completed':  return 'text-blue-400';
+    case 'failed':     return 'text-red-500';
     default:           return 'text-slate-500';
   }
 }
 
 function statusDot(status: SessionStatus): string {
   switch (status) {
-    case 'ACTIVE':     return 'bg-green-400 animate-pulse';
-    case 'PAUSED':     return 'bg-yellow-400';
-    case 'HIBERNATED': return 'bg-blue-400';
-    case 'TERMINATED': return 'bg-slate-600';
+    case 'active':     return 'bg-green-400 animate-pulse';
+    case 'paused':     return 'bg-yellow-400';
+    case 'completed':  return 'bg-blue-400';
+    case 'failed':     return 'bg-red-500';
     default:           return 'bg-slate-600';
   }
 }
 
 function eventTypeIcon(type: TrajectoryEventType) {
   switch (type) {
-    case 'TOOL_CALL':        return Wrench;
-    case 'MESSAGE':          return MessageSquare;
-    case 'TASK_COMPLETION':  return CheckCircle2;
-    case 'TASK_FAILURE':     return XCircle;
-    case 'ERROR':            return AlertTriangle;
-    case 'WARNING':          return AlertTriangle;
-    case 'DELEGATION':       return Radio;
-    default:                 return Activity;
+    case 'tool_call':     return Wrench;
+    case 'tool_approval': return CheckCircle2;
+    case 'tool_result':   return CheckCircle2;
+    case 'message':       return MessageSquare;
+    case 'diff':          return Activity;
+    case 'result':        return CheckCircle2;
+    case 'error':         return AlertTriangle;
+    default:              return Activity;
   }
 }
 
 function eventTypeColor(type: TrajectoryEventType): string {
   switch (type) {
-    case 'TOOL_CALL':        return 'text-blue-400';
-    case 'MESSAGE':          return 'text-slate-300';
-    case 'TASK_COMPLETION':  return 'text-green-400';
-    case 'TASK_FAILURE':     return 'text-red-400';
-    case 'ERROR':            return 'text-red-400';
-    case 'WARNING':          return 'text-yellow-400';
-    case 'DELEGATION':       return 'text-purple-400';
-    default:                 return 'text-slate-400';
+    case 'tool_call':     return 'text-blue-400';
+    case 'tool_approval': return 'text-green-400';
+    case 'tool_result':   return 'text-green-300';
+    case 'message':       return 'text-slate-300';
+    case 'diff':          return 'text-purple-400';
+    case 'result':        return 'text-green-400';
+    case 'error':         return 'text-red-400';
+    default:              return 'text-slate-400';
   }
 }
 
 function eventDotColor(type: TrajectoryEventType): string {
   switch (type) {
-    case 'TOOL_CALL':        return 'bg-blue-400';
-    case 'MESSAGE':          return 'bg-slate-400';
-    case 'TASK_COMPLETION':  return 'bg-green-400';
-    case 'TASK_FAILURE':     return 'bg-red-400';
-    case 'ERROR':            return 'bg-red-400';
-    case 'WARNING':          return 'bg-yellow-400';
-    case 'DELEGATION':       return 'bg-purple-400';
-    default:                 return 'bg-slate-500';
+    case 'tool_call':     return 'bg-blue-400';
+    case 'tool_approval': return 'bg-green-400';
+    case 'tool_result':   return 'bg-green-300';
+    case 'message':       return 'bg-slate-400';
+    case 'diff':          return 'bg-purple-400';
+    case 'result':        return 'bg-green-500';
+    case 'error':         return 'bg-red-400';
+    default:              return 'bg-slate-500';
   }
 }
 
-const EVENT_TYPE_LABELS: Partial<Record<TrajectoryEventType, string>> = {
-  MESSAGE:           'Message',
-  TOOL_CALL:         'Tool Call',
-  CONTEXT_REFRESH:   'Context Refresh',
-  INTERRUPTION:      'Interruption',
-  DELEGATION:        'Delegation',
-  TASK_ASSIGNMENT:   'Task Assigned',
-  TASK_COMPLETION:   'Task Complete',
-  TASK_FAILURE:      'Task Failed',
-  STATE_SNAPSHOT:    'Snapshot',
-  CHANNEL_SWITCH:    'Channel Switch',
-  SESSION_PAUSED:    'Paused',
-  SESSION_RESUMED:   'Resumed',
-  SESSION_TERMINATED:'Terminated',
-  ERROR:             'Error',
-  WARNING:           'Warning',
-  INFO:              'Info',
-  CONFLICT_DETECTED: 'Conflict',
+const EVENT_TYPE_LABELS: Record<TrajectoryEventType, string> = {
+  message:       'Message',
+  tool_call:     'Tool Call',
+  tool_approval: 'Tool Approval',
+  tool_result:   'Tool Result',
+  diff:          'Diff',
+  result:        'Result',
+  error:         'Error',
 };
 
 const ALL_EVENT_TYPES: TrajectoryEventType[] = [
-  'MESSAGE', 'TOOL_CALL', 'TASK_COMPLETION', 'TASK_FAILURE',
-  'ERROR', 'WARNING', 'DELEGATION', 'CONTEXT_REFRESH',
+  'message', 'tool_call', 'tool_approval', 'tool_result', 'diff', 'result', 'error',
 ];
 
 // ---------------------------------------------------------------------------
@@ -197,7 +162,7 @@ function SessionListItem({
       <div className="flex items-center gap-3 text-[11px] text-slate-500">
         <span className="flex items-center gap-1">
           <Clock size={10} aria-hidden="true" />
-          {formatDuration(new Date(session.startedAt * 1000).toISOString())}
+          {formatDuration(session.startedAt)}
         </span>
         <span className="flex items-center gap-1">
           <Wrench size={10} aria-hidden="true" />
@@ -259,11 +224,20 @@ function TrajectoryTimeline({
         const Icon = eventTypeIcon(event.eventType);
         const color = eventTypeColor(event.eventType);
         const dot = eventDotColor(event.eventType);
-        const label = EVENT_TYPE_LABELS[event.eventType] ?? event.event_type;
+        const label = EVENT_TYPE_LABELS[event.eventType] ?? event.eventType;
         const isLast = idx === visible.length - 1;
 
+        // Derive a unique key from sessionId + timestamp + index
+        const key = `${event.sessionId}-${event.timestamp}-${idx}`;
+
+        // Extract tool name from data if it's a tool_call
+        let toolName: string | undefined;
+        if (event.eventType === 'tool_call' && 'toolName' in event.data) {
+          toolName = (event.data as { toolName?: string }).toolName;
+        }
+
         return (
-          <div key={event.id} className="relative mb-4 last:mb-0">
+          <div key={key} className="relative mb-4 last:mb-0">
             {/* Dot on timeline */}
             <div
               className={clsx('absolute w-2.5 h-2.5 rounded-full -left-[22px] top-1', dot)}
@@ -278,9 +252,9 @@ function TrajectoryTimeline({
                 <div className="flex items-center gap-1.5">
                   <Icon size={12} className={color} aria-hidden="true" />
                   <span className={clsx('text-xs font-medium', color)}>{label}</span>
-                  {event.eventType === 'tool_call' && 'toolName' in event.data && (event.data as {toolName?: string}).toolName && (
+                  {toolName && (
                     <span className="text-[10px] text-slate-500 font-mono">
-                      {(event.data as {toolName?: string}).toolName}
+                      {toolName}
                     </span>
                   )}
                 </div>
@@ -294,24 +268,6 @@ function TrajectoryTimeline({
                 <p className="text-[11px] text-slate-500 truncate">
                   {JSON.stringify(event.data).slice(0, 80)}
                 </p>
-              )}
-
-              {/* Cost / tokens inline */}
-              {false /* sats_cost/tokens not in TrajectoryEvent */ && (
-                <div className="flex items-center gap-2 mt-1.5 text-[10px] text-slate-600">
-                  {event.sats_cost > 0 && (
-                    <span className="flex items-center gap-0.5">
-                      <Zap size={9} aria-hidden="true" />
-                      {event.sats_cost} sats
-                    </span>
-                  )}
-                  {event.input_tokens > 0 && (
-                    <span className="flex items-center gap-0.5">
-                      <Cpu size={9} aria-hidden="true" />
-                      {event.input_tokens + event.output_tokens} tokens
-                    </span>
-                  )}
-                </div>
               )}
             </div>
           </div>
@@ -368,7 +324,7 @@ function SessionDetail({
         {/* Stats row */}
         <div className="grid grid-cols-4 gap-2">
           {[
-            { label: 'Duration', value: formatDuration(new Date(session.startedAt * 1000).toISOString()), Icon: Clock },
+            { label: 'Duration', value: formatDuration(session.startedAt), Icon: Clock },
             { label: 'Messages', value: session.metadata['messages'] ?? 0, Icon: MessageSquare },
             { label: 'Tool Calls', value: session.metadata['toolCalls'] ?? 0, Icon: Wrench },
             { label: 'Sats Spent', value: `${session.metadata['satsCost'] ?? 0}`, Icon: Zap },
@@ -532,4 +488,3 @@ export default function ProbeSessionPanel({ className }: ProbeSessionPanelProps)
     </div>
   );
 }
-
