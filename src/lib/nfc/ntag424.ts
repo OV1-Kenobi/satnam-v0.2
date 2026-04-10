@@ -416,7 +416,7 @@ export class NTAG424ProductionManager {
     publicKeyHex: string
   ): Promise<boolean> {
     try {
-      const { p256 } = await import("@noble/curves/nist");
+      const { p256 } = await import("@noble/curves/nist.js");
       const messageBytes = hexToBytes(messageHashHex);
       const signatureBytes = hexToBytes(signatureHex);
       const publicKeyBytes = hexToBytes(publicKeyHex);
@@ -441,7 +441,7 @@ export class NTAG424ProductionManager {
     publicKeyHex: string
   ): Promise<boolean> {
     try {
-      const { secp256k1 } = await import("@noble/curves/secp256k1");
+      const { secp256k1 } = await import("@noble/curves/secp256k1.js");
       const messageBytes = hexToBytes(messageHashHex);
       const signatureBytes = hexToBytes(signatureHex);
       const publicKeyBytes = hexToBytes(publicKeyHex);

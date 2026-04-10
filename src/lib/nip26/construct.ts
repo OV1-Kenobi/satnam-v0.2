@@ -27,7 +27,7 @@
  * @see SPECIFICATION.md §4.2 — NIP-26 Delegation Events
  */
 
-import { schnorr } from '@noble/curves/secp256k1';
+import { schnorr } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils';
 import { finalizeEvent, getPublicKey } from 'nostr-tools';

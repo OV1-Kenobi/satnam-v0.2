@@ -17,7 +17,7 @@
  * @see https://github.com/t-bast/lightning-docs/blob/master/adaptor-sigs.md
  */
 
-import { secp256k1 as _secp256k1 } from '@noble/curves/secp256k1';
+import { secp256k1 as _secp256k1 } from '@noble/curves/secp256k1.js';
 
 /** Extended secp256k1 interface exposing internal CURVE constants and ProjectivePoint. */
 const secp256k1 = _secp256k1 as typeof _secp256k1 & {

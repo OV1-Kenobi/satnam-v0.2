@@ -33,7 +33,7 @@
 
 import { bytesToHex, hexToBytes, utf8ToBytes, randomBytes } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
-import { schnorr, secp256k1 } from '@noble/curves/secp256k1';
+import { schnorr, secp256k1 } from '@noble/curves/secp256k1.js';
 
 import {
   type BfProfile,

@@ -23,7 +23,7 @@
  * @see SPECIFICATION.md §3 — Auth System
  */
 
-import { schnorr } from '@noble/curves/secp256k1';
+import { schnorr } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils';
 import { getEventHash } from 'nostr-tools';
