@@ -3,9 +3,9 @@
  * check-deps.mjs
  *
  * Reads package.json and counts production dependencies.
- * Fails (exit 1) if count exceeds 23.
+ * Fails (exit 1) if count exceeds 22.
  *
- * Security Invariant S8: package.json production dependencies ≤ 23.
+ * Security Invariant S8: package.json production dependencies ≤ 22.
  *
  * Usage: node scripts/check-deps.mjs
  */
@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const ROOT = resolve(__dirname, '..');
 const PKG_PATH = resolve(ROOT, 'package.json');
-const MAX_DEPS = 23;
+const MAX_DEPS = 22;
 
 const RESET = '\x1b[0m';
 const GREEN = '\x1b[32m';

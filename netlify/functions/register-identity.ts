@@ -29,10 +29,13 @@ import { verifyNip98 } from '../../src/lib/nip98/verify';
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    '';
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!key) {
+    // SECURITY: Write operations require the service_role key.
+    // Falling back to anon key would silently fail due to RLS, making
+    // registrations appear to succeed while actually being rejected.
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured. Write operations require the service role key.');
+  }
   return createClient(url, key);
 }
 

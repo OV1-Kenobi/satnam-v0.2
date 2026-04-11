@@ -681,19 +681,19 @@ export async function finalizeDkg(session: DkgSession): Promise<{
       shareIndex = 1;
     }
   } else {
-    // Simulation: derive a deterministic group pubkey from the session ID
-    // This allows state machine tests to complete without @frostr/bifrost
-    const sessionSeed = sha256(utf8ToBytes(session.groupId));
-    const groupPrivkey = sessionSeed; // deterministic, not random — testing only
+    // Simulation: generate random keys for the group.
+    // These are ephemeral — used only for state-machine tests without @frostr/bifrost.
+    // SECURITY: never derive keys from predictable seeds (session IDs, group IDs, etc.)
+    const groupPrivkey = randomBytes(32);
     const groupPubkeyCompressed = secp256k1.getPublicKey(groupPrivkey, true);
-    groupPubkeyHex = bytesToHex(groupPrivkey); // x-coord as group pubkey
+    groupPubkeyHex = bytesToHex(groupPubkeyCompressed.slice(1)); // x-coord as group pubkey
 
-    const shareSeed = sha256(utf8ToBytes(session.groupId + '-share-1'));
-    secretShareHex = bytesToHex(shareSeed);
-    publicShareHex = bytesToHex(secp256k1.getPublicKey(shareSeed, true));
+    const shareSecret = randomBytes(32);
+    secretShareHex = bytesToHex(shareSecret);
+    publicShareHex = bytesToHex(secp256k1.getPublicKey(shareSecret, true));
     shareIndex = 1;
 
-    void groupPubkeyCompressed; // avoid lint warning
+    void groupPrivkey; // consumed above
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -783,10 +783,10 @@ export async function initiateGroupSigning(config: {
     timestamp: session.createdAt,
   };
 
-  // Build a coordinator event signed by a temporary key derived from the group context
-  // In production this uses the participant's own nsec for the coordinator channel
-  const tempKey = bytesToHex(sha256(utf8ToBytes(`frost-coordinator-${sessionId}`)));
-  const requestEvent = buildCoordinatorEvent(requestPayload, sessionId, tempKey);
+  // Sign the coordinator event with the initiator's own secret share.
+  // The share's secret is a valid secp256k1 scalar — it serves as the signing key
+  // for coordinator messages, tying them cryptographically to a real participant.
+  const requestEvent = buildCoordinatorEvent(requestPayload, sessionId, initiatorShare.secretShare);
 
   try {
     await publishToRelay(coordinatorRelay, requestEvent);
@@ -868,8 +868,8 @@ export async function respondToSigningRequest(config: {
     timestamp: Math.floor(Date.now() / 1000),
   };
 
-  const tempKey = bytesToHex(sha256(utf8ToBytes(`frost-coordinator-${sessionId}-resp`)));
-  const responseEvent = buildCoordinatorEvent(partialSigPayload, sessionId, tempKey);
+  // Sign with the responder's own secret share — see initiateSigning for rationale.
+  const responseEvent = buildCoordinatorEvent(partialSigPayload, sessionId, participantShare.secretShare);
 
   await publishToRelay(coordinatorRelay, responseEvent);
 }
@@ -1045,11 +1045,11 @@ export async function rotateShares(config: {
     timestamp: Math.floor(Date.now() / 1000),
   };
 
-  const tempKey = bytesToHex(sha256(utf8ToBytes(`frost-rotation-${rotationSessionId}`)));
+  // Sign with the participant's current secret share — see initiateSigning for rationale.
   const rotationEvent = buildCoordinatorEvent(
     rotationPayload as unknown as FrostCoordinatorPayload,
     rotationSessionId,
-    tempKey,
+    participantShare.secretShare,
   );
 
   try {

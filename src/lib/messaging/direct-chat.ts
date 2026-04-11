@@ -36,11 +36,19 @@ import type { PinGatedOperation } from '../nfc/pin-gate.js';
 /** kind:5 — NIP-09 deletion */
 const KIND_DELETION = 5;
 
-/** Storage keys */
-const DM_THREADS_KEY = 'satnam:dm:threads:v2';
-function dmMessagesKey(contactPubkey: string): string {
-  return `satnam:dm:msgs:${contactPubkey}`;
-}
+// ============================================================================
+// In-memory DM store (SECURITY: decrypted content never touches localStorage)
+// ============================================================================
+
+/**
+ * Decrypted DM threads and messages are held in memory only.
+ * They are lost on page refresh — this is intentional. Persistent storage
+ * of decrypted message content would expose it to XSS and any browser
+ * extension with storage access. Re-fetching from relays on reload is the
+ * correct trade-off: confidentiality > convenience.
+ */
+let memThreads: DirectThread[] = [];
+const memMessages = new Map<string, Message[]>();
 
 // ============================================================================
 // Helpers
@@ -58,37 +66,19 @@ function nowUnix(): number {
 }
 
 function readThreads(): DirectThread[] {
-  try {
-    if (typeof localStorage === 'undefined') return [];
-    const raw = localStorage.getItem(DM_THREADS_KEY);
-    return raw ? (JSON.parse(raw) as DirectThread[]) : [];
-  } catch {
-    return [];
-  }
+  return memThreads;
 }
 
 function writeThreads(threads: DirectThread[]): void {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(DM_THREADS_KEY, JSON.stringify(threads));
-  } catch {}
+  memThreads = threads;
 }
 
 function readMessages(contactPubkey: string): Message[] {
-  try {
-    if (typeof localStorage === 'undefined') return [];
-    const raw = localStorage.getItem(dmMessagesKey(contactPubkey));
-    return raw ? (JSON.parse(raw) as Message[]) : [];
-  } catch {
-    return [];
-  }
+  return memMessages.get(contactPubkey) ?? [];
 }
 
 function writeMessages(contactPubkey: string, messages: Message[]): void {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(dmMessagesKey(contactPubkey), JSON.stringify(messages));
-  } catch {}
+  memMessages.set(contactPubkey, messages);
 }
 
 // ============================================================================

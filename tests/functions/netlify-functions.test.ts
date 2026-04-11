@@ -55,6 +55,14 @@ vi.mock('../../src/lib/nip98/verify', () => ({
 import { verifyNip98 } from '../../src/lib/nip98/verify';
 
 // ============================================================================
+// Environment variables required by Netlify functions
+// ============================================================================
+
+process.env.SUPABASE_URL = 'https://test.supabase.co';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+process.env.SUPABASE_ANON_KEY = 'test-anon-key';
+
+// ============================================================================
 // Global cleanup — prevent mock call counts from leaking between describes
 // ============================================================================
 

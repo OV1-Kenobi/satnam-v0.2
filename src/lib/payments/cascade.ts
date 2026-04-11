@@ -412,8 +412,27 @@ export class CascadeEngine {
       tag: string;
     };
 
+    // SECURITY: Validate callback URL to prevent SSRF / attacker-controlled redirects.
+    // The LNURL spec (LUD-06) requires the callback to be HTTPS. We additionally
+    // verify the callback domain matches the Lightning Address domain to prevent
+    // a compromised metadata endpoint from redirecting invoice fetches elsewhere.
+    let callbackParsed: URL;
+    try {
+      callbackParsed = new URL(meta.callback);
+    } catch {
+      throw new Error(`LNURL-pay: invalid callback URL in metadata`);
+    }
+    if (callbackParsed.protocol !== 'https:') {
+      throw new Error(`LNURL-pay: callback must be HTTPS, got ${callbackParsed.protocol}`);
+    }
+    if (callbackParsed.hostname !== domain) {
+      throw new Error(
+        `LNURL-pay: callback domain mismatch — expected ${domain}, got ${callbackParsed.hostname}`
+      );
+    }
+
     const msats = Number(amountMsats);
-    const callbackUrl = `${meta.callback}?amount=${msats}`;
+    const callbackUrl = `${meta.callback}${meta.callback.includes('?') ? '&' : '?'}amount=${msats}`;
     const invoiceRes = await fetch(callbackUrl);
     if (!invoiceRes.ok) {
       throw new Error(`LNURL-pay invoice fetch failed: HTTP ${invoiceRes.status}`);

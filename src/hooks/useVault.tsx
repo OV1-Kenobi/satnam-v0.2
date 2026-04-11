@@ -32,6 +32,8 @@ import React, {
   useState,
 } from 'react';
 
+import { getVault, VaultError } from '../lib/vault/index.js';
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /** Auto-lock after 10 minutes of inactivity */
@@ -118,9 +120,13 @@ export function VaultProvider({
   const resetIdleTimer = useCallback(() => {
     clearIdleTimer();
     idleTimerRef.current = setTimeout(() => {
-      // Idle timeout expired — lock the vault
+      // Idle timeout expired — lock the vault and clear key material
+      try {
+        getVault().lock();
+      } catch {
+        // Vault may not be initialized
+      }
       setIsUnlocked(false);
-      // TODO (Phase 1 Week 2): call vaultModule.close() to clear in-memory key
     }, idleTimeoutMs);
   }, [clearIdleTimer, idleTimeoutMs]);
 
@@ -128,9 +134,13 @@ export function VaultProvider({
 
   const lock = useCallback(() => {
     clearIdleTimer();
+    try {
+      getVault().lock();
+    } catch {
+      // Vault may not be initialized yet — locking the React state is sufficient.
+    }
     setIsUnlocked(false);
     setUnlockError(null);
-    // TODO (Phase 1 Week 2): call vaultModule.close() to clear the session key
   }, [clearIdleTimer]);
 
   // ── Unlock ──────────────────────────────────────────────────────────────────
@@ -146,40 +156,18 @@ export function VaultProvider({
       setUnlockError(null);
 
       try {
-        /*
-         * Phase 1 Week 2 implementation note:
-         *
-         * Replace this placeholder with:
-         *
-         *   import { openVault } from '../lib/vault/vault';
-         *
-         *   const success = await openVault(passphrase);
-         *
-         * openVault() must:
-         *   1. Derive the wrapping key via argon2id(passphrase, salt)
-         *      with m=65536, t=3, p=4 (Spec § 2.3.2)
-         *   2. Attempt to decrypt the vault root key from OPFS
-         *   3. Return true if decryption succeeds, false on wrong passphrase
-         *   4. Throw VaultNotFoundError if the vault has never been created
-         *
-         * WebAuthn path (Spec § 2.3.3):
-         *   The unlock() function is also called indirectly when WebAuthn
-         *   resolves; the passphrase is replaced by the PRF output.
-         *   The vault module handles this distinction internally.
-         *
-         * STUB: Accept any non-empty passphrase during Phase 1 Week 1.
-         */
-        const success = passphrase.length > 0; // STUB — replace in Week 2
+        const vault = getVault();
+        await vault.unlock('passphrase', passphrase);
 
-        if (success) {
-          setIsUnlocked(true);
-          resetIdleTimer();
-          return true;
-        } else {
+        setIsUnlocked(true);
+        resetIdleTimer();
+        return true;
+      } catch (err) {
+        // DecryptionFailed means wrong passphrase — not an unexpected error
+        if (err instanceof Error && err.message.includes(VaultError.DecryptionFailed)) {
           setUnlockError('Incorrect passphrase. Please try again.');
           return false;
         }
-      } catch (err) {
         const message =
           err instanceof Error ? err.message : 'An unexpected error occurred.';
         setUnlockError(message);

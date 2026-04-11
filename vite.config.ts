@@ -4,7 +4,7 @@ import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import { resolve } from 'path';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     wasm(),
@@ -21,7 +21,9 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // SECURITY: Source maps expose original source to anyone with browser DevTools.
+    // Enable only for development; production builds must not ship source maps.
+    sourcemap: mode !== 'production',
     minify: 'terser',
     rollupOptions: {
       output: {
@@ -59,4 +61,4 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
-});
+}));

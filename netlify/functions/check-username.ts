@@ -23,10 +23,14 @@ import { createClient } from '@supabase/supabase-js';
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  // Read-only function: anon key is sufficient (SELECT on public tables).
   const key =
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.SUPABASE_ANON_KEY ||
     '';
+  if (!key) {
+    throw new Error('Neither SUPABASE_SERVICE_ROLE_KEY nor SUPABASE_ANON_KEY is configured.');
+  }
   return createClient(url, key);
 }
 

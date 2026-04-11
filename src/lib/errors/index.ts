@@ -240,9 +240,12 @@ export class NwcInsufficientFundsError extends SatnamError {
 /**
  * Thrown when a FROST threshold signing operation fails.
  *
+ * Renamed from `FrostError` to avoid collision with the `FrostError` enum
+ * in `frost/types.ts` (which enumerates FROST-specific error variants).
+ *
  * Recoverable: depends on the cause (quorum loss vs. transient failure).
  */
-export class FrostError extends SatnamError {
+export class FrostOperationError extends SatnamError {
   constructor(
     message: string = 'FROST signing error.',
     recoverable: boolean = true,
@@ -251,6 +254,12 @@ export class FrostError extends SatnamError {
     super(message, 'FROST_ERROR', recoverable, context);
   }
 }
+
+/**
+ * @deprecated Use {@link FrostOperationError} instead.
+ * Kept for backward compatibility during migration.
+ */
+export const FrostError = FrostOperationError;
 
 /**
  * Thrown when FROST quorum cannot be reached (insufficient signers).
@@ -409,7 +418,7 @@ export function isNwcError(error: unknown): error is NwcError {
   return error instanceof NwcError;
 }
 
-/** Type guard: is this a FrostError? */
-export function isFrostError(error: unknown): error is FrostError {
-  return error instanceof FrostError;
+/** Type guard: is this a FrostOperationError? */
+export function isFrostError(error: unknown): error is FrostOperationError {
+  return error instanceof FrostOperationError;
 }
