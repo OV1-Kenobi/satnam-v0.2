@@ -3,25 +3,24 @@
  *
  * PinGate class — PIN setup, verification, lockout logic, operation tokens.
  *
- * Tests mock the argon2-browser WASM module and vault operations to enable
+ * Tests mock the @noble/hashes/argon2 module and vault operations to enable
  * fast, deterministic unit testing without OPFS or WASM.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Mock argon2-browser
+// Mock @noble/hashes/argon2
 // ---------------------------------------------------------------------------
 
-// argon2-browser returns a hash object. We mock it to return a predictable
-// 32-byte hash based on the PIN input.
-vi.mock('argon2-browser', () => ({
-  default: {
-    hash: vi.fn(async ({ pass }: { pass: string }) => ({
-      hash: new Uint8Array(32).fill(pass.charCodeAt(0) % 256),
-    })),
-    ArgonType: { Argon2id: 2 },
-  },
+// argon2id returns a Uint8Array directly. We mock it to return a predictable
+// 32-byte hash based on the password input.
+vi.mock('@noble/hashes/argon2', () => ({
+  argon2id: vi.fn((password: Uint8Array) => {
+    // Deterministic: fill with first byte of password
+    const firstByte = password.length > 0 ? password[0] : 0;
+    return new Uint8Array(32).fill(firstByte % 256);
+  }),
 }));
 
 // Mock @noble/hashes/hmac

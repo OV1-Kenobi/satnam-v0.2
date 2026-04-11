@@ -13,13 +13,13 @@
  * 5. Client compares verifier against stored verifier in OPFS Vault at nfc/{card_uid}.pin_verifier.
  * 6. If PIN is correct: construct a PIN-bound operation token: HMAC-SHA256(payload, pin_derived_key).
  *
- * Uses argon2-browser (WASM) for PIN key derivation — NOT @noble/hashes/argon2
- * (which lacks the parallelism parameter in the browser build).
+ * Uses @noble/hashes/argon2 (pure-JS, audited) for PIN key derivation.
+ * The argon2id implementation supports all parameters including parallelism.
  *
  * @see SPECIFICATION.md §5.3 — PIN Gate
  */
 
-import argon2 from 'argon2-browser';
+import { argon2id } from '@noble/hashes/argon2';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
 import { utf8ToBytes } from '@noble/hashes/utils';
@@ -236,16 +236,12 @@ export class PinGate {
    * Salt = UTF-8 bytes of cardUid (hex string).
    */
   private async _deriveVerifier(pin: string): Promise<Uint8Array> {
-    const result = await argon2.hash({
-      pass: pin,
-      salt: this.config.cardUid,
-      time: ARGON2_PARAMS.t,
-      mem: ARGON2_PARAMS.m,
-      parallelism: ARGON2_PARAMS.p,
-      hashLen: KEY_LEN,
-      type: argon2.ArgonType.Argon2id,
+    return argon2id(utf8ToBytes(pin), utf8ToBytes(this.config.cardUid), {
+      t: ARGON2_PARAMS.t,
+      m: ARGON2_PARAMS.m,
+      p: ARGON2_PARAMS.p,
+      dkLen: KEY_LEN,
     });
-    return result.hash;
   }
 
   /**

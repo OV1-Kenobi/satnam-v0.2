@@ -90,6 +90,16 @@ export function _resetDirectChatStore(): void {
   memMessages.clear();
 }
 
+/**
+ * Patch messages in the in-memory store. Test-only — not for production use.
+ * Replaces the stored messages for a given contact pubkey.
+ * @internal
+ */
+export function _patchMessages(contactPubkey: string, patcher: (msgs: Message[]) => Message[]): void {
+  const current = memMessages.get(contactPubkey) ?? [];
+  memMessages.set(contactPubkey, patcher(current));
+}
+
 // ============================================================================
 // PIN gate callback type
 // ============================================================================

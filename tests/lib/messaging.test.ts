@@ -31,7 +31,7 @@ import type { Message, EphemeralConfig, GroupConfig } from '../../src/lib/messag
 import { TTL_PRESETS } from '../../src/lib/messaging/types.js';
 
 import { GroupChatManager } from '../../src/lib/messaging/group-chat.js';
-import { DirectChatManager, _resetDirectChatStore } from '../../src/lib/messaging/direct-chat.js';
+import { DirectChatManager, _resetDirectChatStore, _patchMessages } from '../../src/lib/messaging/direct-chat.js';
 import {
   EphemeralManager,
   setMessageTtl,
@@ -406,14 +406,13 @@ describe('DirectChatManager', () => {
       burnAfterRead: false,
     });
 
-    // Patch expiry to past
-    const key = `satnam:dm:msgs:${BOB}`;
-    const raw = localStorageMock.getItem(key);
-    if (raw) {
-      const msgs = JSON.parse(raw);
-      msgs[0].expiresAt = Math.floor(Date.now() / 1000) - 1;
-      localStorageMock.setItem(key, JSON.stringify(msgs));
-    }
+    // Patch expiry to past via in-memory store helper
+    _patchMessages(BOB, (msgs) =>
+      msgs.map((m) => m.id === msg.id
+        ? { ...m, expiresAt: Math.floor(Date.now() / 1000) - 1 }
+        : m
+      )
+    );
 
     const result = await dm.getDirectMessages(BOB);
     expect(result.find((m) => m.id === msg.id)).toBeUndefined();
