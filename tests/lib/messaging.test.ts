@@ -31,7 +31,7 @@ import type { Message, EphemeralConfig, GroupConfig } from '../../src/lib/messag
 import { TTL_PRESETS } from '../../src/lib/messaging/types.js';
 
 import { GroupChatManager } from '../../src/lib/messaging/group-chat.js';
-import { DirectChatManager } from '../../src/lib/messaging/direct-chat.js';
+import { DirectChatManager, _resetDirectChatStore } from '../../src/lib/messaging/direct-chat.js';
 import {
   EphemeralManager,
   setMessageTtl,
@@ -322,6 +322,7 @@ describe('DirectChatManager', () => {
 
   beforeEach(() => {
     localStorageMock.clear();
+    _resetDirectChatStore();
     vi.clearAllMocks();
     dm = new DirectChatManager(ALICE, ['wss://nos.lol']);
   });

@@ -81,6 +81,15 @@ function writeMessages(contactPubkey: string, messages: Message[]): void {
   memMessages.set(contactPubkey, messages);
 }
 
+/**
+ * Reset the in-memory DM store. Test-only — not for production use.
+ * @internal
+ */
+export function _resetDirectChatStore(): void {
+  memThreads = [];
+  memMessages.clear();
+}
+
 // ============================================================================
 // PIN gate callback type
 // ============================================================================
