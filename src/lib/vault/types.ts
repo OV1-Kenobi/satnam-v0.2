@@ -509,6 +509,29 @@ export interface VaultOps {
   getSig4SatsBonds(): Promise<string | null>;
 
   // -------------------------------------------------------------------------
+  // OpenTimestamps receipts (CR-F)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Store an OpenTimestamps receipt for an anchored event, encrypted under
+   * the master key. Stored at vault/ots/{eventId}.
+   *
+   * @param eventId - Hex-encoded Nostr event id that was anchored
+   * @param receipt - Receipt object (JSON-serializable)
+   * @throws {VaultError.VaultLocked} if vault is locked
+   */
+  storeOtsReceipt(eventId: string, receipt: unknown): Promise<void>;
+
+  /**
+   * Retrieve an OpenTimestamps receipt for an event.
+   *
+   * @param eventId - Hex-encoded Nostr event id
+   * @returns The receipt, or null if none stored for this event
+   * @throws {VaultError.VaultLocked} if vault is locked
+   */
+  getOtsReceipt(eventId: string): Promise<unknown>;
+
+  // -------------------------------------------------------------------------
   // Backup
   // -------------------------------------------------------------------------
 
