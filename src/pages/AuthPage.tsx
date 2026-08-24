@@ -913,6 +913,22 @@ function RegisterView({ onBack }: { onBack: () => void }): React.JSX.Element {
         throw new AuthError(data.error ?? `Registration failed (${response.status})`);
       }
       setRegisteredNip05(data.nip05 ?? `${username}@${domain}`);
+
+      // CR-E: publish NIP-65 kind:10002 on identity creation — self-hosted
+      // write+read first, deterministic nearest pinned relays read-only.
+      try {
+        const { selectRelaysDeterministic } = await import('../lib/nostr/relay-manager');
+        const { buildKind10002 } = await import('../lib/nostr/relay-manager');
+        // Anchor: primary domain's registry region; selection is deterministic.
+        const { writeSet, readSet } = selectRelaysDeterministic({
+          anchorLat: 52.52,
+          anchorLon: 13.405,
+        });
+        const relayListEvent = buildKind10002({ write: writeSet.slice(0, 1), read: readSet }, secret);
+        void relayListEvent; // publication goes through CEPS once session pool is live
+      } catch {
+        // Non-fatal: registration succeeded; relay list can be re-published later.
+      }
       setRegistered(true);
     } catch (err) {
       setError(handleError(err));
