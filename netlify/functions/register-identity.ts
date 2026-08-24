@@ -44,6 +44,18 @@ function getSupabase() {
 // ============================================================================
 
 const NIP05_DOMAIN = process.env.NIP05_DOMAIN || process.env.VITE_NIP05_DOMAIN || 'satnam.pub';
+// Layer 2 (2026-08-24, founder-directed): configurable domain whitelist —
+// config-not-code. Initial entries per founder: openagents.com, sovereignhybridcompute.com.
+const ALLOWED_NIP05_DOMAINS = new Set(
+  (
+    process.env.NIP05_DOMAINS ||
+    process.env.VITE_NIP05_DOMAINS ||
+    'satnam.pub,openagents.com,sovereignhybridcompute.com'
+  )
+    .split(',')
+    .map((d) => d.trim().toLowerCase())
+);
+const DOMAIN_REGEX = /^[a-z0-9][a-z0-9\-.]{1,253}$/;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const RATE_LIMIT_MAX_PER_PUBKEY = 10; // 10 registrations/hour per pubkey
 const RATE_LIMIT_WINDOW_IP_MS = 60_000; // 1 minute
@@ -57,16 +69,20 @@ const LUD16_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // Security headers (auth'd endpoint — no wildcard CORS)
 // ============================================================================
 
+// Layer 2 fix (2026-08-24): EXACT origin matching — startsWith() prefix matching
+// admitted lookalike origins such as https://satnam.pub.evil.com
+const ALLOWED_ORIGINS = new Set([
+  `https://${NIP05_DOMAIN}`,
+  'https://satnam.pub',
+  'http://localhost:5173',
+  'http://localhost:8888',
+]);
+
 function corsHeaders(origin?: string): Record<string, string> {
-  const allowedOrigins = [
-    `https://${NIP05_DOMAIN}`,
-    'https://satnam.pub',
-    'http://localhost:5173',
-    'http://localhost:8888',
-  ];
-  const resolvedOrigin: string = (origin && allowedOrigins.some((o) => origin.startsWith(o)))
-    ? origin
-    : (allowedOrigins[0] ?? 'https://satnam.pub');
+  const resolvedOrigin: string =
+    origin && ALLOWED_ORIGINS.has(origin)
+      ? origin
+      : `https://${NIP05_DOMAIN}`;
   return {
     'Access-Control-Allow-Origin': resolvedOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -124,34 +140,64 @@ async function checkPubkeyRateLimit(
 ): Promise<boolean> {
   const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
 
-  // Count registrations in the last hour for this pubkey
-  const { count, error } = await supabase
+  // Layer 2 fix (2026-08-24, C5 alignment): rate_limits columns are
+  // identifier / endpoint / window_start / request_count per migration 001,
+  // aggregated as one row per (identifier, endpoint, hour).
+  // Previous code queried nonexistent pubkey/action/created_at columns,
+  // which always errored and (combined with fail-open) disabled limiting.
+  const { data, error } = await supabase
     .from('rate_limits')
-    .select('*', { count: 'exact', head: true })
-    .eq('pubkey', pubkey)
-    .eq('action', 'register_identity')
-    .gte('created_at', windowStart);
+    .select('request_count')
+    .eq('identifier', pubkey)
+    .eq('endpoint', 'register-identity')
+    .gte('window_start', windowStart);
 
   if (error) {
-    // On DB error, fail open (don't block legitimate users due to rate limit DB issues)
-    console.error('[register-identity] rate limit check error:', error.message);
-    return true;
+    // Layer 2 fix: FAIL CLOSED on DB error. The previous fail-open posture let a
+    // persistent DB fault silently disable the per-pubkey limit entirely.
+    console.error('[register-identity] rate limit check error (failing closed):', error.message);
+    return false;
   }
 
-  return (count ?? 0) < RATE_LIMIT_MAX_PER_PUBKEY;
+  const total = (data ?? []).reduce((sum, row) => sum + ((row as { request_count?: number }).request_count ?? 0), 0);
+  return total < RATE_LIMIT_MAX_PER_PUBKEY;
 }
 
 async function recordRateLimitEvent(
   supabase: SupabaseClient<any>,
   pubkey: string,
-  ip: string
+  _ip: string
 ): Promise<void> {
-  await supabase.from('rate_limits').insert({
-    pubkey,
-    action: 'register_identity',
-    ip_address: ip,
-    created_at: new Date().toISOString(),
-  });
+  // C5 alignment: read-modify-write increment of the hourly aggregate row.
+  // (Supabase JS has no atomic increment without an RPC; a lost update here
+  // only undercounts by one within the same second — acceptable for this limit.)
+  const windowStart = new Date();
+  windowStart.setMinutes(0, 0, 0);
+  const iso = windowStart.toISOString();
+
+  const { data: existing } = await supabase
+    .from('rate_limits')
+    .select('request_count')
+    .eq('identifier', pubkey)
+    .eq('endpoint', 'register-identity')
+    .eq('window_start', iso)
+    .maybeSingle();
+
+  if (existing) {
+    await supabase
+      .from('rate_limits')
+      .update({ request_count: ((existing as { request_count?: number }).request_count ?? 0) + 1 })
+      .eq('identifier', pubkey)
+      .eq('endpoint', 'register-identity')
+      .eq('window_start', iso);
+  } else {
+    await supabase.from('rate_limits').insert({
+      identifier: pubkey,
+      endpoint: 'register-identity',
+      window_start: iso,
+      request_count: 1,
+    });
+  }
 }
 
 // ============================================================================
@@ -223,16 +269,30 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
 
   const pubkey = authOutcome.pubkey;
 
-  // ── Parse + validate request body ──
-  let body: { username?: string; lud16?: string };
+  // ── Parse + validate request body (action-routed per plan CR-A/CR-H) ──
+  // Layer 2: action routing keeps the ≤8-function ceiling (S9). Supported:
+  //   register (default) — new NIP-05 identity
+  //   update             — change lud16 / reactivate on an owned username
+  let body: { action?: string; username?: string; lud16?: string };
   try {
     body = JSON.parse(event.body || '{}');
   } catch {
     return errorResponse(400, 'Invalid JSON body', requestOrigin);
   }
 
+  const action = (body.action || 'register').toLowerCase();
+  if (!['register', 'update'].includes(action)) {
+    return errorResponse(400, `Unsupported action: ${action}`, requestOrigin);
+  }
+
   const username = (body.username || '').trim().toLowerCase();
   const lud16 = body.lud16?.trim();
+  // Whitelist-aware domain (CR-A): defaults to primary domain; must be whitelisted.
+  const requestedDomain = ((body as { domain?: string }).domain || NIP05_DOMAIN).trim().toLowerCase();
+
+  if (!DOMAIN_REGEX.test(requestedDomain) || !ALLOWED_NIP05_DOMAINS.has(requestedDomain)) {
+    return errorResponse(403, `Domain not whitelisted: ${requestedDomain}`, requestOrigin);
+  }
 
   const usernameError = validateUsername(username);
   if (usernameError) {
@@ -251,11 +311,62 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(429, 'Rate limit exceeded: max 10 registrations per hour per identity.', requestOrigin);
   }
 
-  // ── Check username availability (active identifiers) ──
+  // ── Action routing: update path (owner-only mutation, no new identity) ──
+  if (action === 'update') {
+    const { data: owned, error: ownedErr } = await supabase
+      .from('nip05_identifiers')
+      .select('username')
+      .eq('username', username)
+      .eq('pubkey', pubkey)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (ownedErr) {
+      console.error('[register-identity] DB error (ownership check):', ownedErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    if (!owned) {
+      return errorResponse(403, 'Username is not registered to this pubkey', requestOrigin);
+    }
+
+    if (lud16) {
+      if (!LUD16_REGEX.test(lud16)) {
+        return errorResponse(400, 'Invalid Lightning address format (expected user@domain.tld)', requestOrigin);
+      }
+      const lud16Domain = lud16.split('@')[1] ?? NIP05_DOMAIN;
+      const { error: updErr } = await supabase
+        .from('lightning_addresses')
+        .upsert({
+          username,
+          lnurl_callback: `https://${lud16Domain}/.well-known/lnurlp/${username}`,
+          min_sendable_msats: 1000,
+          max_sendable_msats: 100000000000,
+          metadata_json: JSON.stringify([['text/identifier', `${lud16}`]]),
+        });
+      if (updErr) {
+        console.error('[register-identity] DB error (update lightning):', updErr.message);
+        return errorResponse(500, 'Internal server error', requestOrigin);
+      }
+    }
+
+    await recordRateLimitEvent(supabase, pubkey, clientIP);
+    return {
+      statusCode: 200,
+      headers: {
+        ...corsHeaders(requestOrigin),
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      },
+      body: JSON.stringify({ success: true, nip05: `${username}@${NIP05_DOMAIN}`, ...(lud16 ? { lud16 } : {}) }),
+    };
+  }
+
+  // ── Check username availability (active identifiers, whitelist-scoped) ──
   const { data: existingIdent, error: identCheckErr } = await supabase
     .from('nip05_identifiers')
     .select('username')
     .eq('username', username)
+    .eq('domain', requestedDomain)
     .eq('is_active', true)
     .maybeSingle();
 
@@ -306,7 +417,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   const { error: insertErr } = await supabase.from('nip05_identifiers').insert({
     username,
     pubkey,
-    domain: NIP05_DOMAIN,
+    domain: requestedDomain,
     is_active: true,
     created_at: new Date().toISOString(),
   });
@@ -322,12 +433,19 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
 
   // ── Insert Lightning address if provided ──
   if (lud16) {
+    // C5 alignment (2026-08-24): lightning_addresses columns per migration 001 are
+    // username (FK), lnurl_callback, min/max_sendable_msats, metadata_json.
+    // The previous insert used nonexistent pubkey/lud16 columns.
+    // LUD-16 → LUD-06 callback: https://<domain>/.well-known/lnurlp/<username>
+    const lud16Domain = lud16.split('@')[1] ?? NIP05_DOMAIN;
     const { error: lnErr } = await supabase.from('lightning_addresses').insert({
-      pubkey,
-      lud16,
       username,
-      domain: NIP05_DOMAIN,
-      created_at: new Date().toISOString(),
+      lnurl_callback: `https://${lud16Domain}/.well-known/lnurlp/${username}`,
+      min_sendable_msats: 1000,
+      max_sendable_msats: 100000000000,
+      metadata_json: JSON.stringify([
+        ['text/identifier', `${lud16}`],
+      ]),
     });
 
     if (lnErr) {
@@ -345,7 +463,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   // ── Record rate limit event ──
   await recordRateLimitEvent(supabase, pubkey, clientIP);
 
-  const nip05 = `${username}@${NIP05_DOMAIN}`;
+  const nip05 = `${username}@${requestedDomain}`;
 
   console.log('[register-identity] registered', { username, nip05 });
 
