@@ -269,6 +269,9 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
 
   const pubkey = authOutcome.pubkey;
 
+  // Supabase client needed by every action branch below.
+  const supabase = getSupabase();
+
   // ── Parse + validate request body (action-routed per plan CR-A/CR-H) ──
   // Layer 2: action routing keeps the ≤8-function ceiling (S9). Supported:
   //   register (default) — new NIP-05 identity
@@ -282,8 +285,186 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   }
 
   const action = (body.action || 'register').toLowerCase();
-  if (!['register', 'update', 'rotate'].includes(action)) {
+  if (!['register', 'update', 'rotate', 'group_create', 'agent_deploy'].includes(action)) {
     return errorResponse(400, `Unsupported action: ${action}`, requestOrigin);
+  }
+
+  // ── Action routing: CR-I Layer 2 — group creation with batch provisioning ──
+  if (action === 'group_create') {
+    const gb = body as {
+      charter?: string;
+      role?: string;
+      members?: Array<{ pubkey?: string; role?: string }>;
+    };
+    const charter = (gb.charter ?? '').trim();
+    if (charter.length < 3 || charter.length > 2000) {
+      return errorResponse(400, 'charter must be 3–2000 characters', requestOrigin);
+    }
+    const creatorRole = ['guardian', 'steward'].includes(gb.role ?? '')
+      ? (gb.role as string)
+      : 'guardian';
+
+    // Validate members before any write; cap batch at 50 per call.
+    const members = (gb.members ?? []).slice(0, 50);
+    for (const m of members) {
+      if (!m.pubkey || !/^[0-9a-f]{64}$/.test(m.pubkey)) {
+        return errorResponse(400, 'each member needs a valid 64-hex pubkey', requestOrigin);
+      }
+      if (!['guardian', 'steward', 'adult', 'offspring'].includes(m.role ?? '')) {
+        return errorResponse(400, 'member roles must be guardian/steward/adult/offspring', requestOrigin);
+      }
+    }
+
+    const { data: group, error: gErr } = await supabase
+      .from('groups')
+      .insert({ charter, created_by_pubkey: pubkey })
+      .select('id')
+      .single();
+    if (gErr || !group) {
+      console.error('[register-identity] DB error (group insert):', gErr?.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    const groupId = (group as { id: string }).id;
+
+    // Creator joins with their chosen role, then all provisioned members.
+    const rows = [
+      { group_id: groupId, member_pubkey: pubkey, role: creatorRole },
+      ...members.map((m) => ({
+        group_id: groupId,
+        member_pubkey: m.pubkey!,
+        role: m.role!,
+        invited_by_pubkey: pubkey,
+      })),
+    ];
+    // Deduplicate (creator may also appear in the batch list).
+    const unique = new Map<string, string>();
+    for (const r of rows) unique.set(`${r.member_pubkey}:${r.role}`, JSON.stringify(r));
+    const { error: mErr } = await supabase
+      .from('group_members')
+      .insert([...unique.values()].map((r) => JSON.parse(r)));
+    if (mErr) {
+      console.error('[register-identity] DB error (member insert):', mErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+
+    await recordRateLimitEvent(supabase, pubkey, clientIP);
+    return {
+      statusCode: 201,
+      headers: { ...corsHeaders(requestOrigin), 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ success: true, group_id: groupId, member_count: unique.size }),
+    };
+  }
+
+  // ── Action routing: CR-I Layer 2 — agent deployment with guardrails ──
+  if (action === 'agent_deploy') {
+    const ab = body as {
+      agent_pubkey?: string;
+      name?: string;
+      description?: string;
+      spend_policy?: Record<string, unknown>;
+    };
+    if (!ab.agent_pubkey || !/^[0-9a-f]{64}$/.test(ab.agent_pubkey)) {
+      return errorResponse(400, 'agent_pubkey must be 64 hex chars', requestOrigin);
+    }
+    if (!ab.name || ab.name.length > 100) {
+      return errorResponse(400, 'agent name required (≤100 chars)', requestOrigin);
+    }
+
+    // Deployer must be Guardian or Steward of an active group.
+    const deployerGroup = (body as { group_id?: string }).group_id;
+    let groupId = deployerGroup;
+    if (groupId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(groupId)) {
+        return errorResponse(400, 'invalid group_id format', requestOrigin);
+      }
+      const { data: membership, error: memErr } = await supabase
+        .from('group_members')
+        .select('role')
+        .eq('group_id', groupId)
+        .eq('member_pubkey', pubkey)
+        .in('role', ['guardian', 'steward'])
+        .maybeSingle();
+      if (memErr) {
+        console.error('[register-identity] DB error (deployer role check):', memErr.message);
+        return errorResponse(500, 'Internal server error', requestOrigin);
+      }
+      if (!membership) {
+        return errorResponse(403, 'Only guardians/stewards may deploy agents into a group', requestOrigin);
+      }
+    } else {
+      // Personal agent: create a single-member group owned by the deployer.
+      const { data: personal, error: pgErr } = await supabase
+        .from('groups')
+        .insert({ charter: `Personal agents of ${pubkey.slice(0, 12)}…`, created_by_pubkey: pubkey })
+        .select('id')
+        .single();
+      if (pgErr || !personal) {
+        console.error('[register-identity] DB error (personal group insert):', pgErr?.message);
+        return errorResponse(500, 'Internal server error', requestOrigin);
+      }
+      groupId = (personal as { id: string }).id;
+      await supabase
+        .from('group_members')
+        .insert({ group_id: groupId, member_pubkey: pubkey, role: 'guardian' });
+    }
+
+    // Guardrails: conservative defaults; delegation expires by default.
+    const policy = ab.spend_policy ?? {};
+    const maxSingle = Math.max(1, Number(policy.max_single_spend_msats ?? 100_000)); // 100 sats default
+    const daily = Math.max(maxSingle, Number(policy.daily_limit_msats ?? 500_000));
+    const approval = Math.max(daily, Number(policy.approval_threshold_msats ?? daily));
+    const expiresAt =
+      typeof policy.delegation_expires_at === 'string' ? policy.delegation_expires_at : null;
+
+    const { data: profile, error: apErr } = await supabase
+      .from('agent_profiles')
+      .insert({
+        group_id: groupId,
+        agent_pubkey: ab.agent_pubkey,
+        name: ab.name,
+        ...(ab.description ? { description: ab.description } : {}),
+        created_by_pubkey: pubkey,
+      })
+      .select('id')
+      .single();
+    if (apErr || !profile) {
+      console.error('[register-identity] DB error (agent insert):', apErr?.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    const profileId = (profile as { id: string }).id;
+
+    const { error: spErr } = await supabase.from('agent_spend_policies').insert({
+      agent_profile_id: profileId,
+      max_single_spend_msats: maxSingle,
+      daily_limit_msats: daily,
+      weekly_limit_msats: Math.max(daily, Number(policy.weekly_limit_msats ?? daily * 5)),
+      approval_threshold_msats: approval,
+      allowed_kinds: Array.isArray(policy.allowed_kinds) ? policy.allowed_kinds.map(String).map(String) : [],
+      allowed_rails: Array.isArray(policy.allowed_rails) ? policy.allowed_rails.map(String) : [],
+      allowed_mints: Array.isArray(policy.allowed_mints) ? policy.allowed_mints.map(String) : [],
+      ...(expiresAt ? { delegation_expires_at: expiresAt } : {}),
+    });
+    if (spErr) {
+      console.error('[register-identity] DB error (spend policy insert):', spErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+
+    // Delegation constraints default to least privilege.
+    await supabase.from('agent_delegation_constraints').insert({
+      agent_profile_id: profileId,
+      can_invite_members: false,
+      can_create_agents: false,
+      can_modify_spend_policy: false,
+      can_rotate_keys: false,
+      max_delegation_depth: 1,
+    });
+
+    await recordRateLimitEvent(supabase, pubkey, clientIP);
+    return {
+      statusCode: 201,
+      headers: { ...corsHeaders(requestOrigin), 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ success: true, agent_profile_id: profileId, group_id: groupId }),
+    };
   }
 
   const username = (body.username || '').trim().toLowerCase();
@@ -303,8 +484,6 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   if (lud16 && !LUD16_REGEX.test(lud16)) {
     return errorResponse(400, 'Invalid Lightning address format (expected user@domain.tld)', requestOrigin);
   }
-
-  const supabase = getSupabase();
 
   // ── Per-pubkey rate limit (Supabase) ──
   const withinLimit = await checkPubkeyRateLimit(supabase, pubkey);
