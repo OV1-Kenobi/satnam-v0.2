@@ -273,6 +273,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   // Layer 2: action routing keeps the ≤8-function ceiling (S9). Supported:
   //   register (default) — new NIP-05 identity
   //   update             — change lud16 / reactivate on an owned username
+  //   rotate             — CR-H: move an owned record to a successor pubkey
   let body: { action?: string; username?: string; lud16?: string };
   try {
     body = JSON.parse(event.body || '{}');
@@ -281,7 +282,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   }
 
   const action = (body.action || 'register').toLowerCase();
-  if (!['register', 'update'].includes(action)) {
+  if (!['register', 'update', 'rotate'].includes(action)) {
     return errorResponse(400, `Unsupported action: ${action}`, requestOrigin);
   }
 
@@ -309,6 +310,83 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   const withinLimit = await checkPubkeyRateLimit(supabase, pubkey);
   if (!withinLimit) {
     return errorResponse(429, 'Rate limit exceeded: max 10 registrations per hour per identity.', requestOrigin);
+  }
+
+  // ── Action routing: rotate path (CR-H — old key hands the record over) ──
+  if (action === 'rotate') {
+    const rotateBody = body as { username?: string; domain?: string; successor_pubkey?: string };
+    const username = (rotateBody.username || '').trim().toLowerCase();
+    const successor = (rotateBody.successor_pubkey || '').trim().toLowerCase();
+    const domain = ((rotateBody.domain || '').trim().toLowerCase()) || NIP05_DOMAIN;
+
+    if (!username || !/^[0-9a-f]{64}$/.test(successor)) {
+      return errorResponse(400, 'rotate requires username and 64-hex successor_pubkey', requestOrigin);
+    }
+    if (!DOMAIN_REGEX.test(domain) || !ALLOWED_NIP05_DOMAINS.has(domain)) {
+      return errorResponse(403, `Domain not whitelisted: ${domain}`, requestOrigin);
+    }
+    // Self-rotation is a no-op and almost certainly a client bug.
+    if (successor === pubkey) {
+      return errorResponse(400, 'successor_pubkey must differ from the authenticating key', requestOrigin);
+    }
+
+    // Only the CURRENT owner may rotate. The record's pubkey must equal the
+    // NIP-98-authenticated (old) key.
+    const { data: owned, error: ownedErr } = await supabase
+      .from('nip05_identifiers')
+      .select('id, pubkey')
+      .eq('username', username)
+      .eq('domain', domain)
+      .eq('pubkey', pubkey)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (ownedErr) {
+      console.error('[register-identity] DB error (rotate ownership check):', ownedErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    if (!owned) {
+      // Fail closed: do not reveal whether the username exists for someone else.
+      return errorResponse(403, 'Rotation not authorized for this identity', requestOrigin);
+    }
+
+    // Successor pubkey must not already hold an active record on this domain.
+    const { data: successorTaken, error: takenErr } = await supabase
+      .from('nip05_identifiers')
+      .select('username')
+      .eq('domain', domain)
+      .eq('pubkey', successor)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (takenErr) {
+      console.error('[register-identity] DB error (successor check):', takenErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    if (successorTaken) {
+      return errorResponse(409, 'Successor pubkey already holds an active identity', requestOrigin);
+    }
+
+    // Pointer move: same row, same address string, new pubkey.
+    const { error: rotErr } = await supabase
+      .from('nip05_identifiers')
+      .update({ pubkey: successor })
+      .eq('id', (owned as { id: string }).id);
+    if (rotErr) {
+      console.error('[register-identity] DB error (rotate update):', rotErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+
+    await recordRateLimitEvent(supabase, pubkey, clientIP);
+    console.log('[register-identity] rotated', { username, domain });
+    return {
+      statusCode: 200,
+      headers: {
+        ...corsHeaders(requestOrigin),
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      },
+      body: JSON.stringify({ success: true, nip05: `${username}@${domain}`, rotated_to: successor }),
+    };
   }
 
   // ── Action routing: update path (owner-only mutation, no new identity) ──
