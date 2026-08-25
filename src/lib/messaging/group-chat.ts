@@ -27,6 +27,8 @@ import {
   sendGiftwrappedMessageWithCeps,
   getDefaultRelays,
 } from '../ceps/ceps-client.js';
+import { bytesToHex, hexToBytes, utf8ToBytes, bytesToUtf8, randomBytes } from '@noble/hashes/utils';
+import { getVault } from '../vault/vault.js';
 
 // ============================================================================
 // Constants
@@ -47,52 +49,68 @@ const GROUPS_STORAGE_KEY = 'satnam:groups:v2';
 // Helpers
 // ============================================================================
 
+/** CSPRNG ID generation (replaces Math.random). */
 function generateId(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+  return bytesToHex(randomBytes(16));
 }
 
 function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-function readGroupsFromStorage(): GroupThread[] {
+/**
+ * Read group threads from localStorage, decrypting under the vault master key.
+ * Plaintext group metadata and message content never touches persistent storage.
+ */
+async function readGroupsFromStorage(): Promise<GroupThread[]> {
   try {
     if (typeof localStorage === 'undefined') return [];
     const raw = localStorage.getItem(GROUPS_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as GroupThread[]) : [];
+    if (!raw) return [];
+    const vault = getVault();
+    if (!vault.isUnlocked()) return [];
+    const decrypted = await vault.decryptBytes(hexToBytes(raw));
+    return JSON.parse(bytesToUtf8(decrypted)) as GroupThread[];
   } catch {
     return [];
   }
 }
 
-function writeGroupsToStorage(groups: GroupThread[]): void {
+async function writeGroupsToStorage(groups: GroupThread[]): Promise<void> {
   try {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(groups));
+    const vault = getVault();
+    if (!vault.isUnlocked()) return; // drop writes while locked rather than store plaintext
+    const encrypted = await vault.encryptBytes(utf8ToBytes(JSON.stringify(groups)));
+    localStorage.setItem(GROUPS_STORAGE_KEY, bytesToHex(encrypted));
   } catch {
     // Ignore quota errors in storage
   }
 }
 
-function readMessagesFromStorage(groupId: string): Message[] {
+async function readMessagesFromStorage(groupId: string): Promise<Message[]> {
   try {
     if (typeof localStorage === 'undefined') return [];
     const key = `satnam:group:msgs:${groupId}`;
     const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as Message[]) : [];
+    if (!raw) return [];
+    const vault = getVault();
+    if (!vault.isUnlocked()) return [];
+    const decrypted = await vault.decryptBytes(hexToBytes(raw));
+    return JSON.parse(bytesToUtf8(decrypted)) as Message[];
   } catch {
     return [];
   }
 }
 
-function writeMessagesToStorage(groupId: string, messages: Message[]): void {
+async function writeMessagesToStorage(groupId: string, messages: Message[]): Promise<void> {
   try {
     if (typeof localStorage === 'undefined') return;
+    const vault = getVault();
+    if (!vault.isUnlocked()) return; // drop writes while locked rather than store plaintext
     const key = `satnam:group:msgs:${groupId}`;
-    localStorage.setItem(key, JSON.stringify(messages));
+    const encrypted = await vault.encryptBytes(utf8ToBytes(JSON.stringify(messages)));
+    localStorage.setItem(key, bytesToHex(encrypted));
   } catch {
     // Ignore quota errors
   }
@@ -179,9 +197,9 @@ export class GroupChatManager {
     };
 
     // Persist locally
-    const groups = readGroupsFromStorage();
+    const groups = await readGroupsFromStorage();
     groups.push(thread);
-    writeGroupsToStorage(groups);
+    await writeGroupsToStorage(groups);
 
     return thread;
   }
@@ -249,12 +267,12 @@ export class GroupChatManager {
     };
 
     // Persist to local message store
-    const messages = readMessagesFromStorage(groupId);
+    const messages = await readMessagesFromStorage(groupId);
     messages.push(message);
-    writeMessagesToStorage(groupId, messages);
+    await writeMessagesToStorage(groupId, messages);
 
     // Update thread metadata
-    this._updateThreadLastActivity(groupId, now, content);
+    await this._updateThreadLastActivity(groupId, now, content);
 
     return message;
   }
@@ -310,7 +328,7 @@ export class GroupChatManager {
       groupId,
     );
 
-    this._updateGroupConfig(groupId, updatedConfig);
+    await this._updateGroupConfig(groupId, updatedConfig);
   }
 
   // --------------------------------------------------------------------------
@@ -355,7 +373,7 @@ export class GroupChatManager {
       groupId,
     );
 
-    this._updateGroupConfig(groupId, updatedConfig);
+    await this._updateGroupConfig(groupId, updatedConfig);
   }
 
   // --------------------------------------------------------------------------
@@ -397,7 +415,7 @@ export class GroupChatManager {
       groupId,
     );
 
-    this._updateGroupConfig(groupId, updatedConfig);
+    await this._updateGroupConfig(groupId, updatedConfig);
   }
 
   // --------------------------------------------------------------------------
@@ -435,8 +453,8 @@ export class GroupChatManager {
     );
 
     // Remove from local storage
-    const groups = readGroupsFromStorage().filter((g) => g.groupId !== groupId);
-    writeGroupsToStorage(groups);
+    const groups = (await readGroupsFromStorage()).filter((g) => g.groupId !== groupId);
+    await writeGroupsToStorage(groups);
   }
 
   // --------------------------------------------------------------------------
@@ -456,7 +474,7 @@ export class GroupChatManager {
     since?: number,
     until?: number,
   ): Promise<Message[]> {
-    let messages = readMessagesFromStorage(groupId);
+    let messages = await readMessagesFromStorage(groupId);
 
     // Filter out expired messages
     const now = nowUnix();
@@ -482,7 +500,7 @@ export class GroupChatManager {
    * List all locally known group threads, sorted by lastActivity descending.
    */
   async listGroups(): Promise<GroupThread[]> {
-    const groups = readGroupsFromStorage();
+    const groups = await readGroupsFromStorage();
     return groups.sort((a, b) => b.lastActivity - a.lastActivity);
   }
 
@@ -491,7 +509,7 @@ export class GroupChatManager {
   // --------------------------------------------------------------------------
 
   async getGroup(groupId: string): Promise<GroupThread | undefined> {
-    const groups = readGroupsFromStorage();
+    const groups = await readGroupsFromStorage();
     return groups.find((g) => g.groupId === groupId);
   }
 
@@ -550,24 +568,24 @@ export class GroupChatManager {
   }
 
   /** Merge updated config into the locally cached GroupThread */
-  private _updateGroupConfig(groupId: string, config: GroupConfig): void {
-    const groups = readGroupsFromStorage();
+  private async _updateGroupConfig(groupId: string, config: GroupConfig): Promise<void> {
+    const groups = await readGroupsFromStorage();
     const idx = groups.findIndex((g) => g.groupId === groupId);
     if (idx >= 0) {
       const existing = groups[idx]!;
       const updated: GroupThread = { ...existing, config };
       groups[idx] = updated;
-      writeGroupsToStorage(groups);
+      await writeGroupsToStorage(groups);
     }
   }
 
   /** Update lastActivity and lastMessagePreview on a GroupThread */
-  private _updateThreadLastActivity(
+  private async _updateThreadLastActivity(
     groupId: string,
     timestamp: number,
     preview: string,
-  ): void {
-    const groups = readGroupsFromStorage();
+  ): Promise<void> {
+    const groups = await readGroupsFromStorage();
     const idx = groups.findIndex((g) => g.groupId === groupId);
     if (idx >= 0) {
       const existing = groups[idx]!;
@@ -577,7 +595,7 @@ export class GroupChatManager {
         lastMessagePreview: preview.slice(0, 100),
       };
       groups[idx] = updated;
-      writeGroupsToStorage(groups);
+      await writeGroupsToStorage(groups);
     }
   }
 }

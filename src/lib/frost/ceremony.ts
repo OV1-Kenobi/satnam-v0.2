@@ -112,6 +112,18 @@ interface BifrostSigning {
 }
 
 /**
+ * Module-level cache for the bifrost dealer output. The trusted-dealer model
+ * produces the group + all shares in a single generate_dealer_package call,
+ * but our round-based DKG interface splits that across round1/round2/finalize.
+ * The cache bridges that gap within one ceremony.
+ * @internal
+ */
+let _bifrostDealerCache: {
+  group: { group_pk: string; threshold: number; members: unknown[] } | null;
+  shares: { idx: number; seckey: string }[] | null;
+} | null = null;
+
+/**
  * Attempt to load the @frostr/bifrost package.
  * Returns null if not available — callers degrade gracefully.
  *
@@ -133,53 +145,86 @@ async function loadBifrost(): Promise<{
     // coordination-layer contracts used by the DKG ceremony. They are
     // implemented by adapting the @frostr/bifrost dealer-keygen + node API.
     //
-    // @frostr/bifrost uses a trusted-dealer DKG model (generate_dealer_pkg),
+    // @frostr/bifrost uses a trusted-dealer DKG model (generate_dealer_package),
     // not a round-based interactive DKG. The BifrostDkg interface abstracts
-    // over this: generateRound1Package delegates to generate_dealer_pkg,
+    // over this: generateRound1Package delegates to generate_dealer_package,
     // while round 2 distributes the resulting shares via NIP-17 messages.
-      const libLib = await import('@frostr/bifrost/lib');
+    //
+    // Actual @frostr/bifrost ^2.0.2 API surface (verified against node_modules):
+    //   generate_dealer_package(threshold, members) → {
+    //     group:  { group_pk: hex, threshold: number, members: [...] }
+    //     shares: { idx: number, seckey: hex }[]
+    //   }
+    const libLib = await import('@frostr/bifrost/lib');
+
+    interface BifrostGroup { group_pk: string; threshold: number; members: unknown[] }
+    interface BifrostShare { idx: number; seckey: string }
+    const bifLib = libLib as unknown as {
+      generate_dealer_package: (threshold: number, members: number) => {
+        group: BifrostGroup;
+        shares: BifrostShare[];
+      };
+    };
+    if (typeof bifLib.generate_dealer_package !== 'function') {
+      throw new Error('bifrost: generate_dealer_package export not found');
+    }
+
+    // Module-level dealer output cache: generate_dealer_package produces the
+    // group + all shares in one call, so we cache the result between the
+    // round1/round2/finalize calls within a single ceremony. loadBifrost() is
+    // invoked per ceremony function, so the cache must live at module scope.
+    if (!_bifrostDealerCache) {
+      _bifrostDealerCache = { group: null, shares: null };
+    }
+    const dealerCache = _bifrostDealerCache;
 
     // Adapter: map bifrost dealer API to our BifrostDkg interface
     const dkgAdapter: BifrostDkg = {
       generateRound1Package(participantIndex, threshold, totalShares) {
         // Dealer-keygen: generate a new group + shares for the given parameters.
-        // The calling node acts as the trusted dealer in the first round.
-        const bifLib = libLib as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
-        const generateDealerPkg = bifLib['generate_dealer_package'];
-        const encodeGroupPkg = bifLib['encode_group_pkg'];
-        const encodeSharePkg = bifLib['encode_share_pkg'];
-        if (!generateDealerPkg || !encodeGroupPkg || !encodeSharePkg) {
-          throw new Error('bifrost: missing required exports');
-        }
-        const { group, shares } = generateDealerPkg(threshold, totalShares) as { group: unknown; shares: unknown[] };
-        // Serialize group as commitments bytes and this participant's secret
-        const enc = new TextEncoder();
-        const commitments = enc.encode(encodeGroupPkg(group) as string);
-        const secretPackage = enc.encode(encodeSharePkg(shares[participantIndex]) as string);
+        const result = bifLib.generate_dealer_package(threshold, totalShares);
+        dealerCache.group = result.group;
+        dealerCache.shares = result.shares;
+        // Commitments = JSON of the group package (public info all participants need)
+        const commitments = utf8ToBytes(JSON.stringify(result.group));
+        // Secret package = this participant's share (idx is 1-based)
+        const myShare = result.shares[(participantIndex - 1)] ?? result.shares[0]!;
+        const secretPackage = utf8ToBytes(JSON.stringify(myShare));
         return { commitments, secretPackage };
       },
 
       processRound1Packages(_mySecretPackage, round1Packages) {
-        // In the dealer model, the dealer's secret package already encodes all
-        // share assignments. We forward each participant their share package
-        // as an encrypted share in the round-2 output.
-              const sharePackages = round1Packages.map((pkg) => ({
-          index: pkg.index,
-          encryptedShare: pkg.commitments, // commitments carry the full share for non-dealer participants
-        }));
+        // In the dealer model, every participant's "round 2 package" is their
+        // share. The dealer distributes each share to its owner; here we forward
+        // the cached shares keyed by participant index.
+        if (!dealerCache.shares) {
+          throw new Error('bifrost: DKG round1 must be called before round2');
+        }
+        const shares = dealerCache.shares;
+        const sharePackages = round1Packages.map((pkg) => {
+          const share = shares[pkg.index - 1] ?? shares[0]!;
+          return {
+            index: pkg.index,
+            encryptedShare: utf8ToBytes(JSON.stringify(share)),
+          };
+        });
         return { sharePackages, secretPackage: _mySecretPackage };
       },
 
       processRound2Packages(mySecretPackage, round2Packages) {
-        // For a non-dealer participant, their secretPackage is their encoded share.
-        // Decode the group pubkey from the received commitments (the dealer's group pkg).
+        // Decode our own share from round 2 and the group package from the cache.
         const decoder = new TextDecoder();
-        const groupPkgStr = decoder.decode(round2Packages[0]?.encryptedShare ?? mySecretPackage);
-        // Extract group pubkey as bytes (first 33 bytes of group package represent group pubkey)
-        const groupPubkey = new TextEncoder().encode(groupPkgStr.slice(0, 64)); // hex group pubkey
+        const myShare = JSON.parse(decoder.decode(mySecretPackage)) as BifrostShare;
+        void round2Packages;
+        if (!dealerCache.group) {
+          throw new Error('bifrost: DKG state lost between rounds');
+        }
+        const groupPubkey = hexToBytes(dealerCache.group.group_pk.slice(0, 64));
+        const shareSecret = hexToBytes(myShare.seckey);
+        const publicShare = secp256k1.getPublicKey(shareSecret, true);
         return {
-          secretShare: mySecretPackage,
-          publicShare: round2Packages[0]?.encryptedShare ?? new Uint8Array(32),
+          secretShare: shareSecret,
+          publicShare,
           groupPubkey,
         };
       },
@@ -545,30 +590,19 @@ export async function processDkgRound1(session: DkgSession): Promise<DkgSession>
   }
 
   const bifrost = await loadBifrost();
-
-  // Generate our Round 1 commitment package
-  let commitmentBytes: Uint8Array;
-
-  if (bifrost) {
-    // Use @frostr/bifrost for cryptographic correctness
-    try {
-      // Participant index is 1-based; determined by our position in the participants array
-      const participantIndex = 1; // caller sets this based on their pubkey position
-      const { commitments } = bifrost.dkg.generateRound1Package(
-        participantIndex,
-        session.threshold,
-        session.totalShares,
-      );
-      commitmentBytes = commitments;
-    } catch {
-      // Fall through to simulation
-      commitmentBytes = randomBytes(64);
-    }
-  } else {
-    // Simulation: generate random 64-byte commitment (not cryptographically valid FROST,
-    // but allows state machine testing without the package)
-    commitmentBytes = randomBytes(64);
+  if (!bifrost) {
+    throw frostErr(FrostError.BifrostUnavailable);
   }
+
+  // Generate our Round 1 commitment package using @frostr/bifrost
+  // Participant index is 1-based; determined by our position in the participants array
+  const participantIndex = 1; // caller sets this based on their pubkey position
+  const { commitments } = bifrost.dkg.generateRound1Package(
+    participantIndex,
+    session.threshold,
+    session.totalShares,
+  );
+  const commitmentBytes = commitments;
 
   const updated: DkgSession = {
     ...session,
@@ -602,23 +636,35 @@ export async function processDkgRound2(session: DkgSession): Promise<DkgSession>
     throw new Error(`processDkgRound2: invalid state ${session.state}`);
   }
 
-  // In a full implementation:
-  // 1. Call bifrost.dkg.processRound1Packages(mySecretPackage, allRound1Packages)
-  // 2. Encrypt each resulting sharePackage to the corresponding participant (NIP-44)
-  // 3. Publish to coordinator relay
-  //
-  // Here we simulate successful round-2 package generation
+  const bifrost = await loadBifrost();
+  if (!bifrost) {
+    throw frostErr(FrostError.BifrostUnavailable);
+  }
+
+  // Call bifrost.dkg.processRound1Packages(mySecretPackage, allRound1Packages)
+  // to derive our round-2 share packages. In the trusted-dealer model, the
+  // dealer holds all shares after round 1 and distributes them in round 2, so
+  // we request packages for every participant slot.
+  const mySecretPackage = new Uint8Array(32);
+  const allParticipantSlots = Array.from({ length: session.totalShares }, (_, i) => ({
+    index: i + 1,
+    commitments: session.round1Commitments.get(session.participants[i] ?? 'self') ?? new Uint8Array(64),
+  }));
+  const { sharePackages } = bifrost.dkg.processRound1Packages(
+    mySecretPackage,
+    allParticipantSlots,
+  );
+
   const updated: DkgSession = {
     ...session,
     state: 'round2_collecting',
     round2Shares: new Map(session.round2Shares),
   };
 
-  // Simulate receiving our own round-2 share
-  if (session.participants.length > 0) {
-    updated.round2Shares.set(session.participants[0] ?? 'self', randomBytes(64));
-  } else {
-    updated.round2Shares.set('self', randomBytes(64));
+  // Store every participant's round-2 share package (encrypted share)
+  for (const pkg of sharePackages) {
+    const participantKey = session.participants[pkg.index - 1] ?? `participant-${pkg.index}`;
+    updated.round2Shares.set(participantKey, pkg.encryptedShare);
   }
 
   return updated;
@@ -648,53 +694,34 @@ export async function finalizeDkg(session: DkgSession): Promise<{
   }
 
   const bifrost = await loadBifrost();
-
-  // Determine the group public key
-  let groupPubkeyHex: string;
-  let secretShareHex: string;
-  let publicShareHex: string;
-  let shareIndex: number;
-
-  if (bifrost && session.round2Shares.size >= session.totalShares) {
-    // Use @frostr/bifrost to derive the final share and group pubkey
-    try {
-      const round2Packages = Array.from(session.round2Shares.entries()).map(
-        ([_pubkey, pkg], i) => ({ index: i + 1, encryptedShare: pkg }),
-      );
-
-      // We need the secret package from round 2 processing — in production this
-      // is held transiently in memory between processDkgRound2 and finalizeDkg
-      const result = bifrost.dkg.processRound2Packages(
-        new Uint8Array(32), // placeholder secretPackage (held in memory in real impl)
-        round2Packages,
-      );
-
-      groupPubkeyHex = bytesToHex(result.groupPubkey);
-      secretShareHex = bytesToHex(result.secretShare);
-      publicShareHex = bytesToHex(result.publicShare);
-      shareIndex = 1;
-    } catch {
-      // Fall through to simulation
-      groupPubkeyHex = bytesToHex(randomBytes(32));
-      secretShareHex = bytesToHex(randomBytes(32));
-      publicShareHex = bytesToHex(secp256k1.getPublicKey(randomBytes(32), true));
-      shareIndex = 1;
-    }
-  } else {
-    // Simulation: generate random keys for the group.
-    // These are ephemeral — used only for state-machine tests without @frostr/bifrost.
-    // SECURITY: never derive keys from predictable seeds (session IDs, group IDs, etc.)
-    const groupPrivkey = randomBytes(32);
-    const groupPubkeyCompressed = secp256k1.getPublicKey(groupPrivkey, true);
-    groupPubkeyHex = bytesToHex(groupPubkeyCompressed.slice(1)); // x-coord as group pubkey
-
-    const shareSecret = randomBytes(32);
-    secretShareHex = bytesToHex(shareSecret);
-    publicShareHex = bytesToHex(secp256k1.getPublicKey(shareSecret, true));
-    shareIndex = 1;
-
-    void groupPrivkey; // consumed above
+  if (!bifrost) {
+    throw frostErr(FrostError.BifrostUnavailable);
   }
+
+  if (session.round2Shares.size < session.totalShares) {
+    throw frostErr(FrostError.InsufficientParticipants);
+  }
+
+  // Determine the group public key using @frostr/bifrost.
+  // In the trusted-dealer model the dealer's round-2 output for participant 1
+  // (this node, acting as dealer/coordinator) is that participant's own share
+  // package — use it as the secret package for finalization.
+  const round2Packages = Array.from(session.round2Shares.entries()).map(
+    ([_pubkey, pkg], i) => ({ index: i + 1, encryptedShare: pkg }),
+  );
+  const mySharePackage = session.round2Shares.get(session.participants[0] ?? 'self')
+    ?? round2Packages[0]?.encryptedShare
+    ?? new Uint8Array(32);
+
+  const result = bifrost.dkg.processRound2Packages(
+    mySharePackage,
+    round2Packages,
+  );
+
+  const groupPubkeyHex = bytesToHex(result.groupPubkey);
+  const secretShareHex = bytesToHex(result.secretShare);
+  const publicShareHex = bytesToHex(result.publicShare);
+  const shareIndex = 1;
 
   const now = Math.floor(Date.now() / 1000);
 

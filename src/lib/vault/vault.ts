@@ -652,10 +652,11 @@ export class Vault implements VaultOps {
       const encryptedMasterKey = encryptMasterKey(wrappingKey, masterKey);
       await storage.write(`${this.config.vaultRoot}/master.key`, encryptedMasterKey);
 
-      // Store wrapping key metadata
+      // Store wrapping key metadata — NEVER the credential itself.
+      // For WebAuthn, only the public credential ID is stored (not the PRF output).
       const meta: WrappingKeyMeta = {
         method,
-        credential: method === 'passphrase' ? '' : bytesToHex(credential as Uint8Array),
+        credentialId: '',
         argon2Params:
           method === 'passphrase'
             ? { m: ARGON2_PARAMS.m, t: ARGON2_PARAMS.t, p: ARGON2_PARAMS.p, keyLen: MASTER_KEY_LEN }
@@ -1032,12 +1033,13 @@ export class Vault implements VaultOps {
 
     const storage = await this.getStorage();
 
-    // Collect all vault entries as plaintext (after decrypting with master key)
-    // We re-encrypt them under the master key again in the backup for consistency.
-    // The backup payload is encrypted under the MASTER KEY so the blob is opaque.
-    // The encryptedMasterKey field (AES-GCM under wrapping key) is embedded so the
-    // restore path can derive the master key from just the passphrase + salt.
+    // Read the encrypted master key blob (AES-GCM under wrapping key).
+    // This is prepended to the backup so the restore path can recover the
+    // master key from just the passphrase (fresh-device restore).
     const encryptedMasterKeyBlob = await storage.read(`${this.config.vaultRoot}/master.key`);
+    if (!encryptedMasterKeyBlob) {
+      throw vaultErr(VaultError.DecryptionFailed);
+    }
 
     // Collect all vault entries (already-encrypted blobs stored as hex)
     const entries: Record<string, string> = {};
@@ -1058,74 +1060,70 @@ export class Vault implements VaultOps {
       }
     }
 
+    // Include the wrapping salt so a fresh device can derive the wrapping key
+    // from the passphrase. The salt is not secret — it exists to prevent
+    // precomputation attacks on the passphrase KDF.
+    const salt = await storage.read(`${this.config.vaultRoot}/passphrase.salt`);
+
     const backupPayload = {
       version: 2,
       createdAt: new Date().toISOString(),
-      // AES-GCM(wrappingKey, masterKey) — lets restore caller recover masterKey from passphrase
-      encryptedMasterKey: encryptedMasterKeyBlob ? bytesToHex(encryptedMasterKeyBlob) : null,
+      // 32-byte argon2id salt (hex) — required for fresh-device restore.
+      // NOT secret: security comes from the passphrase, not salt secrecy.
+      salt: salt ? bytesToHex(salt) : null,
       entries,
     };
 
     const backupJson = JSON.stringify(backupPayload);
 
-    // Encrypt the outer backup envelope under the master key.
-    // On restore, the caller derives the wrapping key from their passphrase,
-    // uses it to decrypt encryptedMasterKey, and then decrypts this outer envelope.
-    return encryptEntry(masterKey, utf8ToBytes(backupJson));
+    // Encrypt the payload under the master key.
+    const payloadCiphertext = encryptEntry(masterKey, utf8ToBytes(backupJson));
+
+    // Build the final backup envelope:
+    //   [4-byte LE encMKLen][encryptedMasterKeyBlob][payloadCiphertext]
+    // This allows the restore path to decrypt the master key using only the
+    // wrapping key (derived from passphrase), without already having the vault unlocked.
+    const encMKLen = encryptedMasterKeyBlob.length;
+    const header = new Uint8Array(4);
+    new DataView(header.buffer).setUint32(0, encMKLen, true); // little-endian
+
+    const backup = new Uint8Array(4 + encMKLen + payloadCiphertext.length);
+    backup.set(header, 0);
+    backup.set(encryptedMasterKeyBlob, 4);
+    backup.set(payloadCiphertext, 4 + encMKLen);
+
+    return backup;
   }
 
   /** @inheritdoc */
-  async importEncryptedBackup(data: Uint8Array, wrappingKey: Uint8Array): Promise<void> {
-    // Backup restore protocol:
+  async importEncryptedBackup(data: Uint8Array, wrappingKey?: Uint8Array): Promise<void> {
+    // Backup format (v2): [4-byte LE encMKLen][encryptedMasterKey][xchacha20poly1305(masterKey, JSON(entries))]
     //
-    // The backup blob structure is:
-    //   xchacha20poly1305(masterKey, JSON({
-    //     version: 2,
-    //     encryptedMasterKey: hex(AES-GCM(wrappingKey, masterKey)),
-    //     entries: { '<dir/file>': hex(xchacha20poly1305(masterKey, plaintext)) }
-    //   }))
-    //
-    // Restore sequence:
-    // 1. The provided wrappingKey is argon2id(passphrase, originalSalt).
-    //    We don't have the salt yet — but if the vault already exists on this device,
-    //    we can read master.key from storage and decrypt it with wrappingKey to get masterKey.
-    //
-    // 2. If this is a fresh device (no existing vault), we need the masterKey from the backup.
-    //    But the masterKey is INSIDE the backup (which is encrypted by masterKey) — catch-22.
-    //
-    // Resolution for fresh-device restore:
-    // The backup blob has a 4-byte little-endian prefix indicating the length of the
-    // encryptedMasterKey blob, followed by the encryptedMasterKey, followed by the
-    // xchacha20poly1305(masterKey, payload) envelope.
-    //
-    // This allows the restore to:
-    // 1. Read encryptedMasterKey prefix (without masterKey)
-    // 2. Decrypt encryptedMasterKey using wrappingKey (AES-GCM)
-    // 3. Use masterKey to decrypt the payload envelope
-    //
-    // Format: [4-byte LE encMKLen][encryptedMasterKeyBytes][xchacha(masterKey, JSON)]
-    //
-    // However, for compatibility with the simple exportEncryptedBackup() format,
-    // we try two strategies:
-    // Strategy A: current vault is unlocked — use this.masterKey directly.
-    // Strategy B: derive masterKey using wrappingKey + master.key from storage.
-    // Strategy C: no vault exists — fail with DecryptionFailed.
+    // Strategy A (vault unlocked): use in-memory master key to decrypt payload.
+    //   The wrappingKey is ignored in this path.
+    // Strategy B (vault locked, fresh device): parse the prefix to extract the
+    //   encrypted master key, decrypt it with the provided wrappingKey, then
+    //   use the recovered master key to decrypt the payload.
 
     let masterKey: Uint8Array | null = null;
 
     // Strategy A: vault is already unlocked
     if (this.masterKey) {
       masterKey = this.masterKey;
-    } else {
-      // Strategy B: use wrapping key to decrypt master.key from storage
-      const storage0 = await this.getStorage();
-      const storedEncMK = await storage0.read(`${this.config.vaultRoot}/master.key`);
-      if (storedEncMK) {
-        try {
-          masterKey = decryptMasterKey(wrappingKey, storedEncMK);
-        } catch {
-          masterKey = null;
-        }
+    } else if (wrappingKey) {
+      // Strategy B: parse the prefix to get the encrypted master key
+      if (data.length < 4) {
+        throw vaultErr(VaultError.DecryptionFailed);
+      }
+      const encMKLen = new DataView(data.buffer, data.byteOffset, 4).getUint32(0, true);
+      if (data.length < 4 + encMKLen) {
+        throw vaultErr(VaultError.DecryptionFailed);
+      }
+      const encryptedMasterKeyBlob = data.slice(4, 4 + encMKLen);
+      try {
+        masterKey = decryptMasterKey(wrappingKey, encryptedMasterKeyBlob);
+      } catch {
+        throw vaultErr(VaultError.DecryptionFailed);
       }
     }
 
@@ -1133,9 +1131,13 @@ export class Vault implements VaultOps {
       throw vaultErr(VaultError.DecryptionFailed);
     }
 
+    // Decrypt the payload envelope
+    const encMKLen = new DataView(data.buffer, data.byteOffset, 4).getUint32(0, true);
+    const payloadCiphertext = data.slice(4 + encMKLen);
+
     let backupJson: string;
     try {
-      const plaintext = decryptEntry(masterKey, data);
+      const plaintext = decryptEntry(masterKey, payloadCiphertext);
       backupJson = bytesToUtf8(plaintext);
     } catch {
       throw vaultErr(VaultError.DecryptionFailed);
@@ -1144,7 +1146,7 @@ export class Vault implements VaultOps {
     const backup = JSON.parse(backupJson) as {
       version: number;
       createdAt: string;
-      encryptedMasterKey: string | null;
+      salt: string | null;
       entries: Record<string, string>;
     };
 
@@ -1154,13 +1156,19 @@ export class Vault implements VaultOps {
 
     const storage = await this.getStorage();
 
-    // Restore the encrypted master key blob so the vault can be unlocked later
-    if (backup.encryptedMasterKey) {
+    // Restore the passphrase salt so unlock() on this device derives the same
+    // wrapping key as the original device. Without this, the fresh device would
+    // generate a new random salt and be unable to decrypt master.key.
+    if (backup.salt) {
       await storage.write(
-        `${this.config.vaultRoot}/master.key`,
-        hexToBytes(backup.encryptedMasterKey),
+        `${this.config.vaultRoot}/passphrase.salt`,
+        hexToBytes(backup.salt),
       );
     }
+
+    // Restore the encrypted master key blob so the vault can be unlocked later
+    const encryptedMasterKeyBlob = data.slice(4, 4 + encMKLen);
+    await storage.write(`${this.config.vaultRoot}/master.key`, encryptedMasterKeyBlob);
 
     // Restore all entries (already-encrypted blobs under original master key)
     for (const [relativePath, hexData] of Object.entries(backup.entries)) {
@@ -1213,6 +1221,54 @@ export class Vault implements VaultOps {
   async getSecondFactor(): Promise<VaultSecondFactor> {
     const s = await this.getVaultSettings();
     return s.secondFactor;
+  }
+
+  // -------------------------------------------------------------------------
+  // FROST manifest
+  // -------------------------------------------------------------------------
+
+  /** @inheritdoc */
+  async storeFrostManifest(groupPubkeys: string[]): Promise<void> {
+    const key = this.requireUnlocked();
+    this.resetIdleTimer();
+    await this.writeEncrypted(
+      key,
+      this.path('frost', 'manifest.json'),
+      utf8ToBytes(JSON.stringify(groupPubkeys)),
+    );
+  }
+
+  /** @inheritdoc */
+  async getFrostManifest(): Promise<string[]> {
+    const key = this.requireUnlocked();
+    this.resetIdleTimer();
+    try {
+      const plaintext = await this.readDecrypted(key, this.path('frost', 'manifest.json'));
+      return JSON.parse(bytesToUtf8(plaintext)) as string[];
+    } catch (err) {
+      if (err instanceof Error && err.message === VaultError.IdentityNotFound) {
+        return [];
+      }
+      throw err;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Generic encryption helpers
+  // -------------------------------------------------------------------------
+
+  /** @inheritdoc */
+  async encryptBytes(plaintext: Uint8Array): Promise<Uint8Array> {
+    const key = this.requireUnlocked();
+    this.resetIdleTimer();
+    return encryptEntry(key, plaintext);
+  }
+
+  /** @inheritdoc */
+  async decryptBytes(data: Uint8Array): Promise<Uint8Array> {
+    const key = this.requireUnlocked();
+    this.resetIdleTimer();
+    return decryptEntry(key, data);
   }
 }
 

@@ -105,11 +105,9 @@ export class FrostClient {
    * @param config - FROST protocol configuration
    */
   constructor(
-    _vault: Vault,
+    private readonly vault: Vault,
     private readonly config: FrostConfig = DEFAULT_FROST_CONFIG,
-  ) {
-    void _vault; // vault is held for future direct vault operations
-  }
+  ) {}
 
   // -------------------------------------------------------------------------
   // Group Creation (Guardian only)
@@ -451,14 +449,25 @@ export class FrostClient {
    * should be published to a relay for disaster recovery. Only the participant's
    * nsec can decrypt the backup.
    *
+   * The participant's nsec is retrieved from the vault (first identity) and
+   * used transiently for encryption and signing. It is zeroed after use.
+   *
    * @param groupPubkey - Hex-encoded group public key
-   * @param userPubkey - Hex-encoded user public key (for event authorship)
-   * @returns The unsigned NostrEvent (call your relay publisher to broadcast it)
+   * @returns The signed NostrEvent (call your relay publisher to broadcast it)
    * @throws {FrostError.ShareNotFound} if no share exists for this group
    * @throws {VaultError.VaultLocked} if vault is locked
    */
-  async backupShare(groupPubkey: string, userPubkey: string): Promise<NostrEvent> {
-    return createShareBackupEvent(groupPubkey, userPubkey);
+  async backupShare(groupPubkey: string): Promise<NostrEvent> {
+    const identities = await this.vault.listIdentities();
+    if (identities.length === 0) {
+      throw new Error('[FrostClient] No identities in vault — unlock vault before backup');
+    }
+    const userNsec = await this.vault.getNsec(identities[0]!);
+    try {
+      return await createShareBackupEvent(groupPubkey, userNsec);
+    } finally {
+      userNsec.fill(0);
+    }
   }
 
   /**
@@ -468,13 +477,21 @@ export class FrostClient {
    * participant's nsec, and stores the recovered share in the OPFS Vault.
    *
    * @param event - The kind:10000 backup event from a relay
-   * @param userNsec - Hex-encoded 32-byte user secret key (for NIP-44 decryption)
    * @throws {FrostError.InvalidBackup} if the event format is invalid
    * @throws {FrostError.EncryptionFailed} if NIP-44 decryption fails
    * @throws {VaultError.VaultLocked} if vault is locked
    */
-  async restoreShare(event: NostrEvent, userNsec: string): Promise<void> {
-    await restoreShareFromBackup(event, userNsec);
+  async restoreShare(event: NostrEvent): Promise<void> {
+    const identities = await this.vault.listIdentities();
+    if (identities.length === 0) {
+      throw new Error('[FrostClient] No identities in vault — unlock vault before restore');
+    }
+    const userNsec = await this.vault.getNsec(identities[0]!);
+    try {
+      await restoreShareFromBackup(event, userNsec);
+    } finally {
+      userNsec.fill(0);
+    }
   }
 
   // -------------------------------------------------------------------------

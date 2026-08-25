@@ -222,6 +222,29 @@ jobs:
           echo "S12 PASSED — CSP does not include unsafe-eval"
           echo "::endgroup::"
 
+      # S13 — Wrapping-key material must never be persisted in wrapping.meta
+      - name: "S13: No persisted wrapping-key credential in vault"
+        run: |
+          echo "::group::S13 — wrapping.meta must not persist the wrapping key/PRF output"
+          # The WrappingKeyMeta interface must use credentialId (public identifier),
+          # never 'credential' (which would hold the raw PRF/PinGate bytes).
+          MATCHES=$(grep -rn \
+            --include="*.ts" \
+            -E 'credential:\s*method ===|credential:.*bytesToHex\(credential' \
+            src/lib/vault/ || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::S13 FAILED — wrapping key persisted to wrapping.meta:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          # Verify the field is named credentialId in the type definition
+          if ! grep -q 'credentialId: string' src/lib/vault/types.ts; then
+            echo "::error::S13 FAILED — WrappingKeyMeta.credentialId field missing"
+            exit 1
+          fi
+          echo "S13 PASSED — no persisted wrapping-key material"
+          echo "::endgroup::"
+
   # ── TypeScript & Tests ─────────────────────────────────────────────────────
   typecheck:
     name: TypeScript Typecheck

@@ -24,7 +24,7 @@
  * @see src/lib/vault/vault.ts — Vault storage backend
  */
 
-import { bytesToHex, hexToBytes, utf8ToBytes, bytesToUtf8, randomBytes } from '@noble/hashes/utils';
+import { bytesToHex, utf8ToBytes, bytesToUtf8, randomBytes } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 
@@ -207,32 +207,13 @@ export async function retrieveBfShare(groupPubkey: string): Promise<BfShare | nu
 export async function listGroups(): Promise<BfProfile[]> {
   const vault = getVault();
 
-  // The vault's list() method returns filenames within the frost/ directory.
-  // We call getBfprofile() for each .bfprofile entry.
-  // Access the underlying storage list via vault's identity listing pattern.
+  // Use the dedicated FROST manifest vault entry (vault/frost/manifest.json).
+  // This replaces the previous workaround that stored the manifest in the
+  // identities namespace via storeNsec('frost-manifest', ...).
   const profiles: BfProfile[] = [];
 
-  // We need to enumerate frost/*.bfprofile files. The Vault doesn't expose a
-  // generic list() for frost entries, so we use a private access approach:
-  // attempt to read identities (which uses the same backend) and pattern-match.
-  // However, since we can't access the vault's private storage backend directly,
-  // we rely on the fact that identities listed via the vault's public API have
-  // a naming convention. Instead, we track group pubkeys via a separate manifest
-  // stored as a bfprofile with a well-known key.
-  //
-  // Better approach: the Vault's OPFS backend `list('satnam/vault/frost')` would
-  // return all frost files. Since getBfprofile/getBfshare exist as the public API,
-  // we store a group manifest separately as a "directory" bfprofile entry.
-  //
-  // For v2, we store a frost group manifest as a special vault identity entry.
-  // The manifest is a JSON array of groupPubkey strings, stored via storeNsec
-  // under the key 'frost-manifest' (as a UTF-8 JSON byte array, not an actual nsec).
-  // This avoids needing direct storage access.
-
   try {
-    const manifestBytes = await vault.getNsec('frost-manifest');
-    const manifestJson = bytesToUtf8(manifestBytes);
-    const groupPubkeys = JSON.parse(manifestJson) as string[];
+    const groupPubkeys = await vault.getFrostManifest();
 
     for (const groupPubkey of groupPubkeys) {
       try {
@@ -263,15 +244,14 @@ export async function registerGroupInManifest(groupPubkey: string): Promise<void
 
   let existing: string[] = [];
   try {
-    const manifestBytes = await vault.getNsec('frost-manifest');
-    existing = JSON.parse(bytesToUtf8(manifestBytes)) as string[];
+    existing = await vault.getFrostManifest();
   } catch {
     // No manifest yet — start fresh
   }
 
   if (!existing.includes(groupPubkey)) {
     existing.push(groupPubkey);
-    await vault.storeNsec('frost-manifest', utf8ToBytes(JSON.stringify(existing)));
+    await vault.storeFrostManifest(existing);
   }
 }
 
@@ -323,10 +303,9 @@ export async function deleteGroupData(groupPubkey: string): Promise<void> {
 
   // Remove from manifest
   try {
-    const manifestBytes = await vault.getNsec('frost-manifest');
-    const groups = JSON.parse(bytesToUtf8(manifestBytes)) as string[];
+    const groups = await vault.getFrostManifest();
     const updated = groups.filter((g) => g !== groupPubkey);
-    await vault.storeNsec('frost-manifest', utf8ToBytes(JSON.stringify(updated)));
+    await vault.storeFrostManifest(updated);
   } catch {
     // No manifest — nothing to remove
   }
@@ -354,13 +333,16 @@ export async function deleteGroupData(groupPubkey: string): Promise<void> {
  */
 export async function createShareBackupEvent(
   groupPubkey: string,
-  userPubkey: string,
+  userNsec: Uint8Array,
 ): Promise<NostrEvent> {
   // Retrieve the share from vault
   const share = await retrieveBfShare(groupPubkey);
   if (!share) {
     throw frostErr(FrostError.ShareNotFound);
   }
+
+  const userPubkeyBytes = secp256k1.getPublicKey(userNsec, true);
+  const userPubkey = bytesToHex(userPubkeyBytes.slice(1));
 
   // Serialize the share for encryption
   const shareJson = JSON.stringify(share);
@@ -370,18 +352,15 @@ export async function createShareBackupEvent(
     version: 1,
     groupPubkey,
     shareIndex: share.index,
-    encryptedShare: shareBase64, // will be further NIP-44 encrypted in content
+    encryptedShare: shareBase64,
     createdAt: Math.floor(Date.now() / 1000),
   };
 
-  // NIP-44 encryption stub: encrypt backupContent JSON to the user's own pubkey.
-  // In production this uses nip44.encrypt(senderPrivKey, recipientPubkey, plaintext).
-  // Here we produce a deterministic but opaque encoding since we don't have the
-  // user's nsec at this layer — the caller must encrypt before publishing.
-  //
-  // We produce the plaintext content here; the FrostClient.backupShare() layer
-  // applies the actual NIP-44 encryption using the vault-held nsec.
-  const plaintextContent = JSON.stringify(backupContent);
+  // NIP-44 encrypt the backup content to the user's own pubkey (self-encryption).
+  // This ensures the backup is decryptable only by the user's nsec.
+  const { nip44, finalizeEvent } = await import('nostr-tools');
+  const conversationKey = nip44.getConversationKey(userNsec, userPubkey);
+  const ciphertext = nip44.encrypt(JSON.stringify(backupContent), conversationKey);
 
   const created_at = Math.floor(Date.now() / 1000);
   const kind = 10000;
@@ -390,19 +369,18 @@ export async function createShareBackupEvent(
     ['group', groupPubkey],
   ];
 
-  // Compute NIP-01 event ID over the plaintext (caller replaces content with
-  // NIP-44 ciphertext and recomputes ID before signing)
-  const eventId = computeEventId(userPubkey, created_at, kind, tags, plaintextContent);
+  // Sign the event with the user's nsec
+  const signed = finalizeEvent(
+    {
+      kind,
+      created_at,
+      tags,
+      content: ciphertext,
+    },
+    userNsec,
+  );
 
-  return {
-    id: eventId,
-    kind,
-    pubkey: userPubkey,
-    created_at,
-    tags,
-    content: plaintextContent,
-    sig: '', // Unsigned — caller signs with their nsec
-  };
+  return signed as NostrEvent;
 }
 
 /**
@@ -418,7 +396,7 @@ export async function createShareBackupEvent(
  * @throws {FrostError.EncryptionFailed} if NIP-44 decryption fails
  * @throws {VaultError.VaultLocked} if vault is locked
  */
-export async function restoreShareFromBackup(event: NostrEvent, userNsec: string): Promise<BfShare> {
+export async function restoreShareFromBackup(event: NostrEvent, userNsec: Uint8Array): Promise<BfShare> {
   // Validate event format
   if (event.kind !== 10000) {
     throw frostErr(FrostError.InvalidBackup);
@@ -434,58 +412,24 @@ export async function restoreShareFromBackup(event: NostrEvent, userNsec: string
     throw frostErr(FrostError.InvalidBackup);
   }
 
-  // Decrypt the content.
-  // If content is NIP-44 encrypted: decrypt using userNsec + event.pubkey.
-  // If content is plaintext JSON (direct backup format): parse directly.
+  // Decrypt the content using NIP-44 (self-encryption: conversation key with own pubkey)
+  const userPubkeyBytes = secp256k1.getPublicKey(userNsec, true);
+  const userPubkeyHex = bytesToHex(userPubkeyBytes.slice(1));
+
   let backupContent: ShareBackupContent;
   try {
-    // Attempt to parse as plaintext JSON first (for backups created by createShareBackupEvent
-    // before the client applies NIP-44 encryption layer)
-    const parsed = JSON.parse(event.content) as ShareBackupContent;
-    if (parsed.version !== 1 || !parsed.encryptedShare) {
-      throw new Error('invalid-format');
-    }
-    backupContent = parsed;
+    const { nip44 } = await import('nostr-tools');
+    const conversationKey = nip44.getConversationKey(userNsec, event.pubkey);
+    const decrypted = nip44.decrypt(event.content, conversationKey);
+    backupContent = JSON.parse(decrypted) as ShareBackupContent;
+    void userPubkeyHex; // pubkey derived for potential future validation
   } catch {
-    // Content may be NIP-44 encrypted — attempt decryption
-    try {
-      const nsecBytes = hexToBytes(userNsec);
-      const userPubkeyBytes = secp256k1.getPublicKey(nsecBytes, true);
-      const userPubkeyHex = bytesToHex(userPubkeyBytes.slice(1)); // 32-byte x-coordinate
+    throw frostErr(FrostError.EncryptionFailed);
+  }
 
-      // NIP-44 uses the shared secret: sha256(privkey * senderPubkey)
-      // For self-encryption: sender = receiver, so shared secret = sha256(privkey * pubkey)
-      // This is a simplified decryption — in production use nostr-tools nip44.decrypt()
-      void userPubkeyHex; // used for decryption context
-      void userNsec;
-
-      // Attempt nostr-tools NIP-44 decryption if available
-      let decrypted: string;
-      try {
-        // Dynamic import to avoid hard dependency — caller provides nostr-tools
-        const nostrTools = await import('nostr-tools');
-        if ('nip44' in nostrTools && nostrTools.nip44) {
-          type Nip44 = {
-            getConversationKey: (privkey: Uint8Array, pubkey: string) => Uint8Array;
-            decrypt: (key: Uint8Array, ciphertext: string) => string;
-          };
-          const nip44 = nostrTools.nip44 as unknown as Nip44;
-          const conversationKey = nip44.getConversationKey(hexToBytes(userNsec), event.pubkey);
-          decrypted = nip44.decrypt(conversationKey, event.content);
-        } else {
-          throw new Error('nip44-not-available');
-        }
-      } catch {
-        throw frostErr(FrostError.EncryptionFailed);
-      }
-
-      backupContent = JSON.parse(decrypted) as ShareBackupContent;
-    } catch (e) {
-      if (e instanceof Error && (e as { frostError?: FrostError }).frostError) {
-        throw e;
-      }
-      throw frostErr(FrostError.InvalidBackup);
-    }
+  // Validate share structure
+  if (backupContent.version !== 1 || !backupContent.encryptedShare) {
+    throw frostErr(FrostError.InvalidBackup);
   }
 
   // Decode the inner share

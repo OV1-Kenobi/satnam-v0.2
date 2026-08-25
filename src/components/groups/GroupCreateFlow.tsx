@@ -433,9 +433,10 @@ function StepWaiting({
         if (next >= config.totalParticipants) {
           clearInterval(interval);
           setTimeout(() => {
-            // Generate a mock group pubkey (real: DKG output)
-            onNext('02' + Array.from({ length: 64 }, () =>
-              Math.floor(Math.random() * 16).toString(16)).join(''));
+            // Generate a mock group pubkey via CSPRNG (real: DKG output)
+            const randBytes = new Uint8Array(32);
+            crypto.getRandomValues(randBytes);
+            onNext('02' + Array.from(randBytes, (b) => b.toString(16).padStart(2, '0')).join(''));
           }, 800);
         }
         return next;

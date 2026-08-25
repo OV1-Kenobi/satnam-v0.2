@@ -77,6 +77,49 @@ const localStorageMock = {
 };
 vi.stubGlobal('localStorage', localStorageMock);
 
+// Mock the vault with an always-unlocked pass-through encryption layer.
+// The vault's real encryption is exercised in vault.test.ts; here we only
+// need the storage contract (encrypt → hex → localStorage → decrypt).
+const { xchacha20poly1305 } = await import('@noble/ciphers/chacha');
+const { randomBytes, bytesToHex, utf8ToBytes } = await import('@noble/hashes/utils');
+const testVaultKey = randomBytes(32);
+
+/** Test helper: encrypt a JSON-serializable value the same way group-chat does. */
+async function encryptForStorage(value: unknown): Promise<string> {
+  const nonce = randomBytes(24);
+  const ct = xchacha20poly1305(testVaultKey, nonce).encrypt(utf8ToBytes(JSON.stringify(value)));
+  const out = new Uint8Array(24 + ct.length);
+  out.set(nonce, 0);
+  out.set(ct, 24);
+  return bytesToHex(out);
+}
+
+vi.mock('../../src/lib/vault/vault.js', async () => {
+  const vault = {
+    isUnlocked: () => true,
+    encryptBytes: async (plaintext: Uint8Array): Promise<Uint8Array> => {
+      const nonce = randomBytes(24);
+      const ct = xchacha20poly1305(testVaultKey, nonce).encrypt(plaintext);
+      const out = new Uint8Array(24 + ct.length);
+      out.set(nonce, 0);
+      out.set(ct, 24);
+      return out;
+    },
+    decryptBytes: async (data: Uint8Array): Promise<Uint8Array> => {
+      const nonce = data.slice(0, 24);
+      const ct = data.slice(24);
+      return xchacha20poly1305(testVaultKey, nonce).decrypt(ct);
+    },
+    // unused stubs
+    getNsec: async () => new Uint8Array(32),
+    storeNsec: async () => {},
+    listIdentities: async () => [],
+    lock: () => {},
+    unlock: async () => {},
+  };
+  return { getVault: () => vault, Vault: vi.fn() };
+});
+
 // Fixed pubkeys for testing
 const ALICE = 'aaaa'.repeat(16);   // 64-char hex
 const BOB   = 'bbbb'.repeat(16);
@@ -226,12 +269,11 @@ describe('GroupChatManager', () => {
 
   it('removeMember: also removes from admins list', async () => {
     const thread = await gm.createGroup('Admin Removal', [BOB]);
-    // Manually patch config to make BOB an admin for this test
-    const stored = localStorageMock.getItem('satnam:groups:v2');
-    if (stored) {
-      const groups = JSON.parse(stored);
-      groups[0].config.admins.push(BOB);
-      localStorageMock.setItem('satnam:groups:v2', JSON.stringify(groups));
+    // Manually patch config to make BOB an admin for this test (via encrypted storage)
+    const groups = await gm.listGroups();
+    if (groups.length > 0) {
+      groups[0]!.config.admins.push(BOB);
+      localStorageMock.setItem('satnam:groups:v2', await encryptForStorage(groups));
     }
 
     await gm.removeMember(thread.groupId, BOB);
@@ -267,13 +309,12 @@ describe('GroupChatManager', () => {
       burnAfterRead: false,
     });
 
-    // Patch the message to be expired
+    // Patch the message to be expired (via encrypted storage)
     const key = `satnam:group:msgs:${thread.groupId}`;
-    const raw = localStorageMock.getItem(key);
-    if (raw) {
-      const msgs = JSON.parse(raw);
-      msgs[0].expiresAt = Math.floor(Date.now() / 1000) - 1; // past
-      localStorageMock.setItem(key, JSON.stringify(msgs));
+    const msgs = await gm.getGroupMessages(thread.groupId);
+    if (msgs.length > 0) {
+      msgs[0]!.expiresAt = Math.floor(Date.now() / 1000) - 1; // past
+      localStorageMock.setItem(key, await encryptForStorage(msgs));
     }
 
     const result = await gm.getGroupMessages(thread.groupId);
@@ -296,15 +337,14 @@ describe('GroupChatManager', () => {
     // Patch Beta's lastActivity to be strictly greater than Alpha's.
     // This simulates Beta being more recently active regardless of wall-clock
     // resolution, matching the documented sort order (descending).
-    const stored = localStorageMock.getItem('satnam:groups:v2');
-    if (stored) {
-      const groups: Array<{ config: { name: string }; lastActivity: number }> = JSON.parse(stored);
-      const alpha = groups.find((g) => g.config.name === 'Alpha');
-      const beta  = groups.find((g) => g.config.name === 'Beta');
+    const storedGroups = await gm.listGroups();
+    if (storedGroups.length >= 2) {
+      const alpha = storedGroups.find((g) => g.config.name === 'Alpha');
+      const beta  = storedGroups.find((g) => g.config.name === 'Beta');
       if (alpha && beta) {
         // Ensure Beta has a strictly higher lastActivity
         beta.lastActivity = alpha.lastActivity + 1;
-        localStorageMock.setItem('satnam:groups:v2', JSON.stringify(groups));
+        localStorageMock.setItem('satnam:groups:v2', await encryptForStorage(storedGroups));
       }
     }
 

@@ -309,9 +309,8 @@ function Nip07View({ onBack, extensionName }: Nip07ViewProps): React.JSX.Element
       if (!pubkey || typeof pubkey !== 'string') {
         throw new AuthError('Extension returned no public key.');
       }
-      // Store pubkey (not nsec) in sessionStorage for the session
-      // S4 invariant: no nsec in localStorage
-      sessionStorage.setItem('satnam_session_pubkey', pubkey);
+      // S4 invariant: no nsec in localStorage. The pubkey is held in React
+      // state by the session provider — no sessionStorage write needed here.
       navigate('/dashboard');
     } catch (err) {
       setError(handleError(err));

@@ -102,7 +102,7 @@ function decodeSecretKey(nsecOrHex: string): Uint8Array {
 export class PylonAuth {
   private ws: WebSocket | null = null;
   private state: ConnectionState = 'disconnected';
-  private pendingNsec: string | null = null;
+  private pendingNsecBytes: Uint8Array | null = null;
   private readonly listeners: Set<MessageListener> = new Set();
 
   /**
@@ -145,10 +145,10 @@ export class PylonAuth {
       this.state = 'disconnected';
     }
 
-    // Retrieve nsec — either provided or from vault
-    let nsec: string;
+    // Retrieve nsec bytes — either provided (decode) or from vault
+    let nsecBytes: Uint8Array;
     if (signerNsec) {
-      nsec = signerNsec;
+      nsecBytes = decodeSecretKey(signerNsec);
     } else {
       // Fall back to the first identity in the vault (Principal)
       const identities = await this.vault.listIdentities();
@@ -156,13 +156,13 @@ export class PylonAuth {
         throw new Error('[PylonAuth] No identities found in vault — provide signerNsec or unlock vault');
       }
       const principalNpub = identities[0]!;
-      const nsecBytes = await this.vault.getNsec(principalNpub);
-      // Convert raw bytes to hex string for internal use
-      nsec = Array.from(nsecBytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      nsecBytes = await this.vault.getNsec(principalNpub);
     }
-    this.pendingNsec = nsec;
+    // Store as bytes so we can zero them on disconnect
+    if (this.pendingNsecBytes) this.pendingNsecBytes.fill(0);
+    this.pendingNsecBytes = nsecBytes;
 
-    return this._openAndAuthenticate(relayUrl, nsec);
+    return this._openAndAuthenticate(relayUrl, nsecBytes);
   }
 
   /**
@@ -181,14 +181,14 @@ export class PylonAuth {
     challenge: string,
     relayUrl: string
   ): Promise<NostrEvent> {
-    if (!this.pendingNsec) {
+    if (!this.pendingNsecBytes) {
       throw new Error('[PylonAuth] handleChallenge called without an active nsec — call connect() first');
     }
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('[PylonAuth] WebSocket is not open — cannot respond to AUTH challenge');
     }
 
-    const authEvent = this._buildAuthEvent(challenge, relayUrl, this.pendingNsec);
+    const authEvent = this._buildAuthEvent(challenge, relayUrl, this.pendingNsecBytes);
 
     // Send the AUTH response
     const message = JSON.stringify(['AUTH', authEvent]);
@@ -223,7 +223,10 @@ export class PylonAuth {
    * Clears all internal state.
    */
   disconnect(): void {
-    this.pendingNsec = null;
+    if (this.pendingNsecBytes) {
+      this.pendingNsecBytes.fill(0);
+      this.pendingNsecBytes = null;
+    }
     this.state = 'disconnected';
     this.listeners.clear();
 
@@ -247,7 +250,7 @@ export class PylonAuth {
    */
   private _openAndAuthenticate(
     relayUrl: string,
-    nsec: string
+    nsecBytes: Uint8Array
   ): Promise<WebSocket> {
     return new Promise<WebSocket>((resolve, reject) => {
       const AUTH_TIMEOUT_MS = 15_000;
@@ -291,7 +294,7 @@ export class PylonAuth {
           // Relay sent an AUTH challenge
           const challenge = msg[1] as string;
           try {
-            const authEvent = this._buildAuthEvent(challenge, relayUrl, nsec);
+            const authEvent = this._buildAuthEvent(challenge, relayUrl, nsecBytes);
             ws.send(JSON.stringify(['AUTH', authEvent]));
           } catch (err) {
             clearTimeout(timeout);
@@ -342,10 +345,8 @@ export class PylonAuth {
   private _buildAuthEvent(
     challenge: string,
     relayUrl: string,
-    nsec: string
+    secretKey: Uint8Array
   ): NostrEvent {
-    const secretKey = decodeSecretKey(nsec);
-
     const unsigned = {
       kind: NIP42_KIND,
       created_at: Math.floor(Date.now() / 1000),

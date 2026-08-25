@@ -276,11 +276,9 @@ describe('Vault PRF (WP 005)', () => {
     for (const k of keysBefore) memStore.delete(k);
     expect(Array.from(memStore.keys()).some((k) => k.includes(TEST_NPUB))).toBe(false);
 
-    // Laptop vault (we reuse same instance unlocked — Strategy A)
+    // Laptop vault (we reuse same instance unlocked — Strategy A: no wrapping key needed)
     const laptop = phone; // same process simulates unlocked vault strategy
-    const dummyWrappingKey = new Uint8Array(32).fill(0);
-    await laptop.importEncryptedBackup(backup, dummyWrappingKey);
-    dummyWrappingKey.fill(0);
+    await laptop.importEncryptedBackup(backup);
     // Zero backup buffer after use per spec
     backup.fill(0);
     expect(backup.every((b) => b === 0)).toBe(true);

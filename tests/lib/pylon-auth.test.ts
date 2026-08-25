@@ -22,6 +22,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { MockedFunction } from 'vitest';
+import { hexToBytes } from '@noble/hashes/utils';
 import { PylonAuth, PYLON_RELAY_URL } from '../../src/lib/pylon/auth.js';
 
 // ---------------------------------------------------------------------------
@@ -206,7 +207,7 @@ describe('PylonAuth', () => {
       mockWs.readyState = MockWebSocket.CLOSED;
 
       // Access private members via type casting for this edge-case test
-      (auth as any).pendingNsec = TEST_HEX_NSEC;
+      (auth as any).pendingNsecBytes = hexToBytes(TEST_HEX_NSEC);
       (auth as any).ws = mockWs;
 
       await expect(
@@ -227,14 +228,14 @@ describe('PylonAuth', () => {
       mockWs.readyState = MockWebSocket.OPEN;
       (auth as any).ws = mockWs;
       (auth as any).state = 'authenticated';
-      (auth as any).pendingNsec = TEST_HEX_NSEC;
+      (auth as any).pendingNsecBytes = hexToBytes(TEST_HEX_NSEC);
 
       auth.disconnect();
 
       expect(auth.isAuthenticated()).toBe(false);
       expect(auth.getConnectionState()).toBe('disconnected');
       expect(auth.getWebSocket()).toBeNull();
-      expect((auth as any).pendingNsec).toBeNull();
+      expect((auth as any).pendingNsecBytes).toBeNull();
     });
 
     it('handles disconnect when already disconnected (no-op)', () => {
@@ -260,7 +261,7 @@ describe('PylonAuth', () => {
       const mockWs = new MockWebSocket(PYLON_RELAY_URL);
       mockWs.readyState = MockWebSocket.OPEN;
       (auth as any).ws = mockWs;
-      (auth as any).pendingNsec = TEST_HEX_NSEC;
+      (auth as any).pendingNsecBytes = hexToBytes(TEST_HEX_NSEC);
 
       await auth.handleChallenge('my-challenge', PYLON_RELAY_URL);
 
@@ -287,7 +288,7 @@ describe('PylonAuth', () => {
       const mockWs = new MockWebSocket(PYLON_RELAY_URL);
       mockWs.readyState = MockWebSocket.OPEN;
       (auth as any).ws = mockWs;
-      (auth as any).pendingNsec = TEST_HEX_NSEC;
+      (auth as any).pendingNsecBytes = hexToBytes(TEST_HEX_NSEC);
 
       await auth.handleChallenge('challenge', PYLON_RELAY_URL);
 
@@ -306,7 +307,7 @@ describe('PylonAuth', () => {
       const mockWs = new MockWebSocket(PYLON_RELAY_URL);
       mockWs.readyState = MockWebSocket.OPEN;
       (auth as any).ws = mockWs;
-      (auth as any).pendingNsec = TEST_HEX_NSEC;
+      (auth as any).pendingNsecBytes = hexToBytes(TEST_HEX_NSEC);
 
       await auth.handleChallenge('challenge-abc', PYLON_RELAY_URL);
 

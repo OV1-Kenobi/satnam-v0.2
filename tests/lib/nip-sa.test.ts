@@ -105,12 +105,30 @@ function makeMockCeps(existingEvents: any[] = []) {
   };
 }
 
+// Mock the vault so agent nsec lookups resolve to the test fixture key.
+// publishAgentProfile/updateAgentProfile/deactivateAgent now take agentNpub
+// and retrieve the secret from the vault.
+vi.mock('../../src/lib/vault/vault.js', () => {
+  const TEST_KEY_BYTES = new Uint8Array(32).fill(0x30); // matches '0'.repeat(64)
+  const vault = {
+    isUnlocked: () => true,
+    getAgentNsec: vi.fn(async (_npub: string) => new Uint8Array(TEST_KEY_BYTES)),
+    storeAgentNsec: vi.fn(async () => {}),
+    lock: () => {},
+    unlock: async () => {},
+  };
+  return { getVault: () => vault, Vault: vi.fn() };
+});
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/** 64-char hex secret key fixture */
+/** 64-char hex secret key fixture (legacy — agent keys now live in the vault) */
 const TEST_NSEC_HEX = '0'.repeat(64);
+
+/** Agent npub fixture used with the vault mock */
+const TEST_AGENT_NPUB = 'npub1agenttest1234567890abcdef1234567890abcdef1234567890abcdef12';
 
 /** Minimal valid BuildAgentProfileParams */
 function makeProfileParams(overrides: Partial<BuildAgentProfileParams> = {}): BuildAgentProfileParams {
@@ -249,7 +267,7 @@ describe('publishAgentProfile', () => {
   it('7. signs and publishes with hex nsec', async () => {
     const ceps = makeMockCeps();
     const unsigned = buildAgentProfile(makeProfileParams());
-    const eventId = await publishAgentProfile(unsigned, TEST_NSEC_HEX, ceps as any);
+    const eventId = await publishAgentProfile(unsigned, TEST_AGENT_NPUB, ceps as any);
 
     expect(ceps.publishEvent).toHaveBeenCalledOnce();
     expect(typeof eventId).toBe('string');
@@ -259,7 +277,7 @@ describe('publishAgentProfile', () => {
   it('8. signs and publishes with nsec bech32', async () => {
     const ceps = makeMockCeps();
     const unsigned = buildAgentProfile(makeProfileParams());
-    const eventId = await publishAgentProfile(unsigned, 'nsec1test', ceps as any);
+    const eventId = await publishAgentProfile(unsigned, TEST_AGENT_NPUB, ceps as any);
 
     expect(ceps.publishEvent).toHaveBeenCalledOnce();
     expect(typeof eventId).toBe('string');
@@ -269,7 +287,7 @@ describe('publishAgentProfile', () => {
     const ceps = makeMockCeps();
     const unsigned = buildAgentProfile(makeProfileParams());
 
-    await publishAgentProfile(unsigned, TEST_NSEC_HEX, ceps as any, {
+    await publishAgentProfile(unsigned, TEST_AGENT_NPUB, ceps as any, {
       delegatorPubkey: 'gov-pubkey-hex',
       conditions: 'kind=39200',
       token: 'delegation-token-hex',
@@ -312,7 +330,7 @@ describe('updateAgentProfile', () => {
     const eventId = await updateAgentProfile(
       'existing-event-id',
       { name: 'NewName', about: 'New about' },
-      TEST_NSEC_HEX,
+      TEST_AGENT_NPUB,
       ceps as any
     );
 
@@ -329,7 +347,7 @@ describe('updateAgentProfile', () => {
   it('10b. throws if no existing profile found on relay', async () => {
     const ceps = makeMockCeps([]); // Empty result
     await expect(
-      updateAgentProfile('nonexistent-id', { name: 'X' }, TEST_NSEC_HEX, ceps as any)
+      updateAgentProfile('nonexistent-id', { name: 'X' }, TEST_AGENT_NPUB, ceps as any)
     ).rejects.toThrow(/No existing kind:39200 profile found/);
   });
 });
@@ -341,7 +359,7 @@ describe('updateAgentProfile', () => {
 describe('deactivateAgent', () => {
   it('11. publishes kind:5 deletion event with e tag', async () => {
     const ceps = makeMockCeps();
-    await deactivateAgent('profile-event-id', TEST_NSEC_HEX, ceps as any);
+    await deactivateAgent('profile-event-id', TEST_AGENT_NPUB, ceps as any);
 
     expect(ceps.publishEvent).toHaveBeenCalledOnce();
     const publishedEvent = (ceps.publishEvent as any).mock.calls[0][0];

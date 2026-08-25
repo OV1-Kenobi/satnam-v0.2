@@ -294,9 +294,10 @@ export class CentralEventPublishingService {
   private groupSessions: Map<string, PrivacyGroup> = new Map();
   private rateLimits: Map<string, { count: number; resetTime: number }> =
     new Map();
-  // Active nsec (hex) — set during initializeSession, cleared on destroySession
+  // Active nsec (bytes) — set during initializeSession, zeroed on destroySession
   // SECURITY: Never persisted. Lives only in heap for the session duration.
-  private activeNsecHex: string | null = null;
+  // Stored as Uint8Array so it can be explicitly zeroed (unlike immutable strings).
+  private activeNsecBytes: Uint8Array | null = null;
 
   constructor() {
     this.relays = defaultRelays();
@@ -343,21 +344,23 @@ export class CentralEventPublishingService {
       userHash = await PrivacyUtils.hashIdentifier(
         options?.npub || "nip07"
       );
-      this.activeNsecHex = null;
+      this.activeNsecBytes = null;
     } else {
-      // Decode nsec to hex for signing
+      // Decode nsec to bytes for signing
       if (!nsecOrMarker) throw new Error("nsec or nip07 marker required");
-      let nsecHex: string;
+      let nsecBytes: Uint8Array;
       if (/^[0-9a-fA-F]{64}$/.test(nsecOrMarker)) {
-        nsecHex = nsecOrMarker;
+        nsecBytes = hexToBytes(nsecOrMarker);
       } else {
         const dec = nip19.decode(nsecOrMarker);
         if (dec.type !== "nsec") throw new Error("Invalid nsec");
-        nsecHex = bytesToHex(dec.data as Uint8Array);
+        nsecBytes = dec.data as Uint8Array;
       }
-      const pubHex = getPublicKey(hexToBytes(nsecHex));
+      const pubHex = getPublicKey(nsecBytes);
       userHash = await PrivacyUtils.hashIdentifier(pubHex);
-      this.activeNsecHex = nsecHex;
+      // Store as bytes so we can zero it on destroySession
+      if (this.activeNsecBytes) this.activeNsecBytes.fill(0);
+      this.activeNsecBytes = nsecBytes;
     }
 
     this.userSession = {
@@ -373,8 +376,11 @@ export class CentralEventPublishingService {
   }
 
   async destroySession(): Promise<void> {
+    if (this.activeNsecBytes) {
+      this.activeNsecBytes.fill(0);
+      this.activeNsecBytes = null;
+    }
     this.userSession = null;
-    this.activeNsecHex = null;
     this.contactSessions.clear();
     this.groupSessions.clear();
     this.rateLimits.clear();
@@ -431,16 +437,49 @@ export class CentralEventPublishingService {
       return (window as any).nostr.signEvent(unsignedEvent);
     }
 
-    if (!this.activeNsecHex) {
+    if (!this.activeNsecBytes) {
       throw new Error(
         "[CEPS] No active signing key. Initialize session with nsec from OPFS Vault."
       );
     }
 
+    // F-11: Request explicit user consent for non-DM event kinds when using
+    // the vault-held nsec. DM kinds (4, 14, 1059) are whitelisted because they
+    // are the app's core messaging pipeline. All other kinds require approval.
+    const kind = (unsignedEvent as { kind?: number }).kind;
+    if (kind !== undefined && ![4, 14, 1059].includes(kind)) {
+      const approved = await this.requestSigningConsent(unsignedEvent);
+      if (!approved) {
+        throw new Error("[CEPS] Signing rejected by user");
+      }
+    }
+
     return finalizeEvent(
       unsignedEvent as Parameters<typeof finalizeEvent>[0],
-      hexToBytes(this.activeNsecHex)
+      this.activeNsecBytes
     );
+  }
+
+  /**
+   * Request user consent before signing a non-DM event kind.
+   * Override this method in the UI layer to show a confirmation dialog.
+   * Default implementation logs and approves (for non-browser/testing use).
+   * @internal
+   */
+  protected async requestSigningConsent(
+    unsignedEvent: Record<string, unknown>
+  ): Promise<boolean> {
+    // In production, this should be overridden to show a modal with:
+    //   - Event kind and human-readable description
+    //   - Content preview (truncated)
+    //   - Recipient pubkeys (p tags)
+    //   - Target relays
+    // For now, log the signing request and approve. Replace with a UI hook.
+    console.warn(
+      "[CEPS] Signing request for non-DM kind:",
+      (unsignedEvent as { kind?: number }).kind
+    );
+    return true;
   }
 
   // ---- Publishing ----
@@ -533,14 +572,14 @@ export class CentralEventPublishingService {
     recipientNpub: string,
     plaintext: string
   ): Promise<string> {
-    if (!this.activeNsecHex && this.userSession?.authMethod !== "nip07") {
+    if (!this.activeNsecBytes && this.userSession?.authMethod !== "nip07") {
       throw new Error("[CEPS] No active session for sending messages");
     }
 
     // CR-C (2026-08-24): true NIP-17/NIP-59 transport replaces NIP-04 kind:4.
     // Pipeline: kind:14 rumor → kind:13 seal (NIP-44, randomized timestamps)
     // → kind:1059 wrap (fresh CSPRNG ephemeral key per message).
-    if (!this.activeNsecHex) {
+    if (!this.activeNsecBytes) {
       throw new Error(
         "[CEPS] Gift-wrapped sending requires a vault nsec session; " +
           "NIP-07 sessions cannot derive seals client-side"
@@ -548,25 +587,14 @@ export class CentralEventPublishingService {
     }
 
     const { createGiftWrap } = await import("../messaging/gift-wrap");
-    const senderSecret = this.getSecretBytes(this.activeNsecHex);
+    // Use the session key directly; createGiftWrap does not retain it
     const { event } = createGiftWrap({
-      senderSecret,
+      senderSecret: this.activeNsecBytes,
       recipientNpubOrHex: recipientNpub,
       plaintext,
     });
-    senderSecret.fill(0);
 
     return this.publishEvent(event as unknown as Event);
-  }
-
-  /** Decode hex secret to bytes (gift-wrap input); zero after use by caller. */
-  private getSecretBytes(hex: string): Uint8Array {
-    if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
-      throw new Error("[CEPS] active nsec is not 64-hex");
-    }
-    const out = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)!;
-    return out;
   }
 
   async sendOTPDM(

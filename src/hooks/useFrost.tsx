@@ -182,7 +182,7 @@ export interface FrostState {
    * @param groupPubkey - Hex-encoded group public key
    * @param userPubkey - Hex-encoded user public key
    */
-  backupShare: (groupPubkey: string, userPubkey: string) => Promise<NostrEvent>;
+  backupShare: (groupPubkey: string) => Promise<NostrEvent>;
 
   /**
    * Restore a bfshare from a backup event.
@@ -190,7 +190,7 @@ export interface FrostState {
    * @param event - The kind:10000 backup event from a relay
    * @param userNsec - Hex-encoded user secret key for NIP-44 decryption
    */
-  restoreShare: (event: NostrEvent, userNsec: string) => Promise<void>;
+  restoreShare: (event: NostrEvent) => Promise<void>;
 
   /** Refresh the groups list from the vault. */
   refreshGroups: () => Promise<void>;
@@ -400,20 +400,20 @@ export function FrostProvider({ children, config }: FrostProviderProps) {
   );
 
   const backupShare = useCallback(
-    async (groupPubkey: string, userPubkey: string): Promise<NostrEvent> => {
+    async (groupPubkey: string): Promise<NostrEvent> => {
       return withLoading(async () => {
         const client = getClient();
-        return client.backupShare(groupPubkey, userPubkey);
+        return client.backupShare(groupPubkey);
       });
     },
     [], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const restoreShare = useCallback(
-    async (event: NostrEvent, userNsec: string): Promise<void> => {
+    async (event: NostrEvent): Promise<void> => {
       return withLoading(async () => {
         const client = getClient();
-        await client.restoreShare(event, userNsec);
+        await client.restoreShare(event);
         await refreshGroups();
       });
     },
@@ -606,14 +606,14 @@ export function useFrostStandalone(config?: Partial<FrostConfig>): FrostState {
   );
 
   const backupShare = useCallback(
-    (gp: string, up: string) => withLoading(() => getClient().backupShare(gp, up)),
+    (gp: string) => withLoading(() => getClient().backupShare(gp)),
     [], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const restoreShare = useCallback(
-    (event: NostrEvent, nsec: string) =>
+    (event: NostrEvent) =>
       withLoading(async () => {
-        await getClient().restoreShare(event, nsec);
+        await getClient().restoreShare(event);
         await refreshGroups();
       }),
     [refreshGroups], // eslint-disable-line react-hooks/exhaustive-deps

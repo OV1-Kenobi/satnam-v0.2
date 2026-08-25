@@ -13,6 +13,32 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+// Mock the vault with an always-unlocked XChaCha20-Poly1305 pass-through so
+// note encryption round-trips without a real OPFS/argon2id setup.
+vi.mock('../../src/lib/vault/vault.js', async () => {
+  const { xchacha20poly1305 } = await import('@noble/ciphers/chacha');
+  const { randomBytes } = await import('@noble/hashes/utils');
+  const testKey = randomBytes(32);
+  const vault = {
+    isUnlocked: () => true,
+    encryptBytes: async (plaintext: Uint8Array): Promise<Uint8Array> => {
+      const nonce = randomBytes(24);
+      const ct = xchacha20poly1305(testKey, nonce).encrypt(plaintext);
+      const out = new Uint8Array(24 + ct.length);
+      out.set(nonce, 0);
+      out.set(ct, 24);
+      return out;
+    },
+    decryptBytes: async (data: Uint8Array): Promise<Uint8Array> => {
+      const nonce = data.slice(0, 24);
+      const ct = data.slice(24);
+      return xchacha20poly1305(testKey, nonce).decrypt(ct);
+    },
+  };
+  return { getVault: () => vault, Vault: vi.fn() };
+});
+
 import { NoteToSelfClient } from '../../src/lib/note-to-self/client.js';
 import type { SelfNote, NoteCategory } from '../../src/lib/note-to-self/types.js';
 import { NOTE_CATEGORIES, CATEGORY_CONFIG } from '../../src/lib/note-to-self/types.js';

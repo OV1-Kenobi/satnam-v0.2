@@ -131,20 +131,17 @@ export function DeviceLinkQR(): React.JSX.Element {
         // raw is expected to be base64-encoded encrypted backup
         const backupBytes = base64ToBytes(raw);
         const vault = getVault();
-        // If vault is already unlocked, Strategy A uses existing masterKey and dummy wrappingKey.
-        // Otherwise we cannot derive wrappingKey without passphrase — instruct user.
+        // If vault is already unlocked, the in-memory master key decrypts the backup.
+        // Otherwise (fresh device), the user must unlock with their passphrase after import.
         if (!vault.isUnlocked()) {
           setError(
-            'Vault is locked on this device. Unlock with your passphrase first, then import. ' +
-              'The backup is encrypted under your master key — unlocking provides the wrapping key.',
+            'Vault is locked on this device. Unlock with your passphrase first, then import.',
           );
           zeroBytes(backupBytes);
           return;
         }
-        const dummyWrappingKey = new Uint8Array(32).fill(0);
-        await vault.importEncryptedBackup(backupBytes, dummyWrappingKey);
+        await vault.importEncryptedBackup(backupBytes);
         zeroBytes(backupBytes);
-        zeroBytes(dummyWrappingKey);
         const identities = await vault.listIdentities();
         setStatus(
           `Import complete — ${identities.length} identity(ies) restored. Vault already unlocked. Verify with listIdentities().`,

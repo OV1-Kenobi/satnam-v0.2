@@ -255,6 +255,8 @@ import {
   combineSignatures,
 } from '../../src/lib/frost/ceremony.js';
 import { FrostClient } from '../../src/lib/frost/client.js';
+import { hexToBytes } from '@noble/hashes/utils';
+import { getPublicKey } from 'nostr-tools';
 
 // ---------------------------------------------------------------------------
 // Test Fixtures
@@ -262,7 +264,9 @@ import { FrostClient } from '../../src/lib/frost/client.js';
 
 /** Deterministic test keypairs (hex) */
 const GUARDIAN_NSEC = 'a'.repeat(64);
-const GUARDIAN_PUBKEY = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'.slice(2, 66);
+const GUARDIAN_NSEC_BYTES = hexToBytes(GUARDIAN_NSEC);
+// Derived from the guardian nsec (0xaa…aa scalar) so backup event authorship matches
+const GUARDIAN_PUBKEY = getPublicKey(GUARDIAN_NSEC_BYTES);
 
 const STEWARD_NSEC = 'b'.repeat(64);
 const STEWARD_PUBKEY = '02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5'.slice(2, 66);
@@ -850,21 +854,24 @@ describe('Signing session state transitions', () => {
 // ---------------------------------------------------------------------------
 
 describe('createShareBackupEvent', () => {
-  it('creates a kind:10000 event', async () => {
+  it('creates a signed kind:10000 event with NIP-44-encrypted content', async () => {
     const share = makeBfShare();
     await storeBfShare(GROUP_PUBKEY, share);
 
-    const backupEvent = await createShareBackupEvent(GROUP_PUBKEY, GUARDIAN_PUBKEY);
+    const backupEvent = await createShareBackupEvent(GROUP_PUBKEY, GUARDIAN_NSEC_BYTES);
 
     expect(backupEvent.kind).toBe(10000);
     expect(backupEvent.pubkey).toBe(GUARDIAN_PUBKEY);
+    expect(backupEvent.sig).toBeTruthy();
+    // Content must be NIP-44 ciphertext — not parseable as plaintext JSON
+    expect(() => JSON.parse(backupEvent.content)).toThrow();
   });
 
   it('includes the correct d tag', async () => {
     const share = makeBfShare();
     await storeBfShare(GROUP_PUBKEY, share);
 
-    const backupEvent = await createShareBackupEvent(GROUP_PUBKEY, GUARDIAN_PUBKEY);
+    const backupEvent = await createShareBackupEvent(GROUP_PUBKEY, GUARDIAN_NSEC_BYTES);
 
     const dTag = backupEvent.tags.find((t) => t[0] === 'd');
     expect(dTag).toBeTruthy();
@@ -875,7 +882,7 @@ describe('createShareBackupEvent', () => {
     const share = makeBfShare();
     await storeBfShare(GROUP_PUBKEY, share);
 
-    const backupEvent = await createShareBackupEvent(GROUP_PUBKEY, GUARDIAN_PUBKEY);
+    const backupEvent = await createShareBackupEvent(GROUP_PUBKEY, GUARDIAN_NSEC_BYTES);
 
     const groupTag = backupEvent.tags.find((t) => t[0] === 'group');
     expect(groupTag).toBeTruthy();
@@ -885,27 +892,26 @@ describe('createShareBackupEvent', () => {
   it('throws ShareNotFound when no share exists (vault unlocked)', async () => {
     // Vault is unlocked in beforeEach; no share stored → ShareNotFound
     await expect(
-      createShareBackupEvent('no-share-here'.padEnd(64, '0'), GUARDIAN_PUBKEY),
+      createShareBackupEvent('no-share-here'.padEnd(64, '0'), GUARDIAN_NSEC_BYTES),
     ).rejects.toMatchObject({
       message: FrostError.ShareNotFound,
     });
   });
 
-  it('content contains valid JSON with version and groupPubkey', async () => {
+  it('round-trips: createShareBackupEvent → restoreShareFromBackup recovers the share', async () => {
+    const { restoreShareFromBackup } = await import('../../src/lib/frost/vault-storage.js');
     const share = makeBfShare();
     await storeBfShare(GROUP_PUBKEY, share);
 
-    const backupEvent = await createShareBackupEvent(GROUP_PUBKEY, GUARDIAN_PUBKEY);
+    const backupEvent = await createShareBackupEvent(GROUP_PUBKEY, GUARDIAN_NSEC_BYTES);
 
-    const content = JSON.parse(backupEvent.content) as {
-      version: number;
-      groupPubkey: string;
-      shareIndex: number;
-    };
+    // Wipe the local share (soft-delete pattern used by deleteGroupData), then restore
+    await vault.storeBfshare(GROUP_PUBKEY, new TextEncoder().encode('null'));
 
-    expect(content.version).toBe(1);
-    expect(content.groupPubkey).toBe(GROUP_PUBKEY);
-    expect(content.shareIndex).toBe(1);
+    const restored = await restoreShareFromBackup(backupEvent, GUARDIAN_NSEC_BYTES);
+    expect(restored.secretShare).toBe(share.secretShare);
+    expect(restored.groupPubkey).toBe(GROUP_PUBKEY);
+    expect(restored.index).toBe(share.index);
   });
 });
 
@@ -1004,22 +1010,28 @@ describe('FrostClient', () => {
   });
 
   it('backupShare throws ShareNotFound when vault is unlocked and no share exists', async () => {
-    // Vault is unlocked (beforeEach), no share stored → ShareNotFound
+    // Vault is unlocked (beforeEach), guardian identity stored, no share → ShareNotFound
+    const { nip19 } = await import('nostr-tools');
+    await vault.storeNsec(nip19.npubEncode(GUARDIAN_PUBKEY), GUARDIAN_NSEC_BYTES);
     await expect(
-      client.backupShare(GROUP_PUBKEY, GUARDIAN_PUBKEY),
+      client.backupShare(GROUP_PUBKEY),
     ).rejects.toMatchObject({
       message: FrostError.ShareNotFound,
     });
   });
 
-  it('backupShare returns an event when share exists', async () => {
+  it('backupShare returns a signed, NIP-44-encrypted event when share exists', async () => {
+    const { nip19 } = await import('nostr-tools');
+    await vault.storeNsec(nip19.npubEncode(GUARDIAN_PUBKEY), GUARDIAN_NSEC_BYTES);
     const share = makeBfShare();
     await storeBfShare(GROUP_PUBKEY, share);
 
-    const event = await client.backupShare(GROUP_PUBKEY, GUARDIAN_PUBKEY);
+    const event = await client.backupShare(GROUP_PUBKEY);
 
     expect(event.kind).toBe(10000);
     expect(event.pubkey).toBe(GUARDIAN_PUBKEY);
+    expect(event.sig).toBeTruthy();
+    expect(() => JSON.parse(event.content)).toThrow(); // ciphertext, not plaintext JSON
   });
 });
 

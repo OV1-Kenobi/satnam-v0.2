@@ -29,6 +29,7 @@ import {
   signEventWithCeps,
   getDefaultRelays,
 } from '../ceps/ceps-client.js';
+import { bytesToHex, randomBytes } from '@noble/hashes/utils';
 
 // ============================================================================
 // Constants
@@ -64,11 +65,9 @@ function writeJson<T>(key: string, value: T): void {
   } catch {}
 }
 
+/** CSPRNG ID generation (replaces Math.random). */
 function generateId(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+  return bytesToHex(randomBytes(16));
 }
 
 function nowUnix(): number {

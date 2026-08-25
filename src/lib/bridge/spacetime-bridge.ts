@@ -44,8 +44,7 @@
  * @see phase4-spec-sections-8-9.md §8.4
  */
 
-import { finalizeEvent, getPublicKey, nip19 } from 'nostr-tools';
-import { hexToBytes } from '@noble/hashes/utils';
+import { finalizeEvent, getPublicKey } from 'nostr-tools';
 import type { Event as NostrEvent } from 'nostr-tools';
 import type { PylonCepsClient } from '../pylon/ceps-pylon.js';
 import type { Vault } from '../vault/vault.js';
@@ -194,34 +193,36 @@ export class SpacetimeBridge {
     }
     const principalNpub = identities[0]!;
     const nsecBytes = await this.vault.getNsec(principalNpub);
-    const nsecHex = Array.from(nsecBytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    const secretKey = this._decodeSecretKey(nsecHex);
-    const principalPubkey = getPublicKey(secretKey);
+    try {
+      const principalPubkey = getPublicKey(nsecBytes);
 
-    const tags: string[][] = [
-      ['d', 'presence'],
-      ['status', status],
-    ];
+      const tags: string[][] = [
+        ['d', 'presence'],
+        ['status', status],
+      ];
 
-    if (agentPubkey) {
-      tags.push(['p', agentPubkey]);
-      tags.push(['agent', agentPubkey]);
+      if (agentPubkey) {
+        tags.push(['p', agentPubkey]);
+        tags.push(['agent', agentPubkey]);
+      }
+
+      const unsigned = {
+        kind: PRESENCE_KIND,
+        created_at: Math.floor(Date.now() / 1000),
+        tags,
+        content: JSON.stringify({
+          status,
+          pubkey: principalPubkey,
+          ...(agentPubkey ? { agentPubkey } : {}),
+          timestamp: Math.floor(Date.now() / 1000),
+        }),
+      };
+
+      const signed = finalizeEvent(unsigned, nsecBytes);
+      await this.pylonCeps.publish(signed as NostrEvent);
+    } finally {
+      nsecBytes.fill(0);
     }
-
-    const unsigned = {
-      kind: PRESENCE_KIND,
-      created_at: Math.floor(Date.now() / 1000),
-      tags,
-      content: JSON.stringify({
-        status,
-        pubkey: principalPubkey,
-        ...(agentPubkey ? { agentPubkey } : {}),
-        timestamp: Math.floor(Date.now() / 1000),
-      }),
-    };
-
-    const signed = finalizeEvent(unsigned, secretKey);
-    await this.pylonCeps.publish(signed as NostrEvent);
 
     this.currentPresenceStatus = status;
   }
@@ -342,28 +343,29 @@ export class SpacetimeBridge {
     }
     const principalNpub = identities[0]!;
     const nsecBytes = await this.vault.getNsec(principalNpub);
-    const nsecHex = Array.from(nsecBytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    const secretKey = this._decodeSecretKey(nsecHex);
+    try {
+      const unsigned = {
+        kind: PRESENCE_KIND,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['d', 'heartbeat'],
+          ['p', agentPubkey],
+          ['agent', agentPubkey],
+          ['status', 'online'],
+          ['heartbeat', 'true'],
+        ],
+        content: JSON.stringify({
+          type: HEARTBEAT_CONTENT,
+          agentPubkey,
+          timestamp: Math.floor(Date.now() / 1000),
+        }),
+      };
 
-    const unsigned = {
-      kind: PRESENCE_KIND,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['d', 'heartbeat'],
-        ['p', agentPubkey],
-        ['agent', agentPubkey],
-        ['status', 'online'],
-        ['heartbeat', 'true'],
-      ],
-      content: JSON.stringify({
-        type: HEARTBEAT_CONTENT,
-        agentPubkey,
-        timestamp: Math.floor(Date.now() / 1000),
-      }),
-    };
-
-    const signed = finalizeEvent(unsigned, secretKey);
-    await this.pylonCeps.publish(signed as NostrEvent);
+      const signed = finalizeEvent(unsigned, nsecBytes);
+      await this.pylonCeps.publish(signed as NostrEvent);
+    } finally {
+      nsecBytes.fill(0);
+    }
   }
 
   /**
@@ -520,21 +522,4 @@ export class SpacetimeBridge {
     return tag?.[1];
   }
 
-  /**
-   * Decode an nsec bech32 or 64-char hex string to raw secret key bytes.
-   * @internal
-   */
-  private _decodeSecretKey(nsecOrHex: string): Uint8Array {
-    if (/^[0-9a-fA-F]{64}$/.test(nsecOrHex)) {
-      return hexToBytes(nsecOrHex);
-    }
-    if (nsecOrHex.startsWith('nsec1')) {
-      const decoded = nip19.decode(nsecOrHex);
-      if (decoded.type !== 'nsec') {
-        throw new Error('Expected nsec bech32 string, got: ' + decoded.type);
-      }
-      return decoded.data as Uint8Array;
-    }
-    throw new Error('Invalid secret key format');
-  }
 }

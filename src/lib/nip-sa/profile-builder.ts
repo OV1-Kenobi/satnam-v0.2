@@ -15,8 +15,8 @@
  * @see phase3-spec-sections.md §7.1 — NIP-SA Agent Profiles
  */
 
-import { finalizeEvent, getPublicKey, nip19 } from 'nostr-tools';
-import { hexToBytes } from '@noble/hashes/utils';
+import { finalizeEvent, getPublicKey } from 'nostr-tools';
+import { getVault } from '../vault/vault.js';
 import type { CepsClient } from '../ceps/ceps-client.js';
 import type {
   AgentCapabilityKey,
@@ -84,30 +84,6 @@ export interface BuildAgentProfileParams {
   nip05?: string;
   /** Semantic version string (default "2.0.0") */
   version?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: decode nsec/hex to Uint8Array
-// ---------------------------------------------------------------------------
-
-/**
- * Decode an nsec bech32 string or 64-char hex secret key to raw bytes.
- * @internal
- */
-function decodeSecretKey(nsecOrHex: string): Uint8Array {
-  if (/^[0-9a-fA-F]{64}$/.test(nsecOrHex)) {
-    return hexToBytes(nsecOrHex);
-  }
-  if (nsecOrHex.startsWith('nsec1')) {
-    const decoded = nip19.decode(nsecOrHex);
-    if (decoded.type !== 'nsec') {
-      throw new Error('Expected nsec bech32 string, got: ' + decoded.type);
-    }
-    return decoded.data as Uint8Array;
-  }
-  throw new Error(
-    'Invalid secret key format — expected nsec bech32 or 64-char hex'
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -234,45 +210,50 @@ export function buildAgentProfile(params: BuildAgentProfileParams): UnsignedEven
  * authority.
  *
  * @param profile - Unsigned event from `buildAgentProfile()`
- * @param signerNsec - Agent's secret key (nsec bech32 or hex). Zeroed by caller after use.
+ * @param agentNpub - Agent's public key. The agent's secret key is retrieved
+ *   from the OPFS Vault (vault/agents/{agent_npub}.nsec) and zeroed after use.
  * @param ceps - Active CEPS client for relay publishing
  * @param delegation - Optional NIP-26 delegation tag for Offspring agents
  * @returns Published event ID (hex)
- * @throws If signing or publishing fails
+ * @throws If the agent nsec is not in the vault, or signing/publishing fails
  */
 export async function publishAgentProfile(
   profile: UnsignedEvent,
-  signerNsec: string,
+  agentNpub: string,
   ceps: CepsClient,
   delegation?: DelegationTag
 ): Promise<string> {
-  const secretKey = decodeSecretKey(signerNsec);
+  const vault = getVault();
+  const secretKey = await vault.getAgentNsec(agentNpub);
+  try {
+    // Append NIP-26 delegation tag if this is an Offspring agent
+    let eventToSign = profile;
+    if (delegation) {
+      const delegationTags = profile.tags.filter((t) => t[0] !== 'delegation');
+      delegationTags.push([
+        'delegation',
+        delegation.delegatorPubkey,
+        delegation.conditions,
+        delegation.token,
+      ]);
+      eventToSign = { ...profile, tags: delegationTags };
+    }
 
-  // Append NIP-26 delegation tag if this is an Offspring agent
-  let eventToSign = profile;
-  if (delegation) {
-    const delegationTags = profile.tags.filter((t) => t[0] !== 'delegation');
-    delegationTags.push([
-      'delegation',
-      delegation.delegatorPubkey,
-      delegation.conditions,
-      delegation.token,
-    ]);
-    eventToSign = { ...profile, tags: delegationTags };
+    const signed = finalizeEvent(
+      {
+        kind: eventToSign.kind,
+        created_at: eventToSign.created_at,
+        tags: eventToSign.tags,
+        content: eventToSign.content,
+      },
+      secretKey
+    );
+
+    const eventId = await ceps.publishEvent(signed as any);
+    return eventId;
+  } finally {
+    secretKey.fill(0);
   }
-
-  const signed = finalizeEvent(
-    {
-      kind: eventToSign.kind,
-      created_at: eventToSign.created_at,
-      tags: eventToSign.tags,
-      content: eventToSign.content,
-    },
-    secretKey
-  );
-
-  const eventId = await ceps.publishEvent(signed as any);
-  return eventId;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,7 +270,7 @@ export async function publishAgentProfile(
  *
  * @param existingEventId - Previous event ID (for caller reference only)
  * @param updates - Partial content fields to merge into the existing profile
- * @param signerNsec - Agent's secret key
+ * @param agentNpub - Agent's public key (secret key retrieved from vault)
  * @param ceps - Active CEPS client
  * @returns New event ID (hex)
  * @throws If the existing profile cannot be fetched or signing fails
@@ -297,10 +278,11 @@ export async function publishAgentProfile(
 export async function updateAgentProfile(
   existingEventId: string,
   updates: Partial<AgentProfileContent>,
-  signerNsec: string,
+  agentNpub: string,
   ceps: CepsClient
 ): Promise<string> {
-  const secretKey = decodeSecretKey(signerNsec);
+  const vault = getVault();
+  const secretKey = await vault.getAgentNsec(agentNpub);
   const pubkey = getPublicKey(secretKey);
 
   // Fetch the existing profile from relay to merge tags and content
@@ -343,17 +325,21 @@ export async function updateAgentProfile(
     content: JSON.stringify(mergedContent),
   };
 
-  const signed = finalizeEvent(
-    {
-      kind: replacementEvent.kind,
-      created_at: replacementEvent.created_at,
-      tags: replacementEvent.tags,
-      content: replacementEvent.content,
-    },
-    secretKey
-  );
+  try {
+    const signed = finalizeEvent(
+      {
+        kind: replacementEvent.kind,
+        created_at: replacementEvent.created_at,
+        tags: replacementEvent.tags,
+        content: replacementEvent.content,
+      },
+      secretKey
+    );
 
-  return ceps.publishEvent(signed as any);
+    return await ceps.publishEvent(signed as any);
+  } finally {
+    secretKey.fill(0);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -369,32 +355,36 @@ export async function updateAgentProfile(
  * be separately purged by the caller.
  *
  * @param profileEventId - The kind:39200 event ID to delete
- * @param signerNsec - Agent's secret key (must match the profile author)
+ * @param agentNpub - Agent's public key (secret key retrieved from vault; must match the profile author)
  * @param ceps - Active CEPS client
  * @returns Deletion event ID (hex)
  * @throws If signing or publishing fails
  */
 export async function deactivateAgent(
   profileEventId: string,
-  signerNsec: string,
+  agentNpub: string,
   ceps: CepsClient
 ): Promise<string> {
-  const secretKey = decodeSecretKey(signerNsec);
+  const vault = getVault();
+  const secretKey = await vault.getAgentNsec(agentNpub);
+  try {
+    // NIP-09 deletion event
+    const deletionEvent = finalizeEvent(
+      {
+        kind: 5,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['e', profileEventId],
+          ['k', '39200'],
+        ],
+        content: 'agent deactivated',
+      },
+      secretKey
+    );
 
-  // NIP-09 deletion event
-  const deletionEvent = finalizeEvent(
-    {
-      kind: 5,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['e', profileEventId],
-        ['k', '39200'],
-      ],
-      content: 'agent deactivated',
-    },
-    secretKey
-  );
-
-  return ceps.publishEvent(deletionEvent as any);
+    return await ceps.publishEvent(deletionEvent as any);
+  } finally {
+    secretKey.fill(0);
+  }
 }
 

@@ -201,16 +201,20 @@ export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
 /**
  * Metadata stored alongside the encrypted master key to describe how the
  * wrapping key is derived. Stored in OPFS as plaintext (not secret).
+ *
+ * SECURITY: The wrapping key itself is NEVER persisted here. For 'webauthn'
+ * and 'nfc' methods, only the public credential ID (not the PRF output) is
+ * stored. The PRF output / PinGate bytes exist only in memory during unlock.
  */
 export interface WrappingKeyMeta {
   /** Derivation method used for the wrapping key. */
   method: VaultMethod;
 
   /**
-   * For 'passphrase' method: base64-encoded 32-byte random salt.
-   * For 'webauthn' method: base64-encoded credential ID.
+   * For 'webauthn' method: base64-encoded credential ID (public identifier,
+   * not the secret PRF output). Empty string for passphrase and nfc methods.
    */
-  credential: string;
+  credentialId: string;
 
   /**
    * For 'passphrase' method: argon2id parameters used during derivation.
@@ -573,15 +577,19 @@ export interface VaultOps {
   exportEncryptedBackup(): Promise<Uint8Array>;
 
   /**
-   * Import and restore a vault from an encrypted backup. The wrapping key is
-   * required to decrypt the master key in the backup, and then to re-encrypt
-   * it under the current device's wrapping key.
+   * Import and restore a vault from an encrypted backup.
+   *
+   * Backup format (v2): [4-byte LE encMKLen][AES-GCM(wrappingKey, masterKey)][xchacha20poly1305(masterKey, JSON(entries))]
+   *
+   * When the vault is already unlocked, wrappingKey may be omitted (the
+   * in-memory master key is used). When the vault is locked (fresh device),
+   * wrappingKey must be provided to decrypt the master key from the prefix.
    *
    * @param data - Encrypted backup blob produced by exportEncryptedBackup()
-   * @param wrappingKey - 32-byte wrapping key derived from the original passphrase/WebAuthn
+   * @param wrappingKey - 32-byte wrapping key derived from the original passphrase/WebAuthn. Optional if vault is already unlocked.
    * @throws {VaultError.DecryptionFailed} if the wrapping key is incorrect
    */
-  importEncryptedBackup(data: Uint8Array, wrappingKey: Uint8Array): Promise<void>;
+  importEncryptedBackup(data: Uint8Array, wrappingKey?: Uint8Array): Promise<void>;
 
   // -------------------------------------------------------------------------
   // Settings (second factor preference) — encrypted under master key at vault/settings.json
@@ -605,4 +613,51 @@ export interface VaultOps {
    * Convenience wrapper over getVaultSettings().
    */
   getSecondFactor(): Promise<VaultSecondFactor>;
+
+  // -------------------------------------------------------------------------
+  // FROST manifest
+  // -------------------------------------------------------------------------
+
+  /**
+   * Store the FROST group manifest (list of group pubkeys) encrypted under
+   * the master key at vault/frost/manifest.json.
+   *
+   * @param groupPubkeys - Array of hex-encoded group public keys
+   * @throws {VaultError.VaultLocked} if vault is locked
+   */
+  storeFrostManifest(groupPubkeys: string[]): Promise<void>;
+
+  /**
+   * Retrieve the FROST group manifest.
+   *
+   * @returns Array of hex-encoded group public keys, or empty array if none stored
+   * @throws {VaultError.VaultLocked} if vault is locked
+   */
+  getFrostManifest(): Promise<string[]>;
+
+  // -------------------------------------------------------------------------
+  // Generic encryption helpers (for encrypting data stored outside the vault,
+  // e.g. localStorage persistence layers)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Encrypt arbitrary bytes under the master key using XChaCha20-Poly1305.
+   * Intended for encrypting data that must be persisted outside the vault
+   * (e.g. localStorage caches). The plaintext never touches persistent storage.
+   *
+   * @param plaintext - Bytes to encrypt
+   * @returns nonce || ciphertext
+   * @throws {VaultError.VaultLocked} if vault is locked
+   */
+  encryptBytes(plaintext: Uint8Array): Promise<Uint8Array>;
+
+  /**
+   * Decrypt bytes previously encrypted with encryptBytes().
+   *
+   * @param data - nonce || ciphertext blob
+   * @returns Decrypted plaintext bytes
+   * @throws {VaultError.VaultLocked} if vault is locked
+   * @throws {VaultError.DecryptionFailed} if authentication tag is invalid
+   */
+  decryptBytes(data: Uint8Array): Promise<Uint8Array>;
 }

@@ -99,16 +99,16 @@ export interface UseAgentProfileResult {
   isLoading: boolean;
   /** Error message, or null */
   error: string | null;
-  /** Publish a new agent profile (returns event ID) */
-  publishProfile: (params: BuildAgentProfileParams, signerNsec: string) => Promise<string>;
-  /** Create a new agent (alias for publishProfile with UI-friendly params) */
-  createAgent: (params: BuildAgentProfileParams, signerNsec?: string) => Promise<string>;
-  /** Update an existing agent profile */
-  updateProfile: (updates: Partial<AgentProfileContent>, signerNsec: string) => Promise<string>;
+  /** Publish a new agent profile (returns event ID). Agent nsec is read from the vault. */
+  publishProfile: (params: BuildAgentProfileParams, agentNpub: string) => Promise<string>;
+  /** Create a new agent — generates a fresh agent keypair in the vault, then publishes the profile. Returns the agent npub. */
+  createAgent: (params: BuildAgentProfileParams) => Promise<string>;
+  /** Update an existing agent profile (agent nsec read from vault) */
+  updateProfile: (updates: Partial<AgentProfileContent>, agentNpub: string) => Promise<string>;
   /** Update agent by ID (for status/partial updates from UI) */
   updateAgent: (id: string, updates: Partial<AgentViewModel>) => Promise<void>;
-  /** Deactivate (delete) the agent profile */
-  deactivate: (signerNsec: string) => Promise<string>;
+  /** Deactivate (delete) the agent profile (agent nsec read from vault) */
+  deactivate: (agentNpub: string) => Promise<string>;
   /** Deactivate agent by ID */
   deactivateAgent: (id: string) => Promise<void>;
   /** Publish an agent state update */
@@ -358,7 +358,7 @@ export function useAgentProfile(
   // ---------------------------------------------------------------------------
 
   const publishProfile = useCallback(
-    async (params: BuildAgentProfileParams, signerNsec: string): Promise<string> => {
+    async (params: BuildAgentProfileParams, agentNpub: string): Promise<string> => {
       if (!ceps) throw new Error('CEPS client is not initialized');
 
       setStatus('publishing');
@@ -369,7 +369,7 @@ export function useAgentProfile(
           '../lib/nip-sa/profile-builder.js'
         );
         const unsigned = buildAgentProfile(params);
-        const eventId = await publishAgentProfile(unsigned, signerNsec, ceps);
+        const eventId = await publishAgentProfile(unsigned, agentNpub, ceps);
         setStatus('success');
         await fetchProfile();
         return eventId;
@@ -384,14 +384,47 @@ export function useAgentProfile(
   );
 
   const createAgent = useCallback(
-    async (params: BuildAgentProfileParams, signerNsec: string = ''): Promise<string> => {
-      return publishProfile(params, signerNsec);
+    async (params: BuildAgentProfileParams): Promise<string> => {
+      if (!ceps) throw new Error('CEPS client is not initialized');
+
+      setStatus('publishing');
+      setError(null);
+
+      try {
+        // Generate a fresh agent keypair and store it in the vault.
+        // The nsec never leaves the vault in plaintext after this point.
+        const { generateSecretKey, getPublicKey, nip19 } = await import('nostr-tools');
+        const { getVault } = await import('../lib/vault/vault.js');
+
+        const agentSecret = generateSecretKey();
+        const agentNpub = nip19.npubEncode(getPublicKey(agentSecret));
+
+        const vault = getVault();
+        try {
+          await vault.storeAgentNsec(agentNpub, agentSecret);
+        } finally {
+          agentSecret.fill(0);
+        }
+
+        const { buildAgentProfile, publishAgentProfile } = await import(
+          '../lib/nip-sa/profile-builder.js'
+        );
+        const unsigned = buildAgentProfile(params);
+        await publishAgentProfile(unsigned, agentNpub, ceps);
+        setStatus('success');
+        return agentNpub;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to create agent';
+        setError(message);
+        setStatus('error');
+        throw err;
+      }
     },
-    [publishProfile]
+    [ceps]
   );
 
   const updateProfile = useCallback(
-    async (updates: Partial<AgentProfileContent>, signerNsec: string): Promise<string> => {
+    async (updates: Partial<AgentProfileContent>, agentNpub: string): Promise<string> => {
       if (!ceps) throw new Error('CEPS client is not initialized');
       if (!profile) throw new Error('No existing profile to update');
 
@@ -403,7 +436,7 @@ export function useAgentProfile(
         const eventId = await updateAgentProfile(
           profile.eventId,
           updates,
-          signerNsec,
+          agentNpub,
           ceps
         );
         setStatus('success');
@@ -427,7 +460,7 @@ export function useAgentProfile(
   );
 
   const deactivate = useCallback(
-    async (signerNsec: string): Promise<string> => {
+    async (agentNpub: string): Promise<string> => {
       if (!ceps) throw new Error('CEPS client is not initialized');
       if (!profile) throw new Error('No profile to deactivate');
 
@@ -436,7 +469,7 @@ export function useAgentProfile(
 
       try {
         const { deactivateAgent: deactivateAgentLib } = await import('../lib/nip-sa/profile-builder.js');
-        const eventId = await deactivateAgentLib(profile.eventId, signerNsec, ceps);
+        const eventId = await deactivateAgentLib(profile.eventId, agentNpub, ceps);
         setProfile(null);
         setAgents([]);
         setStatus('success');

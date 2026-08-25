@@ -6,23 +6,21 @@
  *   kind:14  — Sealed note content (sender = receiver = own pubkey)
  *   kind:1059 — Gift-wrap wrapper published to own pubkey
  *
- * Phase 1 implementation uses localStorage as the persistence layer.
- * Phase 2 will replace with actual Nostr relay queries + NIP-44 decryption
- * using the OPFS vault keys.
+ * Persistence: notes are encrypted under the OPFS vault master key
+ * (XChaCha20-Poly1305) before being written to localStorage. Plaintext
+ * note content never touches persistent storage.
  */
 
+import { bytesToHex, hexToBytes, utf8ToBytes, bytesToUtf8, randomBytes } from '@noble/hashes/utils';
+import { getVault } from '../vault/vault.js';
 import type { SelfNote, NoteCategory } from './types.js';
 
-// Use Web Crypto API for UUID generation (no external dependency)
+/** CSPRNG ID generation (replaces Math.random). */
 function generateId(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  // Fallback for environments without crypto.randomUUID
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+  return bytesToHex(randomBytes(16));
 }
 
-const STORAGE_KEY = 'satnam:notes-to-self';
+const STORAGE_KEY = 'satnam:notes-to-self:v3';
 
 // ---------------------------------------------------------------------------
 // Stub crypto helpers (Phase 1 — real NIP-44 in Phase 2)
@@ -30,7 +28,7 @@ const STORAGE_KEY = 'satnam:notes-to-self';
 
 /** Simulate kind:14 → kind:1059 wrapping.  Returns a fake event ID. */
 function mockWrap(_content: string): string {
-  return `mock_evt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return `mock_evt_${bytesToHex(randomBytes(16))}`;
 }
 
 /** Simulate kind:1059 unwrapping.  Returns the content unchanged.
@@ -44,17 +42,26 @@ export function mockUnwrap(eventId: string, content: string): string {
 // Storage helpers
 // ---------------------------------------------------------------------------
 
-function readNotes(): SelfNote[] {
+async function readNotes(): Promise<SelfNote[]> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as SelfNote[]) : [];
+    if (!raw) return [];
+    const vault = getVault();
+    if (!vault.isUnlocked()) return [];
+    const decrypted = await vault.decryptBytes(hexToBytes(raw));
+    return JSON.parse(bytesToUtf8(decrypted)) as SelfNote[];
   } catch {
     return [];
   }
 }
 
-function writeNotes(notes: SelfNote[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+async function writeNotes(notes: SelfNote[]): Promise<void> {
+  const vault = getVault();
+  if (!vault.isUnlocked()) {
+    throw new Error('Vault must be unlocked to persist notes');
+  }
+  const encrypted = await vault.encryptBytes(utf8ToBytes(JSON.stringify(notes)));
+  localStorage.setItem(STORAGE_KEY, bytesToHex(encrypted));
 }
 
 // ---------------------------------------------------------------------------
@@ -86,9 +93,9 @@ export class NoteToSelfClient {
       eventId:   mockWrap(content),
     };
 
-    const notes = readNotes();
+    const notes = await readNotes();
     notes.unshift(note); // newest first
-    writeNotes(notes);
+    await writeNotes(notes);
 
     return note;
   }
@@ -98,7 +105,7 @@ export class NoteToSelfClient {
    * Phase 1: reads from localStorage.
    */
   async listNotes(since?: number, until?: number): Promise<SelfNote[]> {
-    let notes = readNotes();
+    let notes = await readNotes();
 
     if (since !== undefined) {
       notes = notes.filter(n => n.createdAt >= since);
@@ -115,8 +122,8 @@ export class NoteToSelfClient {
    * Phase 2: publish NIP-09 deletion event for the kind:1059 wrapper.
    */
   async deleteNote(noteId: string): Promise<void> {
-    const notes = readNotes().filter(n => n.id !== noteId);
-    writeNotes(notes);
+    const notes = (await readNotes()).filter(n => n.id !== noteId);
+    await writeNotes(notes);
   }
 
   /**
@@ -126,11 +133,11 @@ export class NoteToSelfClient {
     noteId: string,
     patch: Partial<Pick<SelfNote, 'content' | 'category' | 'tags'>>,
   ): Promise<SelfNote | null> {
-    const notes = readNotes();
+    const notes = await readNotes();
     const idx = notes.findIndex(n => n.id === noteId);
     if (idx < 0) return null;
     notes[idx] = { ...notes[idx]!, ...patch };
-    writeNotes(notes);
+    await writeNotes(notes);
     return notes[idx] ?? null;
   }
 }
