@@ -22,7 +22,11 @@ import {
 import {
   getPrimaryDomain,
   getWhitelistedDomains,
+  getWhitelistedRoots,
+  isValidSubdomain,
   isWhitelistedDomain,
+  isWhitelistedRoot,
+  parseNip05,
   resolveRequestedDomain,
   resetDomainWhitelistCache,
 } from '../../src/lib/identity/domain-whitelist';
@@ -157,28 +161,45 @@ describe('CR-A keygen — memory fence (S-invariant support)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Domain whitelist
+// Domain whitelist — 004 unified: my/our/agent categorizer + root whitelist
 // ---------------------------------------------------------------------------
-describe('CR-A domain-whitelist (config-not-code)', () => {
+describe('CR-A domain-whitelist (config-not-code) — 004 unified', () => {
   beforeEach(() => resetDomainWhitelistCache());
 
-  it('defaults include founder-approved initial entries', () => {
-    const domains = getWhitelistedDomains();
-    expect(domains).toContain('satnam.pub');
-    expect(domains).toContain('openagents.com');
-    expect(domains).toContain('sovereignhybridcompute.com');
-    expect(getPrimaryDomain()).toBe('satnam.pub');
+  it('defaults include founder-approved root entries and categorized domains', () => {
+    const roots = getWhitelistedRoots();
+    expect(roots).toContain('satnam.pub');
+    expect(roots).toContain('openagents.com');
+    expect(roots).toContain('sovereignhybridcompute.com');
+    expect(getPrimaryDomain()).toBe('my.satnam.pub');
+    // categorized full domains
+    expect(getWhitelistedDomains()).toContain('my.satnam.pub');
+    expect(getWhitelistedDomains()).toContain('our.satnam.pub');
+    expect(getWhitelistedDomains()).toContain('agent.satnam.pub');
   });
 
-  it('accepts whitelisted domains and rejects unlisted ones', () => {
-    expect(isWhitelistedDomain('OPENAGENTS.com')).toBe(true);
-    expect(resolveRequestedDomain('sovereignhybridcompute.com')).toBe('sovereignhybridcompute.com');
-    expect(isWhitelistedDomain('evil.example.com')).toBe(false);
+  it('accepts whitelisted categorized domains and rejects unlisted ones', () => {
+    expect(isWhitelistedRoot('openagents.com')).toBe(true);
+    expect(isWhitelistedRoot('OPENAGENTS.COM')).toBe(true);
+    expect(isWhitelistedDomain('my.openagents.com')).toBe(true);
+    expect(isWhitelistedDomain('our.satnam.pub')).toBe(true);
+    expect(isWhitelistedDomain('agent.sovereignhybridcompute.com')).toBe(true);
+    expect(isValidSubdomain('my')).toBe(true);
+    expect(isValidSubdomain('our')).toBe(true);
+    expect(isValidSubdomain('agent')).toBe(true);
+    expect(isValidSubdomain('evil')).toBe(false);
+    expect(isWhitelistedDomain('my.evil.example.com')).toBe(false);
+    expect(isWhitelistedDomain('openagents.com')).toBe(false); // needs subdomain
+    expect(resolveRequestedDomain('my.sovereignhybridcompute.com')).toBe('my.sovereignhybridcompute.com');
     expect(resolveRequestedDomain('evil.example.com')).toBeNull();
+    expect(parseNip05('alice@my.satnam.pub')).toEqual({ username: 'alice', subdomain_prefix: 'my', root_domain: 'satnam.pub' });
+    expect(parseNip05('myfamily@our.satnam.pub')).toEqual({ username: 'myfamily', subdomain_prefix: 'our', root_domain: 'satnam.pub' });
+    expect(parseNip05('bot@agent.satnam.pub')).toEqual({ username: 'bot', subdomain_prefix: 'agent', root_domain: 'satnam.pub' });
+    expect(parseNip05('alice@satnam.pub')).toBeNull(); // missing subdomain
   });
 
-  it('falls back to primary when no domain requested', () => {
-    expect(resolveRequestedDomain(undefined)).toBe('satnam.pub');
-    expect(resolveRequestedDomain('')).toBe('satnam.pub');
+  it('falls back to primary categorized domain when no domain requested', () => {
+    expect(resolveRequestedDomain(undefined)).toBe('my.satnam.pub');
+    expect(resolveRequestedDomain('')).toBe('my.satnam.pub');
   });
 });

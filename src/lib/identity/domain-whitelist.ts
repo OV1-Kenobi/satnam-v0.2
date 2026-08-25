@@ -1,29 +1,36 @@
 /**
  * @module identity/domain-whitelist
- * @description CR-A configurable NIP-05 / Lightning address domain whitelist.
+ * @description CR-A + 004 unified subdomain categorizer.
  *
- * Founder-directed (2026-08-24): settings must allow whitelisting additional
- * domains as valid NIP-05 sign-in names and Lightning addresses. Initial
- * entries: openagents.com, sovereignhybridcompute.com.
+ * Founder-directed (2026-08-25): NIP-05 is username@subdomain_prefix.root_domain
+ *   my.*    → human (alice@my.satnam.pub)
+ *   our.*   → family/group (myfamily@our.satnam.pub)
+ *   agent.* → agent swarm (treasury@agent.satnam.pub)
+ * TLD stays clean: satnam.pub never appears as a NIP-05 host.
  *
- * CONFIG-NOT-CODE: entries come from VITE_NIP05_DOMAINS (build/env config).
- * Adding a domain is a configuration change, never a code change. The server
- * side enforces the same list via the NIP05_DOMAINS env on register-identity.
+ * Whitelist is root_domain ONLY (config-not-code via VITE_NIP05_ROOT_DOMAINS).
+ * Subdomain categorizer is code allow-list, not env.
  */
 
-const DEFAULT_PRIMARY_DOMAIN = 'satnam.pub';
+const DEFAULT_PRIMARY_ROOT = 'satnam.pub';
 
-/** Founder-approved initial whitelist (primary first). */
-const DEFAULT_DOMAINS = [
-  DEFAULT_PRIMARY_DOMAIN,
+export const ROOT_WHITELIST_DEFAULT = [
+  DEFAULT_PRIMARY_ROOT,
   'openagents.com',
   'sovereignhybridcompute.com',
 ] as const;
 
-const DOMAIN_REGEX = /^[a-z0-9][a-z0-9\-.]{1,253}$/;
+export const SUBDOMAIN_ALLOW = ['my', 'our', 'agent'] as const;
+export type SubdomainPrefix = (typeof SUBDOMAIN_ALLOW)[number];
 
-function parseConfiguredDomains(): string[] {
+const ROOT_REGEX = /^[a-z0-9][a-z0-9\-.]{1,253}$/;
+
+function parseConfiguredRoots(): string[] {
   const raw =
+    (typeof import.meta !== 'undefined' &&
+      (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
+        ?.VITE_NIP05_ROOT_DOMAINS) ||
+    // Back-compat: old VITE_NIP05_DOMAINS still honored as root list
     (typeof import.meta !== 'undefined' &&
       (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
         ?.VITE_NIP05_DOMAINS) ||
@@ -31,39 +38,77 @@ function parseConfiguredDomains(): string[] {
   const configured = (raw as string)
     .split(',')
     .map((d: string) => d.trim().toLowerCase())
-    .filter((d: string) => DOMAIN_REGEX.test(d));
-  return configured.length > 0 ? [...new Set([DEFAULT_PRIMARY_DOMAIN, ...configured])] : [...DEFAULT_DOMAINS];
+    .filter((d: string) => ROOT_REGEX.test(d));
+  return configured.length > 0 ? [...new Set([DEFAULT_PRIMARY_ROOT, ...configured])] : [...ROOT_WHITELIST_DEFAULT];
 }
 
-let cachedDomains: string[] | null = null;
+let cachedRoots: string[] | null = null;
 
-/**
- * The active whitelist, primary domain first. Reads VITE_NIP05_DOMAINS once;
- * tests can reset via resetDomainWhitelistCache().
- */
+export function getWhitelistedRoots(): string[] {
+  if (!cachedRoots) cachedRoots = parseConfiguredRoots();
+  return cachedRoots;
+}
+
+/** @deprecated — use getWhitelistedRoots() + SUBDOMAIN_ALLOW */
 export function getWhitelistedDomains(): string[] {
-  if (!cachedDomains) cachedDomains = parseConfiguredDomains();
-  return cachedDomains;
+  const roots = getWhitelistedRoots();
+  return roots.flatMap((r) => SUBDOMAIN_ALLOW.map((s) => `${s}.${r}`));
 }
 
-/** Primary domain (registration default + display). */
+export function getPrimaryRoot(): string {
+  return getWhitelistedRoots()[0] ?? DEFAULT_PRIMARY_ROOT;
+}
+
+/** @deprecated — use getPrimaryRoot() */
 export function getPrimaryDomain(): string {
-  return getWhitelistedDomains()[0] ?? DEFAULT_PRIMARY_DOMAIN;
+  return `my.${getPrimaryRoot()}`;
+}
+
+export function isValidSubdomain(prefix: string): boolean {
+  return (SUBDOMAIN_ALLOW as readonly string[]).includes(prefix.trim().toLowerCase());
+}
+
+export function isWhitelistedRoot(root: string): boolean {
+  return getWhitelistedRoots().includes(root.trim().toLowerCase());
 }
 
 /** True when a domain may be used for NIP-05 names and Lightning addresses. */
 export function isWhitelistedDomain(domain: string): boolean {
   const normalized = domain.trim().toLowerCase();
-  return getWhitelistedDomains().includes(normalized);
+  const parts = normalized.split('.');
+  if (parts.length < 3) return false;
+  const root = parts.slice(-2).join('.');
+  const sub = parts.slice(0, -2).join('.');
+  return isValidSubdomain(sub) && isWhitelistedRoot(root);
 }
 
-/** Validate + normalize a user-supplied domain; null when not whitelisted. */
+export function parseNip05(full: string): { username: string; subdomain_prefix: SubdomainPrefix; root_domain: string } | null {
+  const at = full.indexOf('@');
+  if (at === -1) return null;
+  const username = full.slice(0, at).trim().toLowerCase();
+  const domain = full.slice(at + 1).trim().toLowerCase();
+  const parts = domain.split('.');
+  if (parts.length < 3) return null;
+  const root = parts.slice(-2).join('.');
+  const sub = parts.slice(0, -2).join('.') as SubdomainPrefix;
+  if (!username || !isValidSubdomain(sub) || !isWhitelistedRoot(root)) return null;
+  return { username, subdomain_prefix: sub, root_domain: root };
+}
+
 export function resolveRequestedDomain(requested?: string): string | null {
-  const candidate = (requested ?? '').trim().toLowerCase() || getPrimaryDomain();
+  if (!requested) return `my.${getPrimaryRoot()}`;
+  const candidate = requested.trim().toLowerCase();
   return isWhitelistedDomain(candidate) ? candidate : null;
+}
+
+/** Resolve a categorized NIP-05 request by class. */
+export function resolveRequestedCategorized(params: { username: string; subdomain_prefix: SubdomainPrefix; root_domain: string }): string | null {
+  if (!isValidSubdomain(params.subdomain_prefix)) return null;
+  if (!isWhitelistedRoot(params.root_domain)) return null;
+  return `${params.username}@${params.subdomain_prefix}.${params.root_domain}`;
 }
 
 /** Test seam: clear the memoized whitelist so env changes are picked up. */
 export function resetDomainWhitelistCache(): void {
-  cachedDomains = null;
+  cachedRoots = null;
 }

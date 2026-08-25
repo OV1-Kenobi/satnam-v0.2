@@ -92,15 +92,27 @@ function getClientIP(headers: Record<string, string | undefined>): string {
 }
 
 // ============================================================================
-// NIP-05 parsing
+// NIP-05 parsing — 004 unified: username@subdomain_prefix.root_domain
+// e.g. alice@my.satnam.pub, myfamily@our.satnam.pub, bot@agent.satnam.pub
 // ============================================================================
 
-function parseNip05(nip05: string): { username: string; domain: string } {
+function parseNip05(nip05: string): { username: string; subdomain_prefix: string; root_domain: string } {
   const parts = nip05.split("@");
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    throw new Error("Invalid NIP-05 format; expected username@domain");
+    throw new Error("Invalid NIP-05 format; expected username@subdomain.root");
   }
-  return { username: parts[0].toLowerCase(), domain: parts[1].toLowerCase() };
+  const username = parts[0].toLowerCase();
+  const domain = parts[1].toLowerCase();
+  const domainParts = domain.split(".");
+  if (domainParts.length < 3) {
+    throw new Error("Invalid NIP-05 domain; expected subdomain.root (e.g. my.satnam.pub)");
+  }
+  const root_domain = domainParts.slice(-2).join(".");
+  const subdomain_prefix = domainParts.slice(0, -2).join(".");
+  if (!['my','our','agent'].includes(subdomain_prefix)) {
+    throw new Error(`Invalid subdomain prefix: ${subdomain_prefix} (expected my/our/agent)`);
+  }
+  return { username, subdomain_prefix, root_domain };
 }
 
 // ============================================================================
@@ -141,9 +153,10 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   }
 
   let username: string;
-  let domain: string;
+  let subdomain_prefix: string;
+  let root_domain: string;
   try {
-    ({ username, domain } = parseNip05(nip05));
+    ({ username, subdomain_prefix, root_domain } = parseNip05(nip05));
   } catch (err) {
     return errorResponse(
       400,
@@ -152,19 +165,21 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     );
   }
 
-  // Only serve identifiers for our own domain
-  const ownedDomains = (
+  // 004: whitelist is root_domain only (subdomain is categorizer: my/our/agent)
+  const ownedRoots = (
+    process.env.NIP05_ROOT_DOMAINS ||
     process.env.NIP05_DOMAINS ||
+    process.env.VITE_NIP05_ROOT_DOMAINS ||
     process.env.VITE_NIP05_DOMAINS ||
-    "satnam.pub"
+    "satnam.pub,openagents.com,sovereignhybridcompute.com"
   )
     .split(",")
-    .map((d) => d.trim());
+    .map((d) => d.trim().toLowerCase());
 
-  if (!ownedDomains.includes(domain)) {
+  if (!ownedRoots.includes(root_domain)) {
     return errorResponse(
       404,
-      `Domain ${domain} not served by this resolver`,
+      `Root domain ${root_domain} not served by this resolver`,
       requestOrigin
     );
   }
@@ -172,16 +187,13 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   try {
     const supabase = getSupabase();
 
-    // Query nip05_identifiers (public table), scoped to the requested domain.
-    // Layer 2 fix (2026-08-24, C5/CR-A): previously matched username only, so
-    // identical usernames across whitelisted domains collided. The `domain`
-    // column was added by migration 002; whitelist itself is config-not-code
-    // via NIP05_DOMAINS (checked above).
+    // Query nip05_identifiers — unified table with subdomain_prefix + root_domain (004)
     const { data, error } = await supabase
       .from("nip05_identifiers")
       .select("username, pubkey")
       .eq("username", username)
-      .eq("domain", domain)
+      .eq("subdomain_prefix", subdomain_prefix)
+      .eq("root_domain", root_domain)
       .eq("is_active", true)
       .maybeSingle();
 

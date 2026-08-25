@@ -43,19 +43,24 @@ function getSupabase() {
 // Constants
 // ============================================================================
 
-const NIP05_DOMAIN = process.env.NIP05_DOMAIN || process.env.VITE_NIP05_DOMAIN || 'satnam.pub';
-// Layer 2 (2026-08-24, founder-directed): configurable domain whitelist —
-// config-not-code. Initial entries per founder: openagents.com, sovereignhybridcompute.com.
-const ALLOWED_NIP05_DOMAINS = new Set(
+const NIP05_DOMAIN = process.env.NIP05_DOMAIN || process.env.VITE_NIP05_DOMAIN || 'satnam.pub'; // legacy, kept for ALLOWED_ORIGINS
+// 004 (2026-08-25): unified categorizer — my.* = human, our.* = family/group, agent.* = agent
+// Whitelist is root_domain ONLY (config-not-code via NIP05_ROOT_DOMAINS). Subdomain is code allow-list.
+const DEFAULT_ROOT_DOMAIN = process.env.NIP05_ROOT_DOMAIN || process.env.NIP05_DOMAIN || process.env.VITE_NIP05_ROOT_DOMAIN || process.env.VITE_NIP05_DOMAIN || 'satnam.pub';
+const ROOT_WHITELIST = new Set(
   (
+    process.env.NIP05_ROOT_DOMAINS ||
     process.env.NIP05_DOMAINS ||
+    process.env.VITE_NIP05_ROOT_DOMAINS ||
     process.env.VITE_NIP05_DOMAINS ||
     'satnam.pub,openagents.com,sovereignhybridcompute.com'
   )
     .split(',')
     .map((d) => d.trim().toLowerCase())
 );
-const DOMAIN_REGEX = /^[a-z0-9][a-z0-9\-.]{1,253}$/;
+const SUBDOMAIN_ALLOW = new Set(['my', 'our', 'agent']);
+// Root domain format is enforced by ROOT_WHITELIST membership for auto-created rows;
+// imported LN addresses bypass the whitelist but must still be a valid host (checked via URL parsing).
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const RATE_LIMIT_MAX_PER_PUBKEY = 10; // 10 registrations/hour per pubkey
 const RATE_LIMIT_WINDOW_IP_MS = 60_000; // 1 minute
@@ -71,9 +76,22 @@ const LUD16_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 // Layer 2 fix (2026-08-24): EXACT origin matching — startsWith() prefix matching
 // admitted lookalike origins such as https://satnam.pub.evil.com
+// 004: allow my./our./agent. subdomains for all whitelisted roots
 const ALLOWED_ORIGINS = new Set([
   `https://${NIP05_DOMAIN}`,
+  `https://my.${DEFAULT_ROOT_DOMAIN}`,
+  `https://our.${DEFAULT_ROOT_DOMAIN}`,
+  `https://agent.${DEFAULT_ROOT_DOMAIN}`,
   'https://satnam.pub',
+  'https://my.satnam.pub',
+  'https://our.satnam.pub',
+  'https://agent.satnam.pub',
+  'https://my.openagents.com',
+  'https://our.openagents.com',
+  'https://agent.openagents.com',
+  'https://my.sovereignhybridcompute.com',
+  'https://our.sovereignhybridcompute.com',
+  'https://agent.sovereignhybridcompute.com',
   'http://localhost:5173',
   'http://localhost:8888',
 ]);
@@ -256,7 +274,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
 
   // ── NIP-98 Authentication (MUST be called before any business logic — S10) ──
   const authHeader = event.headers?.authorization || event.headers?.Authorization;
-  const requestUrl = `https://${event.headers?.host || NIP05_DOMAIN}/.netlify/functions/register-identity`;
+  const requestUrl = `https://${event.headers?.host || DEFAULT_ROOT_DOMAIN}/.netlify/functions/register-identity`;
   const bodyBytes = event.body
     ? new TextEncoder().encode(event.isBase64Encoded ? atob(event.body) : event.body)
     : undefined;
@@ -469,11 +487,26 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
 
   const username = (body.username || '').trim().toLowerCase();
   const lud16 = body.lud16?.trim();
-  // Whitelist-aware domain (CR-A): defaults to primary domain; must be whitelisted.
-  const requestedDomain = ((body as { domain?: string }).domain || NIP05_DOMAIN).trim().toLowerCase();
+  // 004 unified categorizer: domain = subdomain_prefix.root_domain
+  // Accept either body.domain as full categorized domain (my.satnam.pub) or
+  // separate body.subdomain_prefix + body.root_domain for explicit class.
+  const rawDomain = (
+    (body as { domain?: string }).domain ||
+    (body as { subdomain_prefix?: string; root_domain?: string }).subdomain_prefix && (body as { root_domain?: string }).root_domain
+      ? `${(body as { subdomain_prefix?: string }).subdomain_prefix}.${(body as { root_domain?: string }).root_domain}`
+      : `my.${DEFAULT_ROOT_DOMAIN}`
+  ).trim().toLowerCase();
 
-  if (!DOMAIN_REGEX.test(requestedDomain) || !ALLOWED_NIP05_DOMAINS.has(requestedDomain)) {
-    return errorResponse(403, `Domain not whitelisted: ${requestedDomain}`, requestOrigin);
+  const domainParts = rawDomain.split('.');
+  if (domainParts.length < 3) {
+    return errorResponse(400, `Invalid categorized domain: ${rawDomain} (expected subdomain.root, e.g. my.satnam.pub)`, requestOrigin);
+  }
+  const root_domain = domainParts.slice(-2).join('.');
+  const subdomain_prefix = domainParts.slice(0, -2).join('.');
+  const requestedDomain = rawDomain; // for messages/back-compat
+
+  if (!SUBDOMAIN_ALLOW.has(subdomain_prefix) || !ROOT_WHITELIST.has(root_domain)) {
+    return errorResponse(403, `Domain not whitelisted: ${requestedDomain} (subdomain must be my/our/agent, root must be whitelisted)`, requestOrigin);
   }
 
   const usernameError = validateUsername(username);
@@ -493,16 +526,20 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
 
   // ── Action routing: rotate path (CR-H — old key hands the record over) ──
   if (action === 'rotate') {
-    const rotateBody = body as { username?: string; domain?: string; successor_pubkey?: string };
+    const rotateBody = body as { username?: string; domain?: string; subdomain_prefix?: string; root_domain?: string; successor_pubkey?: string };
     const username = (rotateBody.username || '').trim().toLowerCase();
     const successor = (rotateBody.successor_pubkey || '').trim().toLowerCase();
-    const domain = ((rotateBody.domain || '').trim().toLowerCase()) || NIP05_DOMAIN;
+    const rawRotateDomain = (rotateBody.domain || (rotateBody.subdomain_prefix && rotateBody.root_domain ? `${rotateBody.subdomain_prefix}.${rotateBody.root_domain}` : '') || `my.${DEFAULT_ROOT_DOMAIN}`).trim().toLowerCase();
+    const rParts = rawRotateDomain.split('.');
+    if (rParts.length < 3) return errorResponse(400, `Invalid categorized domain: ${rawRotateDomain}`, requestOrigin);
+    const r_root = rParts.slice(-2).join('.');
+    const r_sub = rParts.slice(0, -2).join('.');
 
     if (!username || !/^[0-9a-f]{64}$/.test(successor)) {
       return errorResponse(400, 'rotate requires username and 64-hex successor_pubkey', requestOrigin);
     }
-    if (!DOMAIN_REGEX.test(domain) || !ALLOWED_NIP05_DOMAINS.has(domain)) {
-      return errorResponse(403, `Domain not whitelisted: ${domain}`, requestOrigin);
+    if (!SUBDOMAIN_ALLOW.has(r_sub) || !ROOT_WHITELIST.has(r_root)) {
+      return errorResponse(403, `Domain not whitelisted: ${rawRotateDomain}`, requestOrigin);
     }
     // Self-rotation is a no-op and almost certainly a client bug.
     if (successor === pubkey) {
@@ -515,7 +552,8 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
       .from('nip05_identifiers')
       .select('id, pubkey')
       .eq('username', username)
-      .eq('domain', domain)
+      .eq('subdomain_prefix', r_sub)
+      .eq('root_domain', r_root)
       .eq('pubkey', pubkey)
       .eq('is_active', true)
       .maybeSingle();
@@ -529,11 +567,12 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
       return errorResponse(403, 'Rotation not authorized for this identity', requestOrigin);
     }
 
-    // Successor pubkey must not already hold an active record on this domain.
+    // Successor pubkey must not already hold an active record on this categorized domain.
     const { data: successorTaken, error: takenErr } = await supabase
       .from('nip05_identifiers')
       .select('username')
-      .eq('domain', domain)
+      .eq('subdomain_prefix', r_sub)
+      .eq('root_domain', r_root)
       .eq('pubkey', successor)
       .eq('is_active', true)
       .maybeSingle();
@@ -556,7 +595,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     }
 
     await recordRateLimitEvent(supabase, pubkey, clientIP);
-    console.log('[register-identity] rotated', { username, domain });
+    console.log('[register-identity] rotated', { username, domain: `${r_sub}.${r_root}` });
     return {
       statusCode: 200,
       headers: {
@@ -564,7 +603,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store',
       },
-      body: JSON.stringify({ success: true, nip05: `${username}@${domain}`, rotated_to: successor }),
+      body: JSON.stringify({ success: true, nip05: `${username}@${r_sub}.${r_root}`, rotated_to: successor }),
     };
   }
 
@@ -590,12 +629,19 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
       if (!LUD16_REGEX.test(lud16)) {
         return errorResponse(400, 'Invalid Lightning address format (expected user@domain.tld)', requestOrigin);
       }
-      const lud16Domain = lud16.split('@')[1] ?? NIP05_DOMAIN;
+      const lud16DomainRaw2 = (lud16.split('@')[1] ?? `my.${DEFAULT_ROOT_DOMAIN}`).toLowerCase();
+      const ludParts2 = lud16DomainRaw2.split('.');
+      const ludRoot2 = ludParts2.slice(-2).join('.');
+      const ludSub2 = ludParts2.slice(0, -2).join('.') || 'my';
+      const isImported2 = lud16DomainRaw2 !== `${subdomain_prefix}.${root_domain}` && lud16DomainRaw2 !== requestedDomain;
       const { error: updErr } = await supabase
         .from('lightning_addresses')
         .upsert({
           username,
-          lnurl_callback: `https://${lud16Domain}/.well-known/lnurlp/${username}`,
+          subdomain_prefix: isImported2 ? ludSub2 : subdomain_prefix,
+          root_domain: isImported2 ? ludRoot2 : root_domain,
+          lnurl_callback: `https://${lud16DomainRaw2}/.well-known/lnurlp/${username}`,
+          is_imported: isImported2,
           min_sendable_msats: 1000,
           max_sendable_msats: 100000000000,
           metadata_json: JSON.stringify([['text/identifier', `${lud16}`]]),
@@ -607,6 +653,10 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     }
 
     await recordRateLimitEvent(supabase, pubkey, clientIP);
+    // For update path, return the existing NIP-05 (username's current categorized domain)
+    // If we have subdomain context from the request, use it; otherwise lookup would be needed.
+    // Pragmatic: use the requested domain for human updates (my.*) as that's the human directory.
+    const updateNip05 = `${username}@${subdomain_prefix}.${root_domain}`;
     return {
       statusCode: 200,
       headers: {
@@ -614,16 +664,17 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store',
       },
-      body: JSON.stringify({ success: true, nip05: `${username}@${NIP05_DOMAIN}`, ...(lud16 ? { lud16 } : {}) }),
+      body: JSON.stringify({ success: true, nip05: updateNip05, ...(lud16 ? { lud16 } : {}) }),
     };
   }
 
-  // ── Check username availability (active identifiers, whitelist-scoped) ──
+  // ── Check username availability (active identifiers, whitelist-scoped, 004) ──
   const { data: existingIdent, error: identCheckErr } = await supabase
     .from('nip05_identifiers')
     .select('username')
     .eq('username', username)
-    .eq('domain', requestedDomain)
+    .eq('subdomain_prefix', subdomain_prefix)
+    .eq('root_domain', root_domain)
     .eq('is_active', true)
     .maybeSingle();
 
@@ -636,10 +687,10 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(409, 'Username already registered', requestOrigin);
   }
 
-  // ── Check if pubkey already has an active identity ──
+  // ── Check if pubkey already has an active identity — 004 unified
   const { data: existingPubkey, error: pubkeyCheckErr } = await supabase
     .from('nip05_identifiers')
-    .select('username')
+    .select('username, subdomain_prefix, root_domain')
     .eq('pubkey', pubkey)
     .eq('is_active', true)
     .maybeSingle();
@@ -650,7 +701,10 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   }
 
   if (existingPubkey) {
-    return errorResponse(409, `Pubkey already registered as ${existingPubkey.username}@${NIP05_DOMAIN}`, requestOrigin);
+    // 004: show categorized NIP-05 if we can, else fallback to the requested domain
+    const ep = existingPubkey as unknown as { username: string; subdomain_prefix?: string; root_domain?: string };
+    const existingDomain = ep.subdomain_prefix && ep.root_domain ? `${ep.subdomain_prefix}.${ep.root_domain}` : requestedDomain;
+    return errorResponse(409, `Pubkey already registered as ${ep.username}@${existingDomain}`, requestOrigin);
   }
 
   // ── Check username_reservations (active reservation for another pubkey) ──
@@ -670,11 +724,12 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(409, 'Username temporarily reserved by another user', requestOrigin);
   }
 
-  // ── Insert into nip05_identifiers ──
+  // ── Insert into nip05_identifiers — 004 unified: subdomain_prefix + root_domain ──
   const { error: insertErr } = await supabase.from('nip05_identifiers').insert({
     username,
     pubkey,
-    domain: requestedDomain,
+    subdomain_prefix,
+    root_domain,
     is_active: true,
     created_at: new Date().toISOString(),
   });
@@ -688,16 +743,22 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(500, 'Internal server error', requestOrigin);
   }
 
-  // ── Insert Lightning address if provided ──
+  // ── Insert Lightning address if provided — 004: subdomain_prefix + root_domain + is_imported ──
   if (lud16) {
-    // C5 alignment (2026-08-24): lightning_addresses columns per migration 001 are
-    // username (FK), lnurl_callback, min/max_sendable_msats, metadata_json.
-    // The previous insert used nonexistent pubkey/lud16 columns.
-    // LUD-16 → LUD-06 callback: https://<domain>/.well-known/lnurlp/<username>
-    const lud16Domain = lud16.split('@')[1] ?? NIP05_DOMAIN;
+    const lud16DomainRaw = (lud16.split('@')[1] ?? `my.${DEFAULT_ROOT_DOMAIN}`).toLowerCase();
+    const ludParts = lud16DomainRaw.split('.');
+    const ludRoot = ludParts.slice(-2).join('.');
+    const ludSubRaw = ludParts.slice(0, -2).join('.') || 'my';
+    const isImported = lud16DomainRaw !== requestedDomain;
+    // For imported external LN (e.g. getalby.com), keep its own subdomain/root even if not in allow-list — is_imported bypasses CHECK
+    const lnSub = isImported ? ludSubRaw : subdomain_prefix;
+    const lnRoot = isImported ? ludRoot : root_domain;
     const { error: lnErr } = await supabase.from('lightning_addresses').insert({
       username,
-      lnurl_callback: `https://${lud16Domain}/.well-known/lnurlp/${username}`,
+      subdomain_prefix: lnSub,
+      root_domain: lnRoot,
+      lnurl_callback: `https://${lud16DomainRaw}/.well-known/lnurlp/${username}`,
+      is_imported: isImported,
       min_sendable_msats: 1000,
       max_sendable_msats: 100000000000,
       metadata_json: JSON.stringify([
