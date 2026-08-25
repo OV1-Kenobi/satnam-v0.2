@@ -42,6 +42,7 @@ const AgentsPage         = lazy(() => import('./pages/AgentsPage'));
 const MarketplacePage    = lazy(() => import('./pages/MarketplacePage'));
 const CircleOfTrustPage  = lazy(() => import('./pages/CircleOfTrustPage'));
 const MessagesPage       = lazy(() => import('./pages/MessagesPage'));
+const SettingsVaultPage  = lazy(() => import('./pages/SettingsVault'));
 const NotFoundPage       = lazy(() => import('./pages/NotFoundPage'));
 
 // ── Loading fallback ──────────────────────────────────────────────────────────
@@ -106,6 +107,7 @@ function AppRouter() {
             <Route path="/agents"      element={<AgentsPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/messages"    element={<MessagesPage />} />
+            <Route path="/settings/vault" element={<SettingsVaultPage />} />
           </Route>
 
           {/* ── 404 ───────────────────────────────────────────────────── */}

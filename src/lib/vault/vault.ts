@@ -50,12 +50,15 @@ import { bytesToHex, hexToBytes, utf8ToBytes, bytesToUtf8, randomBytes } from '@
 import type {
   VaultOps,
   VaultConfig,
+  VaultMethod,
+  VaultSecondFactor,
+  VaultSettings,
   Nip46PairingState,
   EncryptedLlmKeys,
   CashuProof,
   WrappingKeyMeta,
 } from './types.js';
-import { VaultError, DEFAULT_VAULT_CONFIG } from './types.js';
+import { VaultError, DEFAULT_VAULT_CONFIG, DEFAULT_VAULT_SETTINGS } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -413,6 +416,31 @@ function derivePassphraseWrappingKey(passphrase: string, salt: Uint8Array): Uint
 }
 
 /**
+ * Derive NFC wrapping key via PinGate: argon2id(pin, uid, m:65536,t:3,p:4) → 32 bytes.
+ * The UID is the NTAG424 SUN uid (hex string); PIN is 4-8 digits.
+ * @internal exported for tests
+ */
+export function deriveNfcWrappingKey(pin: string, uid: string): Uint8Array {
+  return argon2id(utf8ToBytes(pin), utf8ToBytes(uid), {
+    ...ARGON2_PARAMS,
+    dkLen: MASTER_KEY_LEN,
+  }) as Uint8Array;
+}
+
+/**
+ * XOR two 32-byte arrays to produce a combined wrapping key.
+ * Used for WebAuthn PRF defense-in-depth: finalKey = PRF bytes XOR passphrase-derived key.
+ * Both inputs must be 32 bytes.
+ * @internal exported for tests
+ */
+export function xorWrappingKeys(a: Uint8Array, b: Uint8Array): Uint8Array {
+  if (a.length !== 32 || b.length !== 32) throw new Error('xorWrappingKeys requires 32-byte inputs');
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) out[i] = (a[i] ?? 0) ^ (b[i] ?? 0);
+  return out;
+}
+
+/**
  * Zero a Uint8Array in-place using cryptographically-motivated overwriting.
  * Prevents sensitive key material from lingering in GC-reachable memory.
  *
@@ -523,39 +551,54 @@ export class Vault implements VaultOps {
 
   /**
    * Derive a wrapping key from the provided method and credential.
+   *
+   * - 'passphrase': argon2id(passphrase, salt) — salt is read/created at vault/passphrase.salt
+   * - 'webauthn':   PRF output Uint8Array (32 bytes) from navigator.credentials.get PRF extension — used directly as wrapping key. For defense-in-depth the caller MAY XOR with a passphrase-derived key via xorWrappingKeys() before calling (see WP 005). The raw PRF bytes are treated as the wrapping key here; the XOR composition is a caller-side concern so the vault stays deterministic and testable.
+   * - 'nfc':        PinGate derived bytes argon2id(pin, uid, m:65536,t:3,p:4) → 32 bytes. Caller derives via deriveNfcWrappingKey(pin, uid) and passes the result. Require tap + PIN at UI layer.
    */
   private async deriveWrappingKey(
-    method: 'webauthn' | 'passphrase',
+    method: VaultMethod,
     credential: Uint8Array | string,
   ): Promise<{ wrappingKey: Uint8Array; salt: Uint8Array }> {
     if (method === 'webauthn') {
-      /**
-       * WebAuthn PRF extension stub.
-       *
-       * In a full browser implementation, this would call:
-       * ```
-       * navigator.credentials.get({
-       *   publicKey: {
-       *     allowCredentials: [{ id: credentialId, type: 'public-key' }],
-       *     userVerification: 'required',
-       *     extensions: { prf: { eval: { first: salt } } },
-       *   }
-       * })
-       * ```
-       * and extract the 32-byte PRF output from:
-       * ```
-       * assertion.getClientExtensionResults().prf?.results?.first
-       * ```
-       * That 32-byte output IS the wrapping key (no additional KDF step needed).
-       *
-       * The credentialId is stored in OPFS as vault/webauthn.cred (not secret —
-       * it is a public identifier). The salt is stored as vault/passphrase.salt
-       * for deterministic re-derivation.
-       *
-       * This environment does not support the WebAuthn PRF extension.
-       * @see SPECIFICATION.md §2.2 Option A
-       */
-      throw new Error('WebAuthn PRF not available in this environment');
+      if (!(credential instanceof Uint8Array)) {
+        throw new Error('WebAuthn credential must be a Uint8Array (32-byte PRF output)');
+      }
+      if (credential.length !== 32) {
+        throw new Error('WebAuthn PRF output must be 32 bytes');
+      }
+      // PRF output IS the wrapping key — no KDF step. For XOR defense-in-depth, the caller
+      // is expected to have already performed xorWrappingKeys(prfBytes, passphraseDerivedKey)
+      // before invoking initialize/unlock. See WP 005 and vault PRF wiring notes.
+      const wrappingKey = new Uint8Array(credential);
+      // Salt is not used for webauthn but we need to return one for signature compatibility.
+      // Reuse or create a deterministic salt file for auditability; not used in derivation.
+      const storage = await this.getStorage();
+      const saltPath = `${this.config.vaultRoot}/webauthn.salt`;
+      let salt = await storage.read(saltPath);
+      if (!salt) {
+        salt = randomBytes(32);
+        await storage.write(saltPath, salt);
+      }
+      return { wrappingKey, salt };
+    }
+
+    if (method === 'nfc') {
+      if (!(credential instanceof Uint8Array)) {
+        throw new Error('NFC credential must be a Uint8Array (32-byte PinGate derived bytes)');
+      }
+      if (credential.length !== 32) {
+        throw new Error('NFC PinGate derived bytes must be 32 bytes');
+      }
+      const wrappingKey = new Uint8Array(credential);
+      const storage = await this.getStorage();
+      const saltPath = `${this.config.vaultRoot}/nfc.salt`;
+      let salt = await storage.read(saltPath);
+      if (!salt) {
+        salt = randomBytes(32);
+        await storage.write(saltPath, salt);
+      }
+      return { wrappingKey, salt };
     }
 
     // Passphrase derivation
@@ -584,13 +627,13 @@ export class Vault implements VaultOps {
 
   /** @inheritdoc */
   async initialize(
-    method: 'webauthn' | 'passphrase',
+    method: VaultMethod,
     credential: Uint8Array | string,
   ): Promise<void> {
     const storage = await this.getStorage();
 
     // Create directory structure
-    const dirs = ['identities', 'frost', 'nwc', 'nfc', 'nip46', 'agents', 'cashu', 'sig4sats'];
+    const dirs = ['identities', 'frost', 'nwc', 'nfc', 'nip46', 'agents', 'cashu', 'sig4sats', 'settings'];
     for (const dir of dirs) {
       // Write a sentinel file so the directory is created
       const sentinelPath = `${this.config.vaultRoot}/${dir}/.keep`;
@@ -634,7 +677,7 @@ export class Vault implements VaultOps {
 
   /** @inheritdoc */
   async unlock(
-    method: 'webauthn' | 'passphrase',
+    method: VaultMethod,
     credential: Uint8Array | string,
   ): Promise<void> {
     const storage = await this.getStorage();
@@ -999,7 +1042,7 @@ export class Vault implements VaultOps {
     // Collect all vault entries (already-encrypted blobs stored as hex)
     const entries: Record<string, string> = {};
 
-    const dirs = ['identities', 'frost', 'nwc', 'nfc', 'nip46', 'agents', 'cashu', 'sig4sats'];
+    const dirs = ['identities', 'frost', 'nwc', 'nfc', 'nip46', 'agents', 'cashu', 'sig4sats', 'settings'];
     for (const dir of dirs) {
       const files = await storage.list(`${this.config.vaultRoot}/${dir}`);
       for (const file of files) {
@@ -1126,6 +1169,50 @@ export class Vault implements VaultOps {
     }
 
     // The vault is now populated. Call unlock(method, passphrase) to activate it.
+  }
+
+  // -------------------------------------------------------------------------
+  // Settings (second factor) — encrypted under master key at vault/settings/settings.json
+  // -------------------------------------------------------------------------
+
+  /** @inheritdoc */
+  async getVaultSettings(): Promise<VaultSettings> {
+    const key = this.requireUnlocked();
+    this.resetIdleTimer();
+    try {
+      const plaintext = await this.readDecrypted(key, this.path('settings', 'settings.json'));
+      const parsed = JSON.parse(bytesToUtf8(plaintext)) as VaultSettings;
+      // Validate secondFactor enum
+      if (!['none', 'yubikey', 'nfc', 'biometrics'].includes(parsed.secondFactor)) {
+        return { ...DEFAULT_VAULT_SETTINGS, updatedAt: new Date().toISOString() };
+      }
+      return parsed;
+    } catch (err) {
+      if (err instanceof Error && err.message === VaultError.IdentityNotFound) {
+        return { ...DEFAULT_VAULT_SETTINGS, updatedAt: new Date().toISOString() };
+      }
+      throw err;
+    }
+  }
+
+  /** @inheritdoc */
+  async setVaultSettings(settings: VaultSettings): Promise<void> {
+    const key = this.requireUnlocked();
+    this.resetIdleTimer();
+    if (!['none', 'yubikey', 'nfc', 'biometrics'].includes(settings.secondFactor)) {
+      throw new Error(`Invalid secondFactor: ${settings.secondFactor}`);
+    }
+    const toStore: VaultSettings = {
+      secondFactor: settings.secondFactor,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.writeEncrypted(key, this.path('settings', 'settings.json'), utf8ToBytes(JSON.stringify(toStore)));
+  }
+
+  /** @inheritdoc */
+  async getSecondFactor(): Promise<VaultSecondFactor> {
+    const s = await this.getVaultSettings();
+    return s.secondFactor;
   }
 }
 

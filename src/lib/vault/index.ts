@@ -20,15 +20,19 @@
  * ```
  */
 
-export { Vault, getVault, hashUrl } from './vault.js';
+export { Vault, getVault, hashUrl, deriveNfcWrappingKey, xorWrappingKeys } from './vault.js';
 export {
   VaultError,
   DEFAULT_VAULT_CONFIG,
+  DEFAULT_VAULT_SETTINGS,
 } from './types.js';
 export type {
   VaultOps,
   VaultConfig,
   VaultDirectory,
+  VaultMethod,
+  VaultSecondFactor,
+  VaultSettings,
   Nip46PairingState,
   EncryptedLlmKeys,
   CashuProof,

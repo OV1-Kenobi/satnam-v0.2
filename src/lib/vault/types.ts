@@ -168,6 +168,33 @@ export interface CashuProof {
 }
 
 // ---------------------------------------------------------------------------
+// Vault Method & Second Factor
+// ---------------------------------------------------------------------------
+
+/** Vault unlocking method — extends for PRF and NFC. Default is passphrase-only. */
+export type VaultMethod = 'passphrase' | 'webauthn' | 'nfc';
+
+/** User-selectable second factor (persists in vault settings slot, default 'none'). */
+export type VaultSecondFactor = 'none' | 'yubikey' | 'nfc' | 'biometrics';
+
+/**
+ * Persisted vault settings (encrypted under master key at vault/settings.json).
+ * Default secondFactor is 'none' (passphrase-only). Three peers are opt-in.
+ */
+export interface VaultSettings {
+  /** Second factor preference — default 'none'. */
+  secondFactor: VaultSecondFactor;
+  /** ISO 8601 timestamp of last settings update. */
+  updatedAt: string;
+}
+
+/** Default vault settings. */
+export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
+  secondFactor: 'none',
+  updatedAt: new Date().toISOString(),
+};
+
+// ---------------------------------------------------------------------------
 // Wrapping Key Metadata
 // ---------------------------------------------------------------------------
 
@@ -177,7 +204,7 @@ export interface CashuProof {
  */
 export interface WrappingKeyMeta {
   /** Derivation method used for the wrapping key. */
-  method: 'passphrase' | 'webauthn';
+  method: VaultMethod;
 
   /**
    * For 'passphrase' method: base64-encoded 32-byte random salt.
@@ -229,11 +256,11 @@ export interface VaultOps {
    * under the wrapping key using AES-256-GCM. Creates all vault directory
    * structure in OPFS.
    *
-   * @param method - 'passphrase' for argon2id-derived key; 'webauthn' for PRF
-   * @param credential - Passphrase string, or WebAuthn PRF output (Uint8Array)
+   * @param method - 'passphrase' for argon2id-derived key; 'webauthn' for PRF (32-byte Uint8Array); 'nfc' for PinGate derived bytes (32-byte Uint8Array from argon2id(pin, uid, m:65536,t:3,p:4))
+   * @param credential - Passphrase string, or WebAuthn PRF output (Uint8Array), or NFC PinGate bytes (Uint8Array)
    * @throws {VaultError.StorageFull} if OPFS storage is unavailable
    */
-  initialize(method: 'webauthn' | 'passphrase', credential: Uint8Array | string): Promise<void>;
+  initialize(method: VaultMethod, credential: Uint8Array | string): Promise<void>;
 
   /**
    * Unlock an existing vault. Derives the wrapping key from the credential,
@@ -241,10 +268,10 @@ export interface VaultOps {
    * for the duration of the idle timeout.
    *
    * @param method - Must match the method used during initialize()
-   * @param credential - Passphrase string, or WebAuthn PRF output (Uint8Array)
+   * @param credential - Passphrase string, or WebAuthn PRF output (Uint8Array), or NFC PinGate bytes (Uint8Array)
    * @throws {VaultError.DecryptionFailed} if wrapping key is incorrect
    */
-  unlock(method: 'webauthn' | 'passphrase', credential: Uint8Array | string): Promise<void>;
+  unlock(method: VaultMethod, credential: Uint8Array | string): Promise<void>;
 
   /**
    * Lock the vault. Zeroes the master key from the JavaScript heap. All
@@ -555,4 +582,27 @@ export interface VaultOps {
    * @throws {VaultError.DecryptionFailed} if the wrapping key is incorrect
    */
   importEncryptedBackup(data: Uint8Array, wrappingKey: Uint8Array): Promise<void>;
+
+  // -------------------------------------------------------------------------
+  // Settings (second factor preference) — encrypted under master key at vault/settings.json
+  // -------------------------------------------------------------------------
+
+  /**
+   * Retrieve vault settings (second factor preference). Returns default if none persisted.
+   * @throws {VaultError.VaultLocked} if vault is locked
+   */
+  getVaultSettings(): Promise<VaultSettings>;
+
+  /**
+   * Persist vault second-factor preference (encrypted under master key).
+   * @param settings - Settings to store
+   * @throws {VaultError.VaultLocked} if vault is locked
+   */
+  setVaultSettings(settings: VaultSettings): Promise<void>;
+
+  /**
+   * Get the current second factor setting, or 'none' if not yet stored.
+   * Convenience wrapper over getVaultSettings().
+   */
+  getSecondFactor(): Promise<VaultSecondFactor>;
 }
