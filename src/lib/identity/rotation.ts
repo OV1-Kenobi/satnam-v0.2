@@ -21,8 +21,13 @@
 
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
 
-/** Succession event kind per plan directive (see collision flag above). */
-export const SUCCESSION_KIND = 13;
+/**
+ * Succession event kind — FOUNDER DECISION 2026-08-24 (#3): kind:13 belongs
+ * to NIP-59 seals; succession uses a DEDICATED kind instead of sharing.
+ * Chosen 1041 (regular-event range, nod to the NIP-41 succession reference;
+ * unassigned among common NIPs at time of writing).
+ */
+export const SUCCESSION_KIND = 1041;
 
 export interface SuccessionEvent extends Event {
   kind: typeof SUCCESSION_KIND;
