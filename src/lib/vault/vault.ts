@@ -946,6 +946,39 @@ export class Vault implements VaultOps {
   }
 
   // -------------------------------------------------------------------------
+  // OpenTimestamps receipts (CR-F)
+  // -------------------------------------------------------------------------
+
+  /** @inheritdoc */
+  async storeOtsReceipt(eventId: string, receipt: unknown): Promise<void> {
+    if (!/^[0-9a-f]{64}$/.test(eventId)) {
+      throw new Error(`invalid event id: ${eventId}`);
+    }
+    const key = this.requireUnlocked();
+    this.resetIdleTimer();
+    await this.writeEncrypted(
+      key,
+      this.path('ots', `${eventId}.json`),
+      utf8ToBytes(JSON.stringify(receipt)),
+    );
+  }
+
+  /** @inheritdoc */
+  async getOtsReceipt(eventId: string): Promise<unknown> {
+    const key = this.requireUnlocked();
+    this.resetIdleTimer();
+    try {
+      const plaintext = await this.readDecrypted(key, this.path('ots', `${eventId}.json`));
+      return JSON.parse(bytesToUtf8(plaintext));
+    } catch (err) {
+      if (err instanceof Error && err.message === VaultError.IdentityNotFound) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Backup
   // -------------------------------------------------------------------------
 

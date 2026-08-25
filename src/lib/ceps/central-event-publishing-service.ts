@@ -28,7 +28,6 @@
 import {
   finalizeEvent,
   getPublicKey,
-  nip04,
   nip19,
   SimplePool,
   verifyEvent,
@@ -538,39 +537,36 @@ export class CentralEventPublishingService {
       throw new Error("[CEPS] No active session for sending messages");
     }
 
-    let recipientHex: string;
-    try {
-      const dec = nip19.decode(recipientNpub);
-      recipientHex =
-        dec.type === "npub"
-          ? (dec.data as string)
-          : bytesToHex(dec.data as Uint8Array);
-    } catch {
-      recipientHex = recipientNpub;
-    }
-
-    let encryptedContent: string;
-    if (this.activeNsecHex) {
-      encryptedContent = await nip04.encrypt(
-        this.activeNsecHex,
-        recipientHex,
-        plaintext
-      );
-    } else {
-      encryptedContent = await (window as any).nostr.nip04.encrypt(
-        recipientHex,
-        plaintext
+    // CR-C (2026-08-24): true NIP-17/NIP-59 transport replaces NIP-04 kind:4.
+    // Pipeline: kind:14 rumor → kind:13 seal (NIP-44, randomized timestamps)
+    // → kind:1059 wrap (fresh CSPRNG ephemeral key per message).
+    if (!this.activeNsecHex) {
+      throw new Error(
+        "[CEPS] Gift-wrapped sending requires a vault nsec session; " +
+          "NIP-07 sessions cannot derive seals client-side"
       );
     }
 
-    const event = await this.signEventWithActiveSession({
-      kind: 4,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [["p", recipientHex]],
-      content: encryptedContent,
+    const { createGiftWrap } = await import("../messaging/gift-wrap");
+    const senderSecret = this.getSecretBytes(this.activeNsecHex);
+    const { event } = createGiftWrap({
+      senderSecret,
+      recipientNpubOrHex: recipientNpub,
+      plaintext,
     });
+    senderSecret.fill(0);
 
-    return this.publishEvent(event);
+    return this.publishEvent(event as unknown as Event);
+  }
+
+  /** Decode hex secret to bytes (gift-wrap input); zero after use by caller. */
+  private getSecretBytes(hex: string): Uint8Array {
+    if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+      throw new Error("[CEPS] active nsec is not 64-hex");
+    }
+    const out = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)!;
+    return out;
   }
 
   async sendOTPDM(
@@ -579,7 +575,12 @@ export class CentralEventPublishingService {
     _prefs?: GiftWrapPreference
   ): Promise<OTPDeliveryResult> {
     try {
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      // CR-C (2026-08-24): Math.random() OTP replaced with CSPRNG via
+      // crypto.getRandomValues — the old PRNG was predictable under
+      // concurrent-timing analysis.
+      const buf = new Uint32Array(1);
+      crypto.getRandomValues(buf);
+      const otp = String(100000 + ((buf[0] ?? 0) % 900000));
       const messageId = await this.sendStandardDirectMessage(
         recipientNpub,
         `Your Satnam OTP: ${otp}. Valid for 5 minutes.`
@@ -589,7 +590,7 @@ export class CentralEventPublishingService {
         otp,
         messageId,
         expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-        messageType: "nip04",
+        messageType: "gift-wrap",
       };
     } catch (error) {
       return {

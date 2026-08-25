@@ -35,6 +35,7 @@ import { VaultProvider, useVault } from './hooks/useVault';
 
 const HomePage           = lazy(() => import('./pages/HomePage'));
 const AuthPage           = lazy(() => import('./pages/AuthPage'));
+const FoundryLandingPage = lazy(() => import('./pages/FoundryLandingPage'));
 const GroupsPage         = lazy(() => import('./pages/GroupsPage'));
 const WalletPage         = lazy(() => import('./pages/WalletPage'));
 const AgentsPage         = lazy(() => import('./pages/AgentsPage'));
@@ -92,6 +93,8 @@ function AppRouter() {
           {/* ── Public routes ─────────────────────────────────────────── */}
           {/* /auth is always accessible — vault creation / unlock / migration */}
           <Route path="/auth" element={<AuthPage />} />
+          {/* CR-G: Group Foundry landing — founder copy from content modules */}
+          <Route path="/foundry" element={<FoundryLandingPage />} />
 
           {/* ── Protected routes ──────────────────────────────────────── */}
           {/* All require an unlocked OPFS vault */}

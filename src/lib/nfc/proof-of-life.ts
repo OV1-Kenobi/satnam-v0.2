@@ -16,7 +16,9 @@
  *   → MUTUAL_VERIFIED    (both scans complete)
  *   → WELCOME_SENT       (each device sends a signed NIP-17 welcome message)
  *   → ATTESTING          (constructing kind:30078 with welcome msg hash + OTS Bitcoin block height)
- *   → PUBLISHED          (events published to relay + OTS anchored)
+ *   → PUBLISHED          (events published to relay; OTS submission queued)
+ *   → ANCHOR_PENDING     (OTS receipt stored; awaiting Bitcoin confirmation — CR-F)
+ *   → ANCHORED           (verified proof with Bitcoin block height — CR-F)
  *   → CONFIRMED          (both sides confirm receipt)
  *   → FAILED             (timeout, invalid CMAC)
  * ```
@@ -27,7 +29,8 @@
  *   - `nfc-card-hash` tag: SHA-256 of the OTHER participant's card UID
  *   - `welcome-msg-hash` tag: SHA-256 of both welcome messages concatenated
  *   - `block-height` tag: Bitcoin block height at time of ceremony
- *   - `ots` tag: OpenTimestamps commitment (anchored asynchronously)
+ *   - `ots` tag: OpenTimestamps receipt reference — present only after
+ *     confirmation; until then UI shows ANCHOR_PENDING, never "anchored"
  *   - Content: JSON with both pubkey hashes, bilateral flag, timestamp
  *
  * After ceremony, the contact is "authenticated" — future DMs and Zaps to
@@ -61,6 +64,11 @@ export type PolState =
   | 'WELCOME_SENT'
   | 'ATTESTING'
   | 'PUBLISHED'
+  // CR-F (2026-08-24): honest anchor lifecycle — PUBLISHED no longer implies
+  // anchoring. Events sit ANCHOR_PENDING until a verified OTS receipt with a
+  // Bitcoin block height exists, then ANCHORED.
+  | 'ANCHOR_PENDING'
+  | 'ANCHORED'
   | 'CONFIRMED'
   | 'FAILED';
 

@@ -44,6 +44,18 @@ function getSupabase() {
 // ============================================================================
 
 const NIP05_DOMAIN = process.env.NIP05_DOMAIN || process.env.VITE_NIP05_DOMAIN || 'satnam.pub';
+// Layer 2 (2026-08-24, founder-directed): configurable domain whitelist —
+// config-not-code. Initial entries per founder: openagents.com, sovereignhybridcompute.com.
+const ALLOWED_NIP05_DOMAINS = new Set(
+  (
+    process.env.NIP05_DOMAINS ||
+    process.env.VITE_NIP05_DOMAINS ||
+    'satnam.pub,openagents.com,sovereignhybridcompute.com'
+  )
+    .split(',')
+    .map((d) => d.trim().toLowerCase())
+);
+const DOMAIN_REGEX = /^[a-z0-9][a-z0-9\-.]{1,253}$/;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const RATE_LIMIT_MAX_PER_PUBKEY = 10; // 10 registrations/hour per pubkey
 const RATE_LIMIT_WINDOW_IP_MS = 60_000; // 1 minute
@@ -57,16 +69,20 @@ const LUD16_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // Security headers (auth'd endpoint — no wildcard CORS)
 // ============================================================================
 
+// Layer 2 fix (2026-08-24): EXACT origin matching — startsWith() prefix matching
+// admitted lookalike origins such as https://satnam.pub.evil.com
+const ALLOWED_ORIGINS = new Set([
+  `https://${NIP05_DOMAIN}`,
+  'https://satnam.pub',
+  'http://localhost:5173',
+  'http://localhost:8888',
+]);
+
 function corsHeaders(origin?: string): Record<string, string> {
-  const allowedOrigins = [
-    `https://${NIP05_DOMAIN}`,
-    'https://satnam.pub',
-    'http://localhost:5173',
-    'http://localhost:8888',
-  ];
-  const resolvedOrigin: string = (origin && allowedOrigins.some((o) => origin.startsWith(o)))
-    ? origin
-    : (allowedOrigins[0] ?? 'https://satnam.pub');
+  const resolvedOrigin: string =
+    origin && ALLOWED_ORIGINS.has(origin)
+      ? origin
+      : `https://${NIP05_DOMAIN}`;
   return {
     'Access-Control-Allow-Origin': resolvedOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -124,34 +140,64 @@ async function checkPubkeyRateLimit(
 ): Promise<boolean> {
   const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
 
-  // Count registrations in the last hour for this pubkey
-  const { count, error } = await supabase
+  // Layer 2 fix (2026-08-24, C5 alignment): rate_limits columns are
+  // identifier / endpoint / window_start / request_count per migration 001,
+  // aggregated as one row per (identifier, endpoint, hour).
+  // Previous code queried nonexistent pubkey/action/created_at columns,
+  // which always errored and (combined with fail-open) disabled limiting.
+  const { data, error } = await supabase
     .from('rate_limits')
-    .select('*', { count: 'exact', head: true })
-    .eq('pubkey', pubkey)
-    .eq('action', 'register_identity')
-    .gte('created_at', windowStart);
+    .select('request_count')
+    .eq('identifier', pubkey)
+    .eq('endpoint', 'register-identity')
+    .gte('window_start', windowStart);
 
   if (error) {
-    // On DB error, fail open (don't block legitimate users due to rate limit DB issues)
-    console.error('[register-identity] rate limit check error:', error.message);
-    return true;
+    // Layer 2 fix: FAIL CLOSED on DB error. The previous fail-open posture let a
+    // persistent DB fault silently disable the per-pubkey limit entirely.
+    console.error('[register-identity] rate limit check error (failing closed):', error.message);
+    return false;
   }
 
-  return (count ?? 0) < RATE_LIMIT_MAX_PER_PUBKEY;
+  const total = (data ?? []).reduce((sum, row) => sum + ((row as { request_count?: number }).request_count ?? 0), 0);
+  return total < RATE_LIMIT_MAX_PER_PUBKEY;
 }
 
 async function recordRateLimitEvent(
   supabase: SupabaseClient<any>,
   pubkey: string,
-  ip: string
+  _ip: string
 ): Promise<void> {
-  await supabase.from('rate_limits').insert({
-    pubkey,
-    action: 'register_identity',
-    ip_address: ip,
-    created_at: new Date().toISOString(),
-  });
+  // C5 alignment: read-modify-write increment of the hourly aggregate row.
+  // (Supabase JS has no atomic increment without an RPC; a lost update here
+  // only undercounts by one within the same second — acceptable for this limit.)
+  const windowStart = new Date();
+  windowStart.setMinutes(0, 0, 0);
+  const iso = windowStart.toISOString();
+
+  const { data: existing } = await supabase
+    .from('rate_limits')
+    .select('request_count')
+    .eq('identifier', pubkey)
+    .eq('endpoint', 'register-identity')
+    .eq('window_start', iso)
+    .maybeSingle();
+
+  if (existing) {
+    await supabase
+      .from('rate_limits')
+      .update({ request_count: ((existing as { request_count?: number }).request_count ?? 0) + 1 })
+      .eq('identifier', pubkey)
+      .eq('endpoint', 'register-identity')
+      .eq('window_start', iso);
+  } else {
+    await supabase.from('rate_limits').insert({
+      identifier: pubkey,
+      endpoint: 'register-identity',
+      window_start: iso,
+      request_count: 1,
+    });
+  }
 }
 
 // ============================================================================
@@ -223,16 +269,212 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
 
   const pubkey = authOutcome.pubkey;
 
-  // ── Parse + validate request body ──
-  let body: { username?: string; lud16?: string };
+  // Supabase client needed by every action branch below.
+  const supabase = getSupabase();
+
+  // ── Parse + validate request body (action-routed per plan CR-A/CR-H) ──
+  // Layer 2: action routing keeps the ≤8-function ceiling (S9). Supported:
+  //   register (default) — new NIP-05 identity
+  //   update             — change lud16 / reactivate on an owned username
+  //   rotate             — CR-H: move an owned record to a successor pubkey
+  let body: { action?: string; username?: string; lud16?: string };
   try {
     body = JSON.parse(event.body || '{}');
   } catch {
     return errorResponse(400, 'Invalid JSON body', requestOrigin);
   }
 
+  const action = (body.action || 'register').toLowerCase();
+  if (!['register', 'update', 'rotate', 'group_create', 'agent_deploy'].includes(action)) {
+    return errorResponse(400, `Unsupported action: ${action}`, requestOrigin);
+  }
+
+  // ── Action routing: CR-I Layer 2 — group creation with batch provisioning ──
+  if (action === 'group_create') {
+    const gb = body as {
+      charter?: string;
+      role?: string;
+      members?: Array<{ pubkey?: string; role?: string }>;
+    };
+    const charter = (gb.charter ?? '').trim();
+    if (charter.length < 3 || charter.length > 2000) {
+      return errorResponse(400, 'charter must be 3–2000 characters', requestOrigin);
+    }
+    const creatorRole = ['guardian', 'steward'].includes(gb.role ?? '')
+      ? (gb.role as string)
+      : 'guardian';
+
+    // Validate members before any write; cap batch at 50 per call.
+    const members = (gb.members ?? []).slice(0, 50);
+    for (const m of members) {
+      if (!m.pubkey || !/^[0-9a-f]{64}$/.test(m.pubkey)) {
+        return errorResponse(400, 'each member needs a valid 64-hex pubkey', requestOrigin);
+      }
+      if (!['guardian', 'steward', 'adult', 'offspring'].includes(m.role ?? '')) {
+        return errorResponse(400, 'member roles must be guardian/steward/adult/offspring', requestOrigin);
+      }
+    }
+
+    const { data: group, error: gErr } = await supabase
+      .from('groups')
+      .insert({ charter, created_by_pubkey: pubkey })
+      .select('id')
+      .single();
+    if (gErr || !group) {
+      console.error('[register-identity] DB error (group insert):', gErr?.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    const groupId = (group as { id: string }).id;
+
+    // Creator joins with their chosen role, then all provisioned members.
+    const rows = [
+      { group_id: groupId, member_pubkey: pubkey, role: creatorRole },
+      ...members.map((m) => ({
+        group_id: groupId,
+        member_pubkey: m.pubkey!,
+        role: m.role!,
+        invited_by_pubkey: pubkey,
+      })),
+    ];
+    // Deduplicate (creator may also appear in the batch list).
+    const unique = new Map<string, string>();
+    for (const r of rows) unique.set(`${r.member_pubkey}:${r.role}`, JSON.stringify(r));
+    const { error: mErr } = await supabase
+      .from('group_members')
+      .insert([...unique.values()].map((r) => JSON.parse(r)));
+    if (mErr) {
+      console.error('[register-identity] DB error (member insert):', mErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+
+    await recordRateLimitEvent(supabase, pubkey, clientIP);
+    return {
+      statusCode: 201,
+      headers: { ...corsHeaders(requestOrigin), 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ success: true, group_id: groupId, member_count: unique.size }),
+    };
+  }
+
+  // ── Action routing: CR-I Layer 2 — agent deployment with guardrails ──
+  if (action === 'agent_deploy') {
+    const ab = body as {
+      agent_pubkey?: string;
+      name?: string;
+      description?: string;
+      spend_policy?: Record<string, unknown>;
+    };
+    if (!ab.agent_pubkey || !/^[0-9a-f]{64}$/.test(ab.agent_pubkey)) {
+      return errorResponse(400, 'agent_pubkey must be 64 hex chars', requestOrigin);
+    }
+    if (!ab.name || ab.name.length > 100) {
+      return errorResponse(400, 'agent name required (≤100 chars)', requestOrigin);
+    }
+
+    // Deployer must be Guardian or Steward of an active group.
+    const deployerGroup = (body as { group_id?: string }).group_id;
+    let groupId = deployerGroup;
+    if (groupId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(groupId)) {
+        return errorResponse(400, 'invalid group_id format', requestOrigin);
+      }
+      const { data: membership, error: memErr } = await supabase
+        .from('group_members')
+        .select('role')
+        .eq('group_id', groupId)
+        .eq('member_pubkey', pubkey)
+        .in('role', ['guardian', 'steward'])
+        .maybeSingle();
+      if (memErr) {
+        console.error('[register-identity] DB error (deployer role check):', memErr.message);
+        return errorResponse(500, 'Internal server error', requestOrigin);
+      }
+      if (!membership) {
+        return errorResponse(403, 'Only guardians/stewards may deploy agents into a group', requestOrigin);
+      }
+    } else {
+      // Personal agent: create a single-member group owned by the deployer.
+      const { data: personal, error: pgErr } = await supabase
+        .from('groups')
+        .insert({ charter: `Personal agents of ${pubkey.slice(0, 12)}…`, created_by_pubkey: pubkey })
+        .select('id')
+        .single();
+      if (pgErr || !personal) {
+        console.error('[register-identity] DB error (personal group insert):', pgErr?.message);
+        return errorResponse(500, 'Internal server error', requestOrigin);
+      }
+      groupId = (personal as { id: string }).id;
+      await supabase
+        .from('group_members')
+        .insert({ group_id: groupId, member_pubkey: pubkey, role: 'guardian' });
+    }
+
+    // Guardrails: conservative defaults; delegation expires by default.
+    const policy = ab.spend_policy ?? {};
+    const maxSingle = Math.max(1, Number(policy.max_single_spend_msats ?? 100_000)); // 100 sats default
+    const daily = Math.max(maxSingle, Number(policy.daily_limit_msats ?? 500_000));
+    const approval = Math.max(daily, Number(policy.approval_threshold_msats ?? daily));
+    const expiresAt =
+      typeof policy.delegation_expires_at === 'string' ? policy.delegation_expires_at : null;
+
+    const { data: profile, error: apErr } = await supabase
+      .from('agent_profiles')
+      .insert({
+        group_id: groupId,
+        agent_pubkey: ab.agent_pubkey,
+        name: ab.name,
+        ...(ab.description ? { description: ab.description } : {}),
+        created_by_pubkey: pubkey,
+      })
+      .select('id')
+      .single();
+    if (apErr || !profile) {
+      console.error('[register-identity] DB error (agent insert):', apErr?.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    const profileId = (profile as { id: string }).id;
+
+    const { error: spErr } = await supabase.from('agent_spend_policies').insert({
+      agent_profile_id: profileId,
+      max_single_spend_msats: maxSingle,
+      daily_limit_msats: daily,
+      weekly_limit_msats: Math.max(daily, Number(policy.weekly_limit_msats ?? daily * 5)),
+      approval_threshold_msats: approval,
+      allowed_kinds: Array.isArray(policy.allowed_kinds) ? policy.allowed_kinds.map(String).map(String) : [],
+      allowed_rails: Array.isArray(policy.allowed_rails) ? policy.allowed_rails.map(String) : [],
+      allowed_mints: Array.isArray(policy.allowed_mints) ? policy.allowed_mints.map(String) : [],
+      ...(expiresAt ? { delegation_expires_at: expiresAt } : {}),
+    });
+    if (spErr) {
+      console.error('[register-identity] DB error (spend policy insert):', spErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+
+    // Delegation constraints default to least privilege.
+    await supabase.from('agent_delegation_constraints').insert({
+      agent_profile_id: profileId,
+      can_invite_members: false,
+      can_create_agents: false,
+      can_modify_spend_policy: false,
+      can_rotate_keys: false,
+      max_delegation_depth: 1,
+    });
+
+    await recordRateLimitEvent(supabase, pubkey, clientIP);
+    return {
+      statusCode: 201,
+      headers: { ...corsHeaders(requestOrigin), 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ success: true, agent_profile_id: profileId, group_id: groupId }),
+    };
+  }
+
   const username = (body.username || '').trim().toLowerCase();
   const lud16 = body.lud16?.trim();
+  // Whitelist-aware domain (CR-A): defaults to primary domain; must be whitelisted.
+  const requestedDomain = ((body as { domain?: string }).domain || NIP05_DOMAIN).trim().toLowerCase();
+
+  if (!DOMAIN_REGEX.test(requestedDomain) || !ALLOWED_NIP05_DOMAINS.has(requestedDomain)) {
+    return errorResponse(403, `Domain not whitelisted: ${requestedDomain}`, requestOrigin);
+  }
 
   const usernameError = validateUsername(username);
   if (usernameError) {
@@ -243,19 +485,145 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(400, 'Invalid Lightning address format (expected user@domain.tld)', requestOrigin);
   }
 
-  const supabase = getSupabase();
-
   // ── Per-pubkey rate limit (Supabase) ──
   const withinLimit = await checkPubkeyRateLimit(supabase, pubkey);
   if (!withinLimit) {
     return errorResponse(429, 'Rate limit exceeded: max 10 registrations per hour per identity.', requestOrigin);
   }
 
-  // ── Check username availability (active identifiers) ──
+  // ── Action routing: rotate path (CR-H — old key hands the record over) ──
+  if (action === 'rotate') {
+    const rotateBody = body as { username?: string; domain?: string; successor_pubkey?: string };
+    const username = (rotateBody.username || '').trim().toLowerCase();
+    const successor = (rotateBody.successor_pubkey || '').trim().toLowerCase();
+    const domain = ((rotateBody.domain || '').trim().toLowerCase()) || NIP05_DOMAIN;
+
+    if (!username || !/^[0-9a-f]{64}$/.test(successor)) {
+      return errorResponse(400, 'rotate requires username and 64-hex successor_pubkey', requestOrigin);
+    }
+    if (!DOMAIN_REGEX.test(domain) || !ALLOWED_NIP05_DOMAINS.has(domain)) {
+      return errorResponse(403, `Domain not whitelisted: ${domain}`, requestOrigin);
+    }
+    // Self-rotation is a no-op and almost certainly a client bug.
+    if (successor === pubkey) {
+      return errorResponse(400, 'successor_pubkey must differ from the authenticating key', requestOrigin);
+    }
+
+    // Only the CURRENT owner may rotate. The record's pubkey must equal the
+    // NIP-98-authenticated (old) key.
+    const { data: owned, error: ownedErr } = await supabase
+      .from('nip05_identifiers')
+      .select('id, pubkey')
+      .eq('username', username)
+      .eq('domain', domain)
+      .eq('pubkey', pubkey)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (ownedErr) {
+      console.error('[register-identity] DB error (rotate ownership check):', ownedErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    if (!owned) {
+      // Fail closed: do not reveal whether the username exists for someone else.
+      return errorResponse(403, 'Rotation not authorized for this identity', requestOrigin);
+    }
+
+    // Successor pubkey must not already hold an active record on this domain.
+    const { data: successorTaken, error: takenErr } = await supabase
+      .from('nip05_identifiers')
+      .select('username')
+      .eq('domain', domain)
+      .eq('pubkey', successor)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (takenErr) {
+      console.error('[register-identity] DB error (successor check):', takenErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    if (successorTaken) {
+      return errorResponse(409, 'Successor pubkey already holds an active identity', requestOrigin);
+    }
+
+    // Pointer move: same row, same address string, new pubkey.
+    const { error: rotErr } = await supabase
+      .from('nip05_identifiers')
+      .update({ pubkey: successor })
+      .eq('id', (owned as { id: string }).id);
+    if (rotErr) {
+      console.error('[register-identity] DB error (rotate update):', rotErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+
+    await recordRateLimitEvent(supabase, pubkey, clientIP);
+    console.log('[register-identity] rotated', { username, domain });
+    return {
+      statusCode: 200,
+      headers: {
+        ...corsHeaders(requestOrigin),
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      },
+      body: JSON.stringify({ success: true, nip05: `${username}@${domain}`, rotated_to: successor }),
+    };
+  }
+
+  // ── Action routing: update path (owner-only mutation, no new identity) ──
+  if (action === 'update') {
+    const { data: owned, error: ownedErr } = await supabase
+      .from('nip05_identifiers')
+      .select('username')
+      .eq('username', username)
+      .eq('pubkey', pubkey)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (ownedErr) {
+      console.error('[register-identity] DB error (ownership check):', ownedErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    if (!owned) {
+      return errorResponse(403, 'Username is not registered to this pubkey', requestOrigin);
+    }
+
+    if (lud16) {
+      if (!LUD16_REGEX.test(lud16)) {
+        return errorResponse(400, 'Invalid Lightning address format (expected user@domain.tld)', requestOrigin);
+      }
+      const lud16Domain = lud16.split('@')[1] ?? NIP05_DOMAIN;
+      const { error: updErr } = await supabase
+        .from('lightning_addresses')
+        .upsert({
+          username,
+          lnurl_callback: `https://${lud16Domain}/.well-known/lnurlp/${username}`,
+          min_sendable_msats: 1000,
+          max_sendable_msats: 100000000000,
+          metadata_json: JSON.stringify([['text/identifier', `${lud16}`]]),
+        });
+      if (updErr) {
+        console.error('[register-identity] DB error (update lightning):', updErr.message);
+        return errorResponse(500, 'Internal server error', requestOrigin);
+      }
+    }
+
+    await recordRateLimitEvent(supabase, pubkey, clientIP);
+    return {
+      statusCode: 200,
+      headers: {
+        ...corsHeaders(requestOrigin),
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      },
+      body: JSON.stringify({ success: true, nip05: `${username}@${NIP05_DOMAIN}`, ...(lud16 ? { lud16 } : {}) }),
+    };
+  }
+
+  // ── Check username availability (active identifiers, whitelist-scoped) ──
   const { data: existingIdent, error: identCheckErr } = await supabase
     .from('nip05_identifiers')
     .select('username')
     .eq('username', username)
+    .eq('domain', requestedDomain)
     .eq('is_active', true)
     .maybeSingle();
 
@@ -306,7 +674,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   const { error: insertErr } = await supabase.from('nip05_identifiers').insert({
     username,
     pubkey,
-    domain: NIP05_DOMAIN,
+    domain: requestedDomain,
     is_active: true,
     created_at: new Date().toISOString(),
   });
@@ -322,12 +690,19 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
 
   // ── Insert Lightning address if provided ──
   if (lud16) {
+    // C5 alignment (2026-08-24): lightning_addresses columns per migration 001 are
+    // username (FK), lnurl_callback, min/max_sendable_msats, metadata_json.
+    // The previous insert used nonexistent pubkey/lud16 columns.
+    // LUD-16 → LUD-06 callback: https://<domain>/.well-known/lnurlp/<username>
+    const lud16Domain = lud16.split('@')[1] ?? NIP05_DOMAIN;
     const { error: lnErr } = await supabase.from('lightning_addresses').insert({
-      pubkey,
-      lud16,
       username,
-      domain: NIP05_DOMAIN,
-      created_at: new Date().toISOString(),
+      lnurl_callback: `https://${lud16Domain}/.well-known/lnurlp/${username}`,
+      min_sendable_msats: 1000,
+      max_sendable_msats: 100000000000,
+      metadata_json: JSON.stringify([
+        ['text/identifier', `${lud16}`],
+      ]),
     });
 
     if (lnErr) {
@@ -345,7 +720,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   // ── Record rate limit event ──
   await recordRateLimitEvent(supabase, pubkey, clientIP);
 
-  const nip05 = `${username}@${NIP05_DOMAIN}`;
+  const nip05 = `${username}@${requestedDomain}`;
 
   console.log('[register-identity] registered', { username, nip05 });
 

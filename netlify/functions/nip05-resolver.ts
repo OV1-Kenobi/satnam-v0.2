@@ -172,11 +172,16 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   try {
     const supabase = getSupabase();
 
-    // Query nip05_identifiers (public table — no RLS bypass needed for reads)
+    // Query nip05_identifiers (public table), scoped to the requested domain.
+    // Layer 2 fix (2026-08-24, C5/CR-A): previously matched username only, so
+    // identical usernames across whitelisted domains collided. The `domain`
+    // column was added by migration 002; whitelist itself is config-not-code
+    // via NIP05_DOMAINS (checked above).
     const { data, error } = await supabase
       .from("nip05_identifiers")
       .select("username, pubkey")
       .eq("username", username)
+      .eq("domain", domain)
       .eq("is_active", true)
       .maybeSingle();
 

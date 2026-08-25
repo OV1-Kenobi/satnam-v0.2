@@ -87,6 +87,8 @@ const STATE_CONFIG: Record<
   WELCOME_SENT:        { icon: '💌',  label: 'Welcome Sent',         color: 'text-[#F7931A]' },
   ATTESTING:           { icon: '✍',   label: 'Building Trust…',      color: 'text-[#F7931A]' },
   PUBLISHED:           { icon: '📡',  label: 'Publishing…',          color: 'text-[#F7931A]' },
+  ANCHOR_PENDING:      { icon: '⏳',  label: 'Anchoring…',           color: 'text-[#FFD700]' },
+  ANCHORED:            { icon: '⛓',   label: 'Bitcoin-Anchored',     color: 'text-green-500' },
   CONFIRMED:           { icon: '✅',  label: 'Contact Added',        color: 'text-green-500' },
   FAILED:              { icon: '✗',   label: 'Failed',               color: 'text-red-400' },
 };

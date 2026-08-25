@@ -3,9 +3,11 @@
 //   getSupabaseClient (all Supabase reads/writes removed), getEnvVar Supabase vault,
 //   family_role → group_role, setupLightningInfrastructure (Voltage/PhoenixD removed),
 //   server CMAC routing (any fetch/API calls sending cmacHex to server)
-// v2: CMAC verification is client-side via @noble/ciphers AES-128-CMAC
+// v2: CMAC verification is client-side via src/lib/nfc/cmac.ts (RFC 4493 over @noble/ciphers).
 // Master AES key stored in OPFS Vault, never in environment variables.
 // Tag registrations stored locally (OPFS) or published as encrypted Nostr events.
+
+import { verifySunCmac } from './cmac.js';
 
 /**
  * NTAG424 Production Module — v2 Client-Side Architecture
@@ -107,10 +109,31 @@ function hexToBytes(hex: string): Uint8Array {
 }
 
 // ============================================================================
+// Counter persistence (CR-B 2026-08-24)
+// ============================================================================
+
+/**
+ * Per-card counter store. Callers wire this to OPFS vault slots
+ * (e.g. nfc/{uid}.last_counter) so replay protection survives sessions.
+ * The counter is advanced ONLY after successful CMAC verification.
+ */
+export interface CardCounterStore {
+  get(uid: string): Promise<number | undefined>;
+  set(uid: string, counter: number): Promise<void>;
+}
+
+// ============================================================================
 // NTAG424 Production Manager
 // ============================================================================
 
 export class NTAG424ProductionManager {
+  private counterStore?: CardCounterStore;
+
+  /** Wire a persistent per-card counter store (OPFS-backed). */
+  setCounterStore(store: CardCounterStore): void {
+    this.counterStore = store;
+  }
+
   /**
    * Generate a cryptographically random AES-128 key (16 bytes = 128 bits).
    * Used for SUN key generation during NFC ceremony.
@@ -213,15 +236,17 @@ export class NTAG424ProductionManager {
     try {
       const decoded = this.decodeSUNMessage(sunMessage);
 
-      // Replay protection: counter must be greater than last known
-      if (
-        lastKnownCounter !== undefined &&
-        decoded.counter <= lastKnownCounter
-      ) {
+      // Replay protection: counter must be greater than last known.
+      // Source of lastKnownCounter: explicit arg, else the wired counter store.
+      let known = lastKnownCounter;
+      if (known === undefined && this.counterStore) {
+        known = await this.counterStore.get(decoded.uid);
+      }
+      if (known !== undefined && decoded.counter <= known) {
         return { valid: false, error: "Counter replay detected" };
       }
 
-      // Client-side CMAC verification via @noble/ciphers
+      // Client-side CMAC verification via src/lib/nfc/cmac.ts (RFC 4493)
       const cmacValid = await this.verifyAES128CMAC(
         decoded.uid,
         decoded.counter,
@@ -231,6 +256,12 @@ export class NTAG424ProductionManager {
 
       if (!cmacValid) {
         return { valid: false, error: "CMAC verification failed" };
+      }
+
+      // CR-B: persist the counter ONLY after successful verification, so a
+      // failed/tampered tap can never advance the anti-replay floor.
+      if (this.counterStore) {
+        await this.counterStore.set(decoded.uid, decoded.counter);
       }
 
       return { valid: true, counter: decoded.counter };
@@ -243,13 +274,14 @@ export class NTAG424ProductionManager {
   }
 
   /**
-   * Verify AES-128-CMAC using @noble/ciphers.
-   * Computes SUN message authentication code client-side.
+   * Verify AES-128-CMAC via src/lib/nfc/cmac.ts (RFC 4493 over @noble/ciphers).
    *
-   * NTAG424 SUN message format (from NXP spec AN12196):
+   * CR-B (2026-08-24): the previous inline implementation called a `cmac`
+   * export that does not exist on @noble/ciphers/aes — verification always
+   * threw and returned false. Delegated to the tested RFC 4493 module.
+   *
+   * NTAG424 SUN message format (NXP AN12196):
    * SV2 = 0x3C || 0xC3 || 0x00 || 0x01 || 0x00 || 0x80 || UID (7 bytes) || SDMReadCtr (3 bytes)
-   *
-   * v2: CMAC verification is client-side via @noble/ciphers AES-128-CMAC
    */
   private async verifyAES128CMAC(
     uid: string,
@@ -258,32 +290,7 @@ export class NTAG424ProductionManager {
     sunKeyHex: string
   ): Promise<boolean> {
     try {
-      const aesModule = await import("@noble/ciphers/aes");
-      const cmac = (aesModule as unknown as { cmac: (key: Uint8Array, data: Uint8Array) => Uint8Array }).cmac;
-
-      const sunKey = hexToBytes(sunKeyHex);
-      const uidBytes = hexToBytes(uid);
-      const counterBytes = new Uint8Array(3);
-      counterBytes[0] = counter & 0xff;
-      counterBytes[1] = (counter >> 8) & 0xff;
-      counterBytes[2] = (counter >> 16) & 0xff;
-
-      // SUN session vector (NTAG424 spec SV2)
-      const sv2 = new Uint8Array([
-        0x3c, 0xc3, 0x00, 0x01, 0x00, 0x80,
-        ...uidBytes,
-        ...counterBytes,
-      ]);
-
-      const computedCmac = cmac(sunKey, sv2);
-      const expectedCmac = hexToBytes(cmacHex);
-
-      if (computedCmac.length !== expectedCmac.length) return false;
-      let diff = 0;
-      for (let i = 0; i < computedCmac.length; i++) {
-        diff |= (computedCmac[i] ?? 0) ^ (expectedCmac[i] ?? 0);
-      }
-      return diff === 0;
+      return verifySunCmac(sunKeyHex, uid, counter, cmacHex);
     } catch (error) {
       console.error("[NTAG424] CMAC verification error:", error);
       return false;
