@@ -23,6 +23,7 @@ import type { Handler, HandlerResponse } from "@netlify/functions";
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { verifyNip98 } from '../../src/lib/nip98/verify';
 import { checkAndRecordAuthEvent, createSupabaseReplayStore, type SupabaseReplayClient } from './_lib/nip98-replay';
+import { enforceSharedRateLimit, createSupabaseRateLimitStore } from './_lib/rate-limit';
 
 // ============================================================================
 // Supabase client
@@ -273,6 +274,21 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     return errorResponse(429, 'Rate limit exceeded. Try again in a minute.', requestOrigin);
   }
 
+  // Shared cross-instance tier (A-2 / founder W2.1): fail-open on store
+  // outage per _lib/rate-limit.ts policy (defense-in-depth control).
+  const sharedLimit = await enforceSharedRateLimit(
+    createSupabaseRateLimitStore(),
+    clientIP,
+    { endpoint: 'register-identity', limit: RATE_LIMIT_MAX_IP, windowMs: RATE_LIMIT_WINDOW_IP_MS },
+  );
+  if (!sharedLimit.allowed) {
+    return {
+      statusCode: 429,
+      headers: { ...corsHeaders(requestOrigin), 'Retry-After': String(sharedLimit.retryAfterSec), 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ success: false, error: 'Rate limit exceeded. Try again in a minute.' }),
+    };
+  }
+
   // ── NIP-98 Authentication (MUST be called before any business logic — S10) ──
   const authHeader = event.headers?.authorization || event.headers?.Authorization;
   const requestUrl = `https://${event.headers?.host || DEFAULT_ROOT_DOMAIN}/.netlify/functions/register-identity`;
@@ -380,10 +396,15 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
         status: 'invited',
       })),
     ];
-    // Deduplicate (creator may also appear in the batch list; creator's own
-    // explicit row wins with status active).
+    // Deduplicate with EXPLICIT creator precedence (N-4 fix): the creator row
+    // is seeded FIRST and first-set wins, so a provisioned duplicate of the
+    // creator can never downgrade the active row. (Map.set alone is
+    // last-write-wins, which previously did exactly that.)
     const unique = new Map<string, string>();
-    for (const r of rows) unique.set(`${r.member_pubkey}:${r.role}`, JSON.stringify(r));
+    for (const r of rows) {
+      const k = `${r.member_pubkey}:${r.role}`;
+      if (!unique.has(k)) unique.set(k, JSON.stringify(r));
+    }
     const { error: mErr } = await supabase
       .from('group_members')
       .insert([...unique.values()].map((r) => JSON.parse(r)));
@@ -506,6 +527,10 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
         .eq('group_id', groupId)
         .eq('member_pubkey', pubkey)
         .in('role', ['guardian', 'steward'])
+        // N-1 fix: deploy authority requires CONSENTED membership. An
+        // unconsented 'invited' guardian/steward row must not grant it —
+        // per migration 006's contract ("treat invited as non-member").
+        .eq('status', 'active')
         .maybeSingle();
       if (memErr) {
         console.error('[register-identity] DB error (deployer role check):', memErr.message);
@@ -516,6 +541,9 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
       }
     } else {
       // Personal agent: create a single-member group owned by the deployer.
+      // N-2 fix: the owner row is implicitly consenting (creator-consent-by-
+      // creation, same principle as group_create) — write status 'active'
+      // instead of inheriting the column DEFAULT 'invited'.
       const { data: personal, error: pgErr } = await supabase
         .from('groups')
         .insert({ charter: `Personal agents of ${pubkey.slice(0, 12)}…`, created_by_pubkey: pubkey })
@@ -528,7 +556,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
       groupId = (personal as { id: string }).id;
       await supabase
         .from('group_members')
-        .insert({ group_id: groupId, member_pubkey: pubkey, role: 'guardian' });
+        .insert({ group_id: groupId, member_pubkey: pubkey, role: 'guardian', status: 'active' });
     }
 
     // Guardrails: conservative defaults; delegation expires by default.

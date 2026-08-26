@@ -57,6 +57,8 @@
  * request itself.
  */
 
+import { getSharedSupabaseClient } from './supabase-client';
+
 /** Replay protection TTL. Must be >= ±60s verify window + clock-skew margin. */
 export const NIP98_REPLAY_TTL_MS = 5 * 60_000;
 
@@ -209,26 +211,13 @@ export interface SupabaseReplayClient {
   };
 }
 
-/** Lazily-created singleton Supabase client for functions without their own. */
+/** Lazily-resolved shared client (delegates to _lib/supabase-client). */
 let sharedClient: SupabaseReplayClient | null | undefined;
 
 async function getSharedSupabase(): Promise<SupabaseReplayClient | null> {
   if (sharedClient !== undefined) return sharedClient;
-  try {
-    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-    const key =
-      process.env.SUPABASE_SERVICE_ROLE_KEY ||
-      process.env.SUPABASE_ANON_KEY ||
-      '';
-    if (!url || !key) {
-      sharedClient = null;
-      return sharedClient;
-    }
-    const { createClient } = await import('@supabase/supabase-js');
-    sharedClient = createClient(url, key) as unknown as SupabaseReplayClient;
-  } catch {
-    sharedClient = null;
-  }
+  const resolved = (await getSharedSupabaseClient()) as SupabaseReplayClient | null;
+  sharedClient = resolved ?? null;
   return sharedClient;
 }
 

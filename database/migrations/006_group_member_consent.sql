@@ -21,9 +21,10 @@
 -- alpha has no production groups to re-consent.
 --
 -- DEPLOYMENT: applied OUT-OF-BAND by the founder against the operational
--- Supabase project (standing session pattern). Safe to deploy before or
--- after the code that writes status (older code omitting the column gets
--- the DEFAULT).
+-- Supabase project (standing session pattern). APPLY BEFORE deploying the
+-- consent-writing code: the backfill below unconditionally activates any
+-- invited rows, so a code-first deploy would let gap-window invited rows be
+-- silently activated by this late backfill (wave-2 verdict C-1).
 -- =============================================================================
 
 BEGIN;

@@ -32,6 +32,7 @@ import type { Handler, HandlerResponse } from "@netlify/functions";
 import { createClient } from '@supabase/supabase-js';
 import { verifyNip98 } from '../../src/lib/nip98/verify';
 import { checkAndRecordAuthEvent, createSupabaseReplayStore } from './_lib/nip98-replay';
+import { enforceSharedRateLimit, createSupabaseRateLimitStore } from './_lib/rate-limit';
 
 // ============================================================================
 // Supabase client
@@ -172,8 +173,24 @@ async function handleGet(
 async function handlePost(
   event: Parameters<Handler>[0],
   requestOrigin: string | undefined,
-  _clientIP: string
+  clientIP: string
 ): Promise<HandlerResponse> {
+  // Shared cross-instance tier (A-2; fail-open on store outage). Wired for
+  // the MUTATING path only — the public GET discovery endpoint stays on its
+  // in-memory tier.
+  const sharedLimit = await enforceSharedRateLimit(
+    createSupabaseRateLimitStore(),
+    clientIP,
+    { endpoint: 'issuer-registry', limit: RATE_LIMIT_MAX_IP, windowMs: RATE_LIMIT_WINDOW_MS },
+  );
+  if (!sharedLimit.allowed) {
+    return {
+      statusCode: 429,
+      headers: { ...corsHeaders(requestOrigin, 'POST, OPTIONS'), 'Retry-After': String(sharedLimit.retryAfterSec), 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ success: false, error: 'Rate limit exceeded. Try again in a minute.' }),
+    };
+  }
+
   // ── NIP-98 Authentication (MUST be called before any business logic — S10) ──
   const authHeader = event.headers?.authorization || event.headers?.Authorization;
   const requestUrl = `https://${event.headers?.host || NIP05_DOMAIN}/.netlify/functions/issuer-registry`;

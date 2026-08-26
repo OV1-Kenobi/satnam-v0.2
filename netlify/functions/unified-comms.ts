@@ -28,6 +28,7 @@
 import type { Handler, HandlerResponse } from "@netlify/functions";
 import { verifyNip98 } from '../../src/lib/nip98/verify';
 import { checkAndRecordAuthEvent, createSupabaseReplayStore } from './_lib/nip98-replay';
+import { enforceSharedRateLimit, createSupabaseRateLimitStore } from './_lib/rate-limit';
 
 // ============================================================================
 // Constants
@@ -300,6 +301,20 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   // IP rate limit
   if (!checkRateLimit(clientIP)) {
     return errorResponse(429, 'Rate limit exceeded. Try again in a minute.', requestOrigin);
+  }
+
+  // Shared cross-instance tier (A-2; fail-open on store outage).
+  const sharedLimit = await enforceSharedRateLimit(
+    createSupabaseRateLimitStore(),
+    clientIP,
+    { endpoint: 'unified-comms', limit: RATE_LIMIT_MAX_IP, windowMs: RATE_LIMIT_WINDOW_MS },
+  );
+  if (!sharedLimit.allowed) {
+    return {
+      statusCode: 429,
+      headers: { ...corsHeaders(requestOrigin), 'Retry-After': String(sharedLimit.retryAfterSec), 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ success: false, error: 'Rate limit exceeded. Try again in a minute.' }),
+    };
   }
 
   // ── NIP-98 Authentication (MUST be called before any business logic — S10) ──

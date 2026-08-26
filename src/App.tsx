@@ -27,6 +27,7 @@ import {
 import { HelmetProvider } from 'react-helmet-async';
 
 import { VaultProvider, useVault } from './hooks/useVault';
+import { OfflineBanner } from './components/errors/OfflineBanner';
 
 // ── Lazy-loaded route components ──────────────────────────────────────────────
 //
@@ -134,6 +135,8 @@ function AppRouter() {
 export function App() {
   return (
     <HelmetProvider>
+      {/* Global connectivity banner (fixed-position; renders null when online) */}
+      <OfflineBanner />
       <VaultProvider>
         <AppRouter />
       </VaultProvider>
