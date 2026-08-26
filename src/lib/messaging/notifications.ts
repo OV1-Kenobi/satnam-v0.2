@@ -29,7 +29,14 @@ import {
   signEventWithCeps,
   getDefaultRelays,
 } from '../ceps/ceps-client.js';
-import { bytesToHex, randomBytes } from '@noble/hashes/utils';
+import {
+  bytesToHex,
+  bytesToUtf8,
+  hexToBytes,
+  randomBytes,
+  utf8ToBytes,
+} from '@noble/hashes/utils';
+import { getVault } from '../vault/vault.js';
 
 // ============================================================================
 // Constants
@@ -44,25 +51,94 @@ const NOTIFICATIONS_KEY = 'satnam:notifications:v2';
 const THREAD_PREFS_KEY = 'satnam:notifications:thread_prefs:v2';
 const UNREAD_COUNTS_KEY = 'satnam:notifications:unread:v2';
 
+/**
+ * A-5 fix (2026-08-25): retention/TTL for in-app notifications.
+ * messagePreview carries message-content fragments, so entries are pruned
+ * after 7 days on load/add; the existing 200-entry cap still applies.
+ */
+const NOTIFICATION_TTL_S = 7 * 24 * 60 * 60;
+
 // ============================================================================
-// Storage helpers
+// Storage helpers (A-5 fix: all four stores are now vault-encrypted hex)
 // ============================================================================
 
-function readJson<T>(key: string, fallback: T): T {
+/**
+ * Read + decrypt a JSON store. Vault LOCKED or undecryptable (incl. legacy
+ * plaintext from before this fix) → fallback. Never returns plaintext that
+ * touched persistent storage.
+ */
+async function readEncrypted<T>(key: string, fallback: T): Promise<T> {
   try {
     if (typeof localStorage === 'undefined') return fallback;
     const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
+    if (!raw) return fallback;
+    const vault = getVault();
+    if (!vault.isUnlocked()) return fallback;
+    const plain = await vault.decryptBytes(hexToBytes(raw));
+    return JSON.parse(bytesToUtf8(plain)) as T;
   } catch {
     return fallback;
   }
 }
 
-function writeJson<T>(key: string, value: T): void {
+/**
+ * Encrypt + persist a JSON store as hex ciphertext under the vault master
+ * key (fresh nonce per write). Returns false when the vault is LOCKED —
+ * callers decide whether to hold data in memory instead. Plaintext is never
+ * written to persistent storage.
+ */
+async function writeEncrypted<T>(key: string, value: T): Promise<boolean> {
   try {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+    if (typeof localStorage === 'undefined') return false;
+    const vault = getVault();
+    if (!vault.isUnlocked()) return false;
+    const encrypted = await vault.encryptBytes(utf8ToBytes(JSON.stringify(value)));
+    localStorage.setItem(key, bytesToHex(encrypted));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pruneExpired(notifications: InAppNotification[]): InAppNotification[] {
+  const cutoff = nowUnix() - NOTIFICATION_TTL_S;
+  return notifications.filter((n) => n.receivedAt > cutoff);
+}
+
+// ============================================================================
+// Locked-vault hold semantics (documented decision, A-5)
+//
+// While the vault is LOCKED, incoming notifications are HELD IN MEMORY ONLY
+// (capped at 50; newest kept) and are NEVER persisted as plaintext. Any
+// subsequent operation retries the flush once the vault is unlocked; if the
+// user never unlocks again, held notifications are dropped on unload — the
+// privacy-preserving loss direction. Unread counters are held alongside so
+// badges stay consistent with the held notifications.
+// ============================================================================
+
+const HOLD_CAP = 50;
+
+interface HeldWhileLocked {
+  notifications: InAppNotification[];
+  unread: Record<string, number>;
+}
+
+let held: HeldWhileLocked | null = null;
+
+async function flushHeldIfUnlocked(): Promise<void> {
+  if (!held) return;
+  const vault = getVault();
+  if (!vault.isUnlocked()) return;
+
+  const stored = pruneExpired(await readEncrypted<InAppNotification[]>(NOTIFICATIONS_KEY, []));
+  const counts = await readEncrypted<Record<string, number>>(UNREAD_COUNTS_KEY, {});
+  const mergedCounts = { ...counts };
+  for (const [tid, c] of Object.entries(held.unread)) {
+    mergedCounts[tid] = (mergedCounts[tid] ?? 0) + c;
+  }
+  await writeEncrypted(NOTIFICATIONS_KEY, pruneExpired([...held.notifications, ...stored]).slice(0, 200));
+  await writeEncrypted(UNREAD_COUNTS_KEY, mergedCounts);
+  held = null;
 }
 
 /** CSPRNG ID generation (replaces Math.random). */
@@ -150,7 +226,7 @@ export class NotificationManager {
       console.warn('[NotificationManager] Failed to publish push registration:', err);
     }
 
-    writeJson(PUSH_REG_KEY, registration);
+    writeEncrypted(PUSH_REG_KEY, registration);
     return registration;
   }
 
@@ -168,7 +244,7 @@ export class NotificationManager {
    * Publishes a kind:22456 event with type `satnam:push:heartbeat`.
    */
   async sendHeartbeat(): Promise<void> {
-    const reg = this.getRegistration();
+    const reg = await this.getRegistration();
     if (!reg?.active) return;
 
     try {
@@ -196,7 +272,7 @@ export class NotificationManager {
    * gift-wrap events as push notifications until the next heartbeat.
    */
   async setOffline(): Promise<void> {
-    const reg = this.getRegistration();
+    const reg = await this.getRegistration();
     if (!reg?.active) return;
 
     try {
@@ -224,7 +300,7 @@ export class NotificationManager {
    * removes the local registration record.
    */
   async unregisterDevice(): Promise<void> {
-    const reg = this.getRegistration();
+    const reg = await this.getRegistration();
     if (!reg) return;
 
     try {
@@ -240,7 +316,7 @@ export class NotificationManager {
       console.warn('[NotificationManager] Failed to unregister device:', err);
     }
 
-    writeJson<PushRegistration | null>(PUSH_REG_KEY, null);
+    await writeEncrypted(PUSH_REG_KEY, null);
   }
 
   // --------------------------------------------------------------------------
@@ -285,20 +361,20 @@ export class NotificationManager {
   /**
    * Set notification preference for a thread.
    */
-  setThreadPreference(
+  async setThreadPreference(
     threadId: string,
     preference: NotificationPreference,
-  ): void {
-    const prefs = readJson<Record<string, ThreadNotificationPreference>>(
+  ): Promise<void> {
+    const prefs = await readEncrypted<Record<string, ThreadNotificationPreference>>(
       THREAD_PREFS_KEY,
       {},
     );
     prefs[threadId] = { threadId, preference };
-    writeJson(THREAD_PREFS_KEY, prefs);
+    await writeEncrypted(THREAD_PREFS_KEY, prefs);
   }
 
-  getThreadPreference(threadId: string): NotificationPreference {
-    const prefs = readJson<Record<string, ThreadNotificationPreference>>(
+  async getThreadPreference(threadId: string): Promise<NotificationPreference> {
+    const prefs = await readEncrypted<Record<string, ThreadNotificationPreference>>(
       THREAD_PREFS_KEY,
       {},
     );
@@ -309,8 +385,8 @@ export class NotificationManager {
   // Local registration getter
   // --------------------------------------------------------------------------
 
-  getRegistration(): PushRegistration | null {
-    return readJson<PushRegistration | null>(PUSH_REG_KEY, null);
+  async getRegistration(): Promise<PushRegistration | null> {
+    return readEncrypted<PushRegistration | null>(PUSH_REG_KEY, null);
   }
 
   // --------------------------------------------------------------------------
@@ -338,14 +414,19 @@ export class InAppNotificationCenter {
 
   /**
    * Add an in-app notification. Called when a new message arrives.
+   *
+   * A-5 semantics: if the vault is LOCKED the notification is HELD in memory
+   * (capped, never persisted as plaintext) and flushed to the encrypted
+   * store on a later unlocked operation; entries older than
+   * NOTIFICATION_TTL_S are pruned on every load/add.
    */
-  addNotification(
+  async addNotification(
     threadId: string,
     threadType: ThreadType,
     senderPubkey: string,
     messagePreview: string,
     senderDisplayName?: string,
-  ): InAppNotification {
+  ): Promise<InAppNotification> {
     const notification: InAppNotification = {
       id: generateId(),
       threadId,
@@ -357,13 +438,21 @@ export class InAppNotificationCenter {
       read: false,
     };
 
-    const notifications = this.getAll();
-    notifications.unshift(notification);
+    await flushHeldIfUnlocked();
+
+    const stored = pruneExpired(await this.getAll());
+    const notifications = [notification, ...stored];
     // Keep a maximum of 200 notifications
-    writeJson(NOTIFICATIONS_KEY, notifications.slice(0, 200));
+    const persisted = await writeEncrypted(NOTIFICATIONS_KEY, notifications.slice(0, 200));
+    if (!persisted) {
+      // Vault locked — hold in memory only (capped), never persist plaintext.
+      if (!held) held = { notifications: [], unread: {} };
+      held.notifications.unshift(notification);
+      held.notifications = held.notifications.slice(0, HOLD_CAP);
+    }
 
     // Increment unread count
-    this.incrementUnread(threadId);
+    await this.incrementUnread(threadId);
 
     return notification;
   }
@@ -372,52 +461,81 @@ export class InAppNotificationCenter {
   // Mark read
   // --------------------------------------------------------------------------
 
-  markRead(notificationId: string): void {
-    const notifications = this.getAll().map((n) =>
+  async markRead(notificationId: string): Promise<void> {
+    await flushHeldIfUnlocked();
+    const stored = await this.getAll();
+    const merged = stored.map((n) =>
       n.id === notificationId ? { ...n, read: true } : n,
     );
-    writeJson(NOTIFICATIONS_KEY, notifications);
+    if (!(await writeEncrypted(NOTIFICATIONS_KEY, merged))) {
+      if (held) {
+        held.notifications = held.notifications.map((n) =>
+          n.id === notificationId ? { ...n, read: true } : n,
+        );
+      }
+    }
   }
 
-  markAllRead(): void {
-    const notifications = this.getAll().map((n) => ({ ...n, read: true }));
-    writeJson(NOTIFICATIONS_KEY, notifications);
+  async markAllRead(): Promise<void> {
+    await flushHeldIfUnlocked();
+    const notifications = (await this.getAll()).map((n) => ({ ...n, read: true }));
+    if (!(await writeEncrypted(NOTIFICATIONS_KEY, notifications)) && held) {
+      held.notifications = held.notifications.map((n) => ({ ...n, read: true }));
+    }
 
     // Reset all unread counts
-    writeJson(UNREAD_COUNTS_KEY, {});
+    if (!(await writeEncrypted(UNREAD_COUNTS_KEY, {})) && held) {
+      held.unread = {};
+    }
   }
 
-  markThreadRead(threadId: string): void {
-    const notifications = this.getAll().map((n) =>
+  async markThreadRead(threadId: string): Promise<void> {
+    await flushHeldIfUnlocked();
+    const stored = await this.getAll();
+    const merged = stored.map((n) =>
       n.threadId === threadId ? { ...n, read: true } : n,
     );
-    writeJson(NOTIFICATIONS_KEY, notifications);
-    this.resetUnread(threadId);
+    if (!(await writeEncrypted(NOTIFICATIONS_KEY, merged)) && held) {
+      held.notifications = held.notifications.map((n) =>
+        n.threadId === threadId ? { ...n, read: true } : n,
+      );
+    }
+    await this.resetUnread(threadId);
   }
 
   // --------------------------------------------------------------------------
   // Queries
   // --------------------------------------------------------------------------
 
-  getAll(): InAppNotification[] {
-    return readJson<InAppNotification[]>(NOTIFICATIONS_KEY, []);
+  /**
+   * All notifications: decrypted store overlaid with any held-while-locked
+   * entries. Expired entries (> NOTIFICATION_TTL_S) are pruned.
+   */
+  async getAll(): Promise<InAppNotification[]> {
+    const stored = pruneExpired(
+      await readEncrypted<InAppNotification[]>(NOTIFICATIONS_KEY, []),
+    );
+    const pending = held?.notifications ?? [];
+    return [...pending, ...stored].slice(0, 200);
   }
 
-  getUnread(): InAppNotification[] {
-    return this.getAll().filter((n) => !n.read);
+  async getUnread(): Promise<InAppNotification[]> {
+    return (await this.getAll()).filter((n) => !n.read);
   }
 
-  getTotalUnreadCount(): number {
-    return this.getUnread().length;
+  async getTotalUnreadCount(): Promise<number> {
+    return (await this.getUnread()).length;
   }
 
-  getUnreadCountForThread(threadId: string): number {
-    const counts = readJson<Record<string, number>>(UNREAD_COUNTS_KEY, {});
+  async getUnreadCountForThread(threadId: string): Promise<number> {
+    // Persisted store; held-while-locked deltas surface via getAll()-backed
+    // queries and are folded into the store on flush.
+    const counts = await readEncrypted<Record<string, number>>(UNREAD_COUNTS_KEY, {});
     return counts[threadId] ?? 0;
   }
 
-  getAllUnreadCounts(): Record<string, number> {
-    return readJson<Record<string, number>>(UNREAD_COUNTS_KEY, {});
+  async getAllUnreadCounts(): Promise<Record<string, number>> {
+    return readEncrypted<Record<string, number>>(UNREAD_COUNTS_KEY, {});
   }
 
   // --------------------------------------------------------------------------
@@ -440,24 +558,29 @@ export class InAppNotificationCenter {
   /**
    * Refresh the browser badge from current unread state.
    */
-  refreshBadge(): void {
-    this.setBadgeCount(this.getTotalUnreadCount());
+  async refreshBadge(): Promise<void> {
+    this.setBadgeCount(await this.getTotalUnreadCount());
   }
 
   // --------------------------------------------------------------------------
   // Internal counters
   // --------------------------------------------------------------------------
 
-  private incrementUnread(threadId: string): void {
-    const counts = readJson<Record<string, number>>(UNREAD_COUNTS_KEY, {});
+  private async incrementUnread(threadId: string): Promise<void> {
+    const counts = await readEncrypted<Record<string, number>>(UNREAD_COUNTS_KEY, {});
     counts[threadId] = (counts[threadId] ?? 0) + 1;
-    writeJson(UNREAD_COUNTS_KEY, counts);
+    if (!(await writeEncrypted(UNREAD_COUNTS_KEY, counts))) {
+      if (!held) held = { notifications: [], unread: {} };
+      held.unread[threadId] = (held.unread[threadId] ?? 0) + 1;
+    }
   }
 
-  private resetUnread(threadId: string): void {
-    const counts = readJson<Record<string, number>>(UNREAD_COUNTS_KEY, {});
+  private async resetUnread(threadId: string): Promise<void> {
+    const counts = await readEncrypted<Record<string, number>>(UNREAD_COUNTS_KEY, {});
     delete counts[threadId];
-    writeJson(UNREAD_COUNTS_KEY, counts);
+    if (!(await writeEncrypted(UNREAD_COUNTS_KEY, counts)) && held) {
+      delete held.unread[threadId];
+    }
   }
 }
 

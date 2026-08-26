@@ -1,13 +1,19 @@
 /**
  * @module components/errors/OfflineBanner
- * @description Offline detection banner with queued Nostr event count.
+ * @description Offline detection banner.
  *
  * Monitors the browser's online/offline status and displays a sticky
- * banner at the top of the app when the user is offline. Shows the
- * count of Nostr events queued for delivery once connectivity returns.
+ * banner at the top of the app when the user is offline.
  *
- * The service worker background sync handles actual event delivery.
- * This component is purely informational UI.
+ * A-6 fix (2026-08-25): the former useQueuedEventCount hook read the
+ * localStorage key 'satnam_event_queue', which NOTHING in the codebase
+ * writes (the service worker queues into IndexedDB satnam-sw-db /
+ * nostr-event-queue) — a permanently-dead read rendering a fake count of
+ * zero. Removed rather than wired: bridging the SW's IndexedDB queue to
+ * page state needs cross-context invalidation that is not worth building
+ * for an unmounted informational component. Disposition: delete-from-repo;
+ * recovery point 78e71b0 on origin. The component itself is currently not
+ * mounted in App.tsx — kept for future use with its online/offline core.
  *
  * Usage:
  * ```tsx
@@ -19,12 +25,7 @@
 import {
   useState,
   useEffect,
-  useCallback,
 } from 'react';
-
-// ============================================================================
-// Types
-// ============================================================================
 
 // ============================================================================
 // Hook: useOnlineStatus
@@ -55,58 +56,6 @@ export function useOnlineStatus(): boolean {
 }
 
 // ============================================================================
-// Hook: useQueuedEventCount
-// ============================================================================
-
-/**
- * Returns the count of Nostr events queued in localStorage for
- * background sync delivery. Updated whenever localStorage changes
- * or the component re-renders after coming back online.
- */
-export function useQueuedEventCount(): number {
-  const [count, setCount] = useState<number>(0);
-
-  const readQueueCount = useCallback(() => {
-    try {
-      const raw = localStorage.getItem('satnam_event_queue');
-      if (!raw) {
-        setCount(0);
-        return;
-      }
-      const queue = JSON.parse(raw);
-      if (Array.isArray(queue)) {
-        setCount(queue.length);
-      }
-    } catch {
-      setCount(0);
-    }
-  }, []);
-
-  useEffect(() => {
-    readQueueCount();
-
-    // Listen for queue updates from the service worker or other tabs
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'satnam_event_queue') {
-        readQueueCount();
-      }
-    };
-
-    window.addEventListener('storage', handleStorage);
-
-    // Also poll every 5 seconds (for same-tab updates)
-    const interval = setInterval(readQueueCount, 5_000);
-
-    return () => {
-      window.removeEventListener('storage', handleStorage);
-      clearInterval(interval);
-    };
-  }, [readQueueCount]);
-
-  return count;
-}
-
-// ============================================================================
 // OfflineBanner Component
 // ============================================================================
 
@@ -117,11 +66,9 @@ interface OfflineBannerProps {
 
 /**
  * Offline detection banner. Renders nothing when the user is online.
- * Displays a sticky top banner when offline, with queued event count.
  */
 export function OfflineBanner({ className = '' }: OfflineBannerProps): JSX.Element | null {
   const isOnline = useOnlineStatus();
-  const queuedCount = useQueuedEventCount();
   const [justCameOnline, setJustCameOnline] = useState(false);
   const [showReconnected, setShowReconnected] = useState(false);
 
@@ -155,7 +102,7 @@ export function OfflineBanner({ className = '' }: OfflineBannerProps): JSX.Eleme
         className={`fixed left-0 right-0 top-0 z-50 flex items-center justify-center gap-2 bg-emerald-900/90 px-4 py-2.5 text-sm text-emerald-100 backdrop-blur-sm ${className}`}
       >
         <CheckCircleIcon className="h-4 w-4 flex-shrink-0 text-emerald-400" />
-        <span>Back online{queuedCount > 0 ? ` — syncing ${queuedCount} queued event${queuedCount === 1 ? '' : 's'}` : ''}</span>
+        <span>Back online</span>
       </div>
     );
   }
@@ -170,12 +117,7 @@ export function OfflineBanner({ className = '' }: OfflineBannerProps): JSX.Eleme
       >
         <div className="flex items-center gap-2">
           <WifiOffIcon className="h-4 w-4 flex-shrink-0 text-amber-400" />
-          <span>
-            You are offline
-            {queuedCount > 0 && (
-              <> — <strong>{queuedCount}</strong> event{queuedCount === 1 ? '' : 's'} queued for delivery</>
-            )}
-          </span>
+          <span>You are offline</span>
         </div>
         <div className="flex-shrink-0">
           <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-amber-400" aria-hidden="true" />

@@ -458,6 +458,43 @@ export class GroupChatManager {
   }
 
   // --------------------------------------------------------------------------
+  // markGroupMessageBurned
+  // --------------------------------------------------------------------------
+
+  /**
+   * Mark a locally cached group message as burned/deleted (A-7 fix,
+   * 2026-08-25): sets `deleted: true` + `status: 'deleted'` and persists via
+   * the encrypted store, so the next EphemeralManager.processExpiredMessages
+   * pass collects it on the burnedRemoved path.
+   *
+   * Until this marking path existed, no writer ever set `deleted` on GROUP
+   * stores (direct-chat's memory store was the only one), leaving the GC's
+   * burn path dead for groups even after R2-M-1 made the GC read ciphertext.
+   *
+   * Vault locked → returns false without touching storage (nothing is
+   * readable or writable while locked; retry when unlocked).
+   *
+   * @param groupId   - Target group
+   * @param messageId - Client-side message id to mark burned
+   * @returns true when a message was found and marked
+   */
+  async markGroupMessageBurned(groupId: string, messageId: string): Promise<boolean> {
+    const messages = await readMessagesFromStorage(groupId);
+    if (messages.length === 0) return false;
+
+    let marked = false;
+    const updated = messages.map((m) => {
+      if (m.id !== messageId || m.deleted) return m;
+      marked = true;
+      return { ...m, status: 'deleted' as MessageStatus, deleted: true };
+    });
+    if (!marked) return false;
+
+    await writeMessagesToStorage(groupId, updated);
+    return true;
+  }
+
+  // --------------------------------------------------------------------------
   // getGroupMessages
   // --------------------------------------------------------------------------
 

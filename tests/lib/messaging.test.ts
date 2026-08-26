@@ -788,3 +788,44 @@ describe('Ephemeral utilities', () => {
     expect(() => ttlCustom(-1)).toThrow('TTL must be greater than 0');
   });
 });
+
+// ============================================================================
+// W2-10 / A-7: group burn-after-read marking path
+// ============================================================================
+
+describe('W2-10/A-7: markGroupMessageBurned -> GC consumption', () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    vi.clearAllMocks();
+  });
+
+  it('marks a group message deleted and the next GC pass collects it', async () => {
+    const gm = new GroupChatManager(ALICE, ['wss://nos.lol']);
+    const thread = await gm.createGroup('BurnTest', [BOB]);
+    const msg = await gm.sendGroupMessage(thread.groupId, 'burn me', { ttl: 0, burnAfterRead: true });
+
+    // Marking path sets deleted:true through the encrypted store
+    expect(await gm.markGroupMessageBurned(thread.groupId, msg.id)).toBe(true);
+
+    // Stored value remains hex ciphertext (never plaintext) with deleted flag
+    const raw = localStorageMock.getItem(`satnam:group:msgs:${thread.groupId}`)!;
+    expect(raw).toMatch(/^[0-9a-f]+$/);
+    const stored = await decryptFromStorage<Array<{ id: string; deleted: boolean }>>(raw);
+    expect(stored.find((m) => m.id === msg.id)?.deleted).toBe(true);
+
+    // GC consumes the burned marker
+    const result = await new EphemeralManager().processExpiredMessages();
+    expect(result.burnedRemoved).toBeGreaterThanOrEqual(1);
+
+    const remaining = await gm.getGroupMessages(thread.groupId);
+    expect(remaining.some((m) => m.id === msg.id)).toBe(false);
+  });
+
+  it('returns false for an unknown message id without touching storage', async () => {
+    const gm = new GroupChatManager(ALICE, ['wss://nos.lol']);
+    const thread = await gm.createGroup('NoBurn', []);
+    const before = localStorageMock.getItem(`satnam:group:msgs:${thread.groupId}`);
+    expect(await gm.markGroupMessageBurned(thread.groupId, 'nope')).toBe(false);
+    expect(localStorageMock.getItem(`satnam:group:msgs:${thread.groupId}`)).toBe(before);
+  });
+});

@@ -325,7 +325,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   }
 
   const action = (body.action || 'register').toLowerCase();
-  if (!['register', 'update', 'rotate', 'group_create', 'agent_deploy'].includes(action)) {
+  if (!['register', 'update', 'rotate', 'group_create', 'member_consent', 'agent_deploy'].includes(action)) {
     return errorResponse(400, `Unsupported action: ${action}`, requestOrigin);
   }
 
@@ -366,17 +366,22 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     }
     const groupId = (group as { id: string }).id;
 
-    // Creator joins with their chosen role, then all provisioned members.
+    // Creator joins with their chosen role (consenting by the act of
+    // creation); batch-provisioned members are recorded as 'invited' —
+    // M-1 / W2-2 fix: provisioned rows must never masquerade as consenting
+    // members until each pubkey calls member_consent under its own key.
     const rows = [
-      { group_id: groupId, member_pubkey: pubkey, role: creatorRole },
+      { group_id: groupId, member_pubkey: pubkey, role: creatorRole, status: 'active' },
       ...members.map((m) => ({
         group_id: groupId,
         member_pubkey: m.pubkey!,
         role: m.role!,
         invited_by_pubkey: pubkey,
+        status: 'invited',
       })),
     ];
-    // Deduplicate (creator may also appear in the batch list).
+    // Deduplicate (creator may also appear in the batch list; creator's own
+    // explicit row wins with status active).
     const unique = new Map<string, string>();
     for (const r of rows) unique.set(`${r.member_pubkey}:${r.role}`, JSON.stringify(r));
     const { error: mErr } = await supabase
@@ -387,11 +392,63 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
       return errorResponse(500, 'Internal server error', requestOrigin);
     }
 
+    const invitedCount = members.filter((m) => m.pubkey !== pubkey).length;
     await recordRateLimitEvent(supabase, pubkey, clientIP);
     return {
       statusCode: 201,
       headers: { ...corsHeaders(requestOrigin), 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-      body: JSON.stringify({ success: true, group_id: groupId, member_count: unique.size }),
+      body: JSON.stringify({
+        success: true,
+        group_id: groupId,
+        member_count: unique.size,
+        invited_count: invitedCount,
+      }),
+    };
+  }
+
+  // ── Action routing: M-1 / W2-2 — member consent ──
+  // The authenticating key IS the consenting member (NIP-98 verified above);
+  // flips that member's invited row to active. Idempotent for active rows.
+  if (action === 'member_consent') {
+    const cb = body as { group_id?: string };
+    const consentGroupId = cb.group_id;
+    if (!consentGroupId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(consentGroupId)) {
+      return errorResponse(400, 'group_id must be a valid uuid', requestOrigin);
+    }
+
+    const { data: membership, error: memErr } = await supabase
+      .from('group_members')
+      .select('status')
+      .eq('group_id', consentGroupId)
+      .eq('member_pubkey', pubkey)
+      .maybeSingle();
+
+    if (memErr) {
+      console.error('[register-identity] DB error (consent lookup):', memErr.message);
+      return errorResponse(500, 'Internal server error', requestOrigin);
+    }
+    if (!membership) {
+      // Fail closed without revealing group existence details.
+      return errorResponse(403, 'Not provisioned for this group', requestOrigin);
+    }
+
+    if ((membership as { status?: string }).status !== 'active') {
+      const { error: upErr } = await supabase
+        .from('group_members')
+        .update({ status: 'active' })
+        .eq('group_id', consentGroupId)
+        .eq('member_pubkey', pubkey);
+      if (upErr) {
+        console.error('[register-identity] DB error (consent update):', upErr.message);
+        return errorResponse(500, 'Internal server error', requestOrigin);
+      }
+    }
+
+    await recordRateLimitEvent(supabase, pubkey, clientIP);
+    return {
+      statusCode: 200,
+      headers: { ...corsHeaders(requestOrigin), 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ success: true, group_id: consentGroupId, status: 'active' }),
     };
   }
 
@@ -408,6 +465,32 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     }
     if (!ab.name || ab.name.length > 100) {
       return errorResponse(400, 'agent name required (≤100 chars)', requestOrigin);
+    }
+
+    // M-3 / W2-4 fix (2026-08-25): validate delegation_expires_at BEFORE any
+    // DB write (an invalid expiry must not leave an orphan personal group).
+    // Must be a parseable ISO date, in the future, within a 10-year horizon.
+    let expiresAt: string | null = null;
+    {
+      const rawExpiry = ab.spend_policy?.delegation_expires_at;
+      if (rawExpiry !== undefined && rawExpiry !== null) {
+        if (typeof rawExpiry !== 'string') {
+          return errorResponse(400, 'delegation_expires_at must be an ISO 8601 timestamp string', requestOrigin);
+        }
+        const parsedMs = Date.parse(rawExpiry);
+        if (Number.isNaN(parsedMs)) {
+          return errorResponse(400, 'delegation_expires_at is not a valid date', requestOrigin);
+        }
+        const nowMs = Date.now();
+        if (parsedMs <= nowMs) {
+          return errorResponse(400, 'delegation_expires_at must be in the future', requestOrigin);
+        }
+        const TEN_YEARS_MS = 10 * 365 * 24 * 60 * 60 * 1000;
+        if (parsedMs - nowMs > TEN_YEARS_MS) {
+          return errorResponse(400, 'delegation_expires_at may not exceed 10 years from now', requestOrigin);
+        }
+        expiresAt = new Date(parsedMs).toISOString();
+      }
     }
 
     // Deployer must be Guardian or Steward of an active group.
@@ -453,8 +536,6 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     const maxSingle = Math.max(1, Number(policy.max_single_spend_msats ?? 100_000)); // 100 sats default
     const daily = Math.max(maxSingle, Number(policy.daily_limit_msats ?? 500_000));
     const approval = Math.max(daily, Number(policy.approval_threshold_msats ?? daily));
-    const expiresAt =
-      typeof policy.delegation_expires_at === 'string' ? policy.delegation_expires_at : null;
 
     const { data: profile, error: apErr } = await supabase
       .from('agent_profiles')
@@ -512,11 +593,17 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   // 004 unified categorizer: domain = subdomain_prefix.root_domain
   // Accept either body.domain as full categorized domain (my.satnam.pub) or
   // separate body.subdomain_prefix + body.root_domain for explicit class.
+  // W2-3 companion fix: parenthesize the domain fallback. The previous
+  // expression `domain || sub && root ? A : B` parsed as `(domain || (sub && root)) ? A : B`,
+  // so an explicit `domain` field selected the WRONG branch and produced
+  // "undefined.undefined" — the documented `domain` input was silently
+  // broken for every caller using it.
   const rawDomain = (
     (body as { domain?: string }).domain ||
-    (body as { subdomain_prefix?: string; root_domain?: string }).subdomain_prefix && (body as { root_domain?: string }).root_domain
+    ((body as { subdomain_prefix?: string; root_domain?: string }).subdomain_prefix &&
+      (body as { root_domain?: string }).root_domain
       ? `${(body as { subdomain_prefix?: string }).subdomain_prefix}.${(body as { root_domain?: string }).root_domain}`
-      : `my.${DEFAULT_ROOT_DOMAIN}`
+      : `my.${DEFAULT_ROOT_DOMAIN}`)
   ).trim().toLowerCase();
 
   const domainParts = rawDomain.split('.');
@@ -631,10 +718,18 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
 
   // ── Action routing: update path (owner-only mutation, no new identity) ──
   if (action === 'update') {
+    // M-2 / W2-3 fix (2026-08-25): scope the ownership check to the exact
+    // categorized domain (subdomain_prefix + root_domain). The unique index
+    // permits the same username across categorizers (my/our/agent × roots);
+    // the previous username+pubkey-only check could match a row on a DIFFERENT
+    // domain than requested — cross-domain mutation, or a maybeSingle()
+    // multiple-rows error when the pubkey owns the name on 2+ domains.
     const { data: owned, error: ownedErr } = await supabase
       .from('nip05_identifiers')
       .select('username')
       .eq('username', username)
+      .eq('subdomain_prefix', subdomain_prefix)
+      .eq('root_domain', root_domain)
       .eq('pubkey', pubkey)
       .eq('is_active', true)
       .maybeSingle();
@@ -644,7 +739,7 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
       return errorResponse(500, 'Internal server error', requestOrigin);
     }
     if (!owned) {
-      return errorResponse(403, 'Username is not registered to this pubkey', requestOrigin);
+      return errorResponse(403, 'Username is not registered to this pubkey on this domain', requestOrigin);
     }
 
     if (lud16) {

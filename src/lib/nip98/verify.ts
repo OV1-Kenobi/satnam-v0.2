@@ -372,16 +372,22 @@ export function verifyNip98(
     return { authenticated: false, reason: 'method_mismatch' };
   }
 
-  // Step 3e: Validate payload tag (only required/checked when body is provided and tag is present)
+  // Step 3e: Validate payload tag (A-3 fix, 2026-08-25): for requests that
+  // carry a body, the payload tag is now REQUIRED and must match the
+  // SHA-256 of the body. The previous spec-permissive reading accepted
+  // bodied POSTs with NO payload tag, which (combined with replay) let a
+  // captured token authorize ARBITRARY bodies under the victim pubkey.
+  // Satnam's own builder (construct.ts) always sets the tag when a body is
+  // present; third-party clients omitting it will now be rejected.
   const payloadTag = findTag(event.tags, 'payload');
   if (requestBody && requestBody.length > 0) {
-    if (payloadTag) {
-      const expectedHash = hashBody(requestBody);
-      if (payloadTag[1] !== expectedHash) {
-        return { authenticated: false, reason: 'payload_mismatch' };
-      }
+    if (!payloadTag || !payloadTag[1]) {
+      return { authenticated: false, reason: 'payload_mismatch' };
     }
-    // If no payload tag but body is present, we allow it (tag is optional per NIP-98)
+    const expectedHash = hashBody(requestBody);
+    if (payloadTag[1] !== expectedHash) {
+      return { authenticated: false, reason: 'payload_mismatch' };
+    }
   } else if (payloadTag) {
     // Payload tag present but no body provided — validate against empty body
     const emptyHash = hashBody(new Uint8Array(0));

@@ -61,12 +61,24 @@ const MAX_STRING_LENGTH = 512;
 // Security headers
 // ============================================================================
 
+// A-1 fix (2026-08-25): EXACT origin matching on ALL paths (GET, POST,
+// OPTIONS) — the previous `origin || '*'` reflection admitted any attacker
+// page as a readable origin. Same allowlist posture as register-identity.
+const DEFAULT_ORIGIN = `https://${NIP05_DOMAIN}`;
+const ALLOWED_ORIGINS = new Set([
+  `https://${NIP05_DOMAIN}`,
+  'https://satnam.pub',
+  'http://localhost:5173',
+  'http://localhost:8888',
+]);
+
 function corsHeaders(
   origin?: string,
   methods: string = 'GET, POST, OPTIONS'
 ): Record<string, string> {
   return {
-    'Access-Control-Allow-Origin': origin || '*',
+    'Access-Control-Allow-Origin':
+      origin && ALLOWED_ORIGINS.has(origin) ? origin : DEFAULT_ORIGIN,
     'Access-Control-Allow-Methods': methods,
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'X-Content-Type-Options': 'nosniff',

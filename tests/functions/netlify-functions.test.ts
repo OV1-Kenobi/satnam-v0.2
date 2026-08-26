@@ -35,10 +35,17 @@ vi.mock('@supabase/supabase-js', () => ({
         range: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
       })),
-      insert: vi.fn().mockResolvedValue({ error: null }),
+      insert: vi.fn(() => ({
+        // Chainable for .insert(...).select('id').single() callers (agent_deploy)
+        select: () => ({
+          single: async () => ({ data: null, error: null }),
+          maybeSingle: async () => ({ data: null, error: null }),
+        }),
+      })),
       upsert: vi.fn().mockResolvedValue({ error: null }),
       delete: vi.fn(() => ({
         eq: vi.fn().mockResolvedValue({ error: null }),
+        lt: vi.fn().mockResolvedValue({ error: null }),
       })),
     })),
     rpc: vi.fn(() => ({
@@ -126,7 +133,13 @@ async function installDefaultSupabaseMock(): Promise<void> {
         range: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
       }),
-      insert: vi.fn().mockResolvedValue({ error: null }),
+      insert: vi.fn(() => ({
+        // Chainable for .insert(...).select('id').single() callers (agent_deploy)
+        select: () => ({
+          single: async () => ({ data: null, error: null }),
+          maybeSingle: async () => ({ data: null, error: null }),
+        }),
+      })),
       upsert: vi.fn().mockResolvedValue({ error: null }),
       delete: () => ({
         eq: vi.fn().mockResolvedValue({ error: null }),
@@ -1321,5 +1334,298 @@ describe('WP3/H-4 — CSP connect-src allowlist', () => {
     const html = fs.readFileSync('index.html', 'utf-8');
     expect(html).not.toContain('Content-Security-Policy');
     expect(html).not.toContain('http-equiv');
+  });
+});
+
+// ============================================================================
+// Wave 2 — A-1 issuer CORS, M-1 group consent, M-2 update scoping, M-3 expiry
+// ============================================================================
+
+describe('Wave 2 — A-1: issuer-registry exact-origin CORS', () => {
+  let handler: (event: HandlerEvent, ctx: unknown) => Promise<{ statusCode?: number; headers?: Record<string, string>; body?: string } | undefined>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/issuer-registry')) as unknown as { handler: typeof handler });
+    await installDefaultSupabaseMock();
+  });
+
+  const evilOrigins = [
+    'https://satnam.pub.evil.com',
+    'https://evil.com',
+    'https://satnam.pubx',
+    'null',
+  ];
+
+  for (const evil of evilOrigins) {
+    it(`preflight never reflects arbitrary origin ${evil}`, async () => {
+      const result = await handler(
+        makeEvent({ httpMethod: 'OPTIONS', headers: { host: 'satnam.pub', origin: evil } }),
+        {} as never,
+      );
+      expect(result?.statusCode).toBe(204);
+      const acao = result?.headers?.['Access-Control-Allow-Origin'];
+      expect(acao).toBe('https://satnam.pub');
+      expect(acao).not.toBe(evil);
+    });
+
+    it(`GET error path never reflects arbitrary origin ${evil}`, async () => {
+      const result = await handler(
+        makeEvent({
+          httpMethod: 'GET',
+          queryStringParameters: { pubkey: 'not-hex' },
+          headers: { host: 'satnam.pub', origin: evil },
+        }),
+        {} as never,
+      );
+      expect(result?.statusCode).toBe(400);
+      expect(result?.headers?.['Access-Control-Allow-Origin']).toBe('https://satnam.pub');
+    });
+  }
+
+  it('POST error path reflects only whitelisted origins', async () => {
+    mockAuthFailure('missing_header');
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({}),
+        headers: { host: 'satnam.pub', origin: 'https://attacker.example', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(401);
+    expect(result?.headers?.['Access-Control-Allow-Origin']).toBe('https://satnam.pub');
+  });
+
+  it('legit whitelisted origin is echoed on preflight', async () => {
+    const result = await handler(
+      makeEvent({ httpMethod: 'OPTIONS', headers: { host: 'satnam.pub', origin: 'http://localhost:8888' } }),
+      {} as never,
+    );
+    expect(result?.headers?.['Access-Control-Allow-Origin']).toBe('http://localhost:8888');
+  });
+});
+
+describe('Wave 2 — M-1/W2-2: group member consent states', () => {
+  let handler: (event: HandlerEvent, ctx: unknown) => Promise<{ statusCode?: number; headers?: Record<string, string>; body?: string } | undefined>;
+
+  /** Supabase mock that captures group_members inserts and serves consent lookups. */
+  async function installGroupConsentMock(existingMembership: { status: string } | null) {
+    const { createClient } = await import('@supabase/supabase-js');
+    const memberRows: Array<Record<string, unknown>> = [];
+    vi.mocked(createClient).mockReturnValue(({
+      from: (table: string) => ({
+        insert: (rows: unknown) => {
+          if (table === 'group_members') {
+            memberRows.push(...(Array.isArray(rows) ? rows : [rows]) as Array<Record<string, unknown>>);
+            return Promise.resolve({ error: null });
+          }
+          return { select: () => ({ single: async () => ({ data: { id: 'g-0000-uuid' }, error: null }) }) };
+        },
+        select: () => {
+          const chain = {
+            eq: vi.fn(() => chain),
+            gt: vi.fn(() => chain),
+            gte: vi.fn(() => chain),
+            maybeSingle: async () => ({ data: existingMembership, error: null }),
+          };
+          return chain;
+        },
+        update: () => {
+          const uchain = { eq: vi.fn(() => uchain), maybeSingle: async () => ({ data: null, error: null }) };
+          // terminal await works because any function returning uchain is thenable-resolved by test awaiting result of second eq
+          (uchain as unknown as { then: unknown }).then = undefined;
+          return uchain;
+        },
+        upsert: async () => ({ error: null }),
+        delete: () => ({ eq: async () => ({ error: null }), lt: async () => ({ error: null }) }),
+      }),
+    } as unknown) as ReturnType<typeof createClient>);
+    return memberRows;
+  }
+
+  it('group_create records creator active and provisioned members invited with counts', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/register-identity')) as unknown as { handler: typeof handler });
+    const memberRows = await installGroupConsentMock(null);
+    mockAuthSuccess();
+
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({
+          action: 'group_create',
+          charter: 'Family charter',
+          members: [
+            { pubkey: 'd'.repeat(64), role: 'steward' },
+            { pubkey: 'e'.repeat(64), role: 'adult' },
+          ],
+        }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+
+    expect(result?.statusCode).toBe(201);
+    const body = JSON.parse(result?.body || '{}');
+    expect(body.invited_count).toBe(2);
+
+    const creatorRow = memberRows.find((r) => r.member_pubkey === 'a'.repeat(64));
+    expect(creatorRow?.status).toBe('active');
+    for (const pk of ['d'.repeat(64), 'e'.repeat(64)]) {
+      const row = memberRows.find((r) => r.member_pubkey === pk);
+      expect(row?.status).toBe('invited');
+    }
+  });
+
+  it('member_consent flips own invited row to active under the member key', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/register-identity')) as unknown as { handler: typeof handler });
+    await installGroupConsentMock({ status: 'invited' });
+    mockAuthSuccess();
+
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({ action: 'member_consent', group_id: '11111111-2222-3333-4444-555555555555' }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(200);
+    expect(JSON.parse(result?.body || '{}').status).toBe('active');
+  });
+
+  it('member_consent rejects keys not provisioned for the group', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/register-identity')) as unknown as { handler: typeof handler });
+    await installGroupConsentMock(null);
+    mockAuthSuccess();
+
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({ action: 'member_consent', group_id: '11111111-2222-3333-4444-555555555555' }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(403);
+  });
+});
+
+describe('Wave 2 — M-2/W2-3: update path domain scoping', () => {
+  let handler: (event: HandlerEvent, ctx: unknown) => Promise<{ statusCode?: number; headers?: Record<string, string>; body?: string } | undefined>;
+
+  it('ownership check is scoped to subdomain_prefix + root_domain from the request', async () => {
+    vi.resetModules();
+    const { createClient } = await import('@supabase/supabase-js');
+    const eqCalls: Array<[string, unknown]> = [];
+    vi.mocked(createClient).mockReturnValue(({
+      from: (table: string) => ({
+        select: () => {
+          if (table === 'nip05_identifiers') {
+            const chain = {
+              eq: vi.fn((col: string, val: unknown) => { eqCalls.push([col, val]); return chain; }),
+              gt: vi.fn(() => chain),
+              gte: vi.fn(() => chain),
+              maybeSingle: async () => ({ data: { username: 'alice' }, error: null }),
+            };
+            return chain;
+          }
+          // Canonical shape for every other table (rate_limits etc.)
+          return {
+            eq: vi.fn().mockReturnThis(),
+            not: vi.fn().mockReturnThis(),
+            gt: vi.fn().mockReturnThis(),
+            gte: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+            single: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
+        },
+        insert: vi.fn(() => ({
+          select: () => ({
+            single: async () => ({ data: null, error: null }),
+            maybeSingle: async () => ({ data: null, error: null }),
+          }),
+        })),
+        upsert: async () => ({ error: null }),
+        delete: () => ({
+          eq: async () => ({ error: null }),
+          lt: async () => ({ error: null }),
+        }),
+      }),
+    } as unknown) as ReturnType<typeof createClient>);
+
+    ({ handler } = (await import('../../netlify/functions/register-identity')) as unknown as { handler: typeof handler });
+    mockAuthSuccess();
+
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({ action: 'update', username: 'alice', domain: 'my.satnam.pub' }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode, `body=${result?.body}`).toBe(200);
+
+    const cols = eqCalls.map(([c]) => c);
+    expect(cols).toContain('subdomain_prefix');
+    expect(cols).toContain('root_domain');
+    const scoped = eqCalls.filter(([c]) => c === 'subdomain_prefix' || c === 'root_domain');
+    expect(scoped).toContainEqual(['subdomain_prefix', 'my']);
+    expect(scoped).toContainEqual(['root_domain', 'satnam.pub']);
+  });
+});
+
+describe('Wave 2 — M-3/W2-4: delegation_expires_at validation', () => {
+  let handler: (event: HandlerEvent, ctx: unknown) => Promise<{ statusCode?: number; headers?: Record<string, string>; body?: string } | undefined>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/register-identity')) as unknown as { handler: typeof handler });
+    await installDefaultSupabaseMock();
+    mockAuthSuccess();
+  });
+
+  function deployEvent(policy: Record<string, unknown>) {
+    return makeEvent({
+      httpMethod: 'POST',
+      body: JSON.stringify({
+        action: 'agent_deploy',
+        agent_pubkey: 'b'.repeat(64),
+        name: 'TestBot',
+        spend_policy: policy,
+      }),
+      headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+    });
+  }
+
+  it('rejects a past expiry with 400', async () => {
+    const result = await handler(deployEvent({ delegation_expires_at: new Date(Date.now() - 86_400_000).toISOString() }), {} as never);
+    expect(result?.statusCode).toBe(400);
+    expect(JSON.parse(result?.body || '{}').error).toMatch(/future/i);
+  });
+
+  it('rejects an unparseable date with 400', async () => {
+    const result = await handler(deployEvent({ delegation_expires_at: 'not-a-date' }), {} as never);
+    expect(result?.statusCode).toBe(400);
+    expect(JSON.parse(result?.body || '{}').error).toMatch(/valid date/i);
+  });
+
+  it('rejects an expiry beyond the 10-year horizon with 400', async () => {
+    const farFuture = new Date(Date.now() + 11 * 365 * 24 * 60 * 60 * 1000).toISOString();
+    const result = await handler(deployEvent({ delegation_expires_at: farFuture }), {} as never);
+    expect(result?.statusCode).toBe(400);
+    expect(JSON.parse(result?.body || '{}').error).toMatch(/10 years/i);
+  });
+
+  it('accepts a valid future expiry (reaches DB layer)', async () => {
+    const okExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const result = await handler(deployEvent({ delegation_expires_at: okExpiry }), {} as never);
+    // Validation passes; flow proceeds into the deployment DB path
+    expect([200, 201, 500]).toContain(result?.statusCode);
+    expect(result?.statusCode).not.toBe(400);
   });
 });

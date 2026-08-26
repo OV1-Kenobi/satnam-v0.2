@@ -71,37 +71,12 @@
 
     <!-- ── Service Worker Registration ──────────────────────────────────── -->
     <!--
-      Inline script is permitted under CSP (style-src 'self' 'unsafe-inline').
-      This is a minimal bootstrap only — no business logic.
+      A-4 fix (2026-08-25): bootstrap externalized to /sw-register.js.
+      script-src 'self' admits this same-origin file; the previous INLINE
+      script was blocked by the enforced CSP (no unsafe-inline, no hashes),
+      silently disabling PWA/offline/background-sync registration.
     -->
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function () {
-          navigator.serviceWorker
-            .register('/sw.js', { scope: '/' })
-            .then(function (registration) {
-              // Listen for SW updates and notify the React app
-              registration.addEventListener('updatefound', function () {
-                const newWorker = registration.installing;
-                if (!newWorker) return;
-                newWorker.addEventListener('statechange', function () {
-                  if (
-                    newWorker.state === 'installed' &&
-                    navigator.serviceWorker.controller
-                  ) {
-                    // Dispatch a custom event that the React app can listen for
-                    window.dispatchEvent(new CustomEvent('swUpdateAvailable'));
-                  }
-                });
-              });
-            })
-            .catch(function (err) {
-              // SW registration failure is non-fatal — the app works without it
-              console.warn('Service Worker registration failed:', err);
-            });
-        });
-      }
-    </script>
+    <script src="/sw-register.js"></script>
 
     <!-- ── Vite entry point ──────────────────────────────────────────────── -->
     <!-- S7: This is a module script loaded from /src/ — no external CDN.   -->

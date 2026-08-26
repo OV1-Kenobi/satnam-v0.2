@@ -481,4 +481,56 @@ describe('NIP-98 verifyNip98()', () => {
       expect(outcome.reason).toBe('delegation_invalid');
     }
   });
+
+  // -------------------------------------------------------------------------
+  // A-3 fix: payload tag REQUIRED for methods that carry bodies
+  // -------------------------------------------------------------------------
+
+  /** Build a valid bodied POST auth event WITHOUT a payload tag. */
+  function buildBodiedPostWithoutPayloadTag(body: Uint8Array): string {
+    const event = finalizeEvent(
+      {
+        kind: NIP98_KIND,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['u', TARGET_URL],
+          ['method', METHOD_POST],
+          // deliberately no ['payload', ...] tag
+        ],
+        content: '',
+      },
+      sk,
+    );
+    void body;
+    const eventJson = JSON.stringify(event);
+    const eventBytes = new TextEncoder().encode(eventJson);
+    let binary = '';
+    for (let i = 0; i < eventBytes.length; i++) {
+      binary += String.fromCharCode(eventBytes[i] ?? 0);
+    }
+    return btoa(binary);
+  }
+
+  it('A-3: POST with a body but NO payload tag is REJECTED (payload_mismatch)', () => {
+    const body = new TextEncoder().encode('{"username":"alice"}');
+    const base64 = buildBodiedPostWithoutPayloadTag(body);
+    const outcome = verifyNip98(buildHeader(base64), TARGET_URL, METHOD_POST, body);
+    expect(outcome.authenticated).toBe(false);
+    if (!outcome.authenticated) {
+      expect(outcome.reason).toBe('payload_mismatch');
+    }
+  });
+
+  it('A-3: GET without a body and without a payload tag is still accepted', () => {
+    const base64 = buildValidAuthEvent(sk, TARGET_URL, METHOD_GET);
+    const outcome = verifyNip98(buildHeader(base64), TARGET_URL, METHOD_GET);
+    expect(outcome.authenticated).toBe(true);
+  });
+
+  it("A-3: Satnam's own builder still round-trips (construct sets payload for POST)", () => {
+    const body = new TextEncoder().encode('{"foo":"bar"}');
+    const authHeader = buildNip98AuthHeader(sk, TARGET_URL, METHOD_POST, body);
+    const outcome = verifyNip98(authHeader, TARGET_URL, METHOD_POST, body);
+    expect(outcome.authenticated).toBe(true);
+  });
 });
