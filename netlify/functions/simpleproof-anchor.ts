@@ -22,6 +22,7 @@
 
 import type { Handler, HandlerResponse } from "@netlify/functions";
 import { verifyNip98 } from '../../src/lib/nip98/verify';
+import { checkAndRecordAuthEvent, createSupabaseReplayStore } from './_lib/nip98-replay';
 
 // ============================================================================
 // Constants
@@ -56,16 +57,19 @@ const EVENT_ID_REGEX = /^[0-9a-f]{64}$/i;
 // Security headers
 // ============================================================================
 
+// Layer 2 fix (2026-08-25): EXACT origin matching — startsWith() prefix
+// matching admitted lookalike origins such as https://satnam.pub.evil.com
+const DEFAULT_ORIGIN = `https://${NIP05_DOMAIN}`;
+const ALLOWED_ORIGINS = new Set([
+  `https://${NIP05_DOMAIN}`,
+  'https://satnam.pub',
+  'http://localhost:5173',
+  'http://localhost:8888',
+]);
+
 function corsHeaders(origin?: string): Record<string, string> {
-  const allowedOrigins = [
-    `https://${NIP05_DOMAIN}`,
-    'https://satnam.pub',
-    'http://localhost:5173',
-    'http://localhost:8888',
-  ];
-  const resolvedOrigin: string = (origin && allowedOrigins.some((o) => origin.startsWith(o)))
-    ? origin
-    : (allowedOrigins[0] ?? 'https://satnam.pub');
+  const resolvedOrigin: string =
+    origin && ALLOWED_ORIGINS.has(origin) ? origin : DEFAULT_ORIGIN;
   return {
     'Access-Control-Allow-Origin': resolvedOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -214,6 +218,27 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   if (!authOutcome.authenticated) {
     console.log('[simpleproof-anchor] auth failed:', authOutcome.reason);
     return errorResponse(401, `Unauthorized: ${authOutcome.reason}`, requestOrigin);
+  }
+
+  // ── NIP-98 replay dedupe (H-2 fix, 2026-08-25; split policy per founder
+  //    Decision 2): mutating endpoint → FAIL-CLOSED. Store outage = 503 so a
+  //    captured token never gets an untracked anchoring run here. ──
+  if (authOutcome.eventId) {
+    const replay = await checkAndRecordAuthEvent(
+      createSupabaseReplayStore(),
+      authOutcome.eventId,
+      { outagePolicy: 'fail-closed' },
+    );
+    if (!replay.allowed) {
+      if (replay.reason === 'store_unavailable') {
+        return {
+          statusCode: 503,
+          headers: { ...corsHeaders(requestOrigin), 'Retry-After': '30', 'Cache-Control': 'no-store' },
+          body: JSON.stringify({ success: false, error: 'Replay protection store unavailable; retry shortly' }),
+        };
+      }
+      return errorResponse(401, 'Unauthorized: replay_detected', requestOrigin);
+    }
   }
 
   // ── Parse + validate request body ──

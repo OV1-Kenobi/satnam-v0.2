@@ -31,6 +31,7 @@
 import type { Handler, HandlerResponse } from "@netlify/functions";
 import { createClient } from '@supabase/supabase-js';
 import { verifyNip98 } from '../../src/lib/nip98/verify';
+import { checkAndRecordAuthEvent, createSupabaseReplayStore } from './_lib/nip98-replay';
 
 // ============================================================================
 // Supabase client
@@ -175,6 +176,28 @@ async function handlePost(
   }
 
   const pubkey = authOutcome.pubkey;
+
+  // ── NIP-98 replay dedupe (H-2 fix, 2026-08-25; split policy per founder
+  //    Decision 2): mutating endpoint → FAIL-CLOSED. Store outage = 503 so a
+  //    captured token never gets an untracked issuer upsert here.
+  //    Runs after verify, before body parsing or any other DB access. ──
+  if (authOutcome.eventId) {
+    const replay = await checkAndRecordAuthEvent(
+      createSupabaseReplayStore(),
+      authOutcome.eventId,
+      { outagePolicy: 'fail-closed' },
+    );
+    if (!replay.allowed) {
+      if (replay.reason === 'store_unavailable') {
+        return {
+          statusCode: 503,
+          headers: { ...corsHeaders(requestOrigin, 'POST, OPTIONS'), 'Retry-After': '30', 'Cache-Control': 'no-store' },
+          body: JSON.stringify({ success: false, error: 'Replay protection store unavailable; retry shortly' }),
+        };
+      }
+      return errorResponse(401, 'Unauthorized: replay_detected', requestOrigin);
+    }
+  }
 
   // ── Parse body ──
   let body: {

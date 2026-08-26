@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { finalizeEvent } from 'nostr-tools';
 import {
   buildAgentProfile,
   publishAgentProfile,
@@ -469,6 +470,103 @@ describe('publishAgentSchedule', () => {
         ceps: ceps as any,
       })
     ).rejects.toThrow(/at least 30 seconds/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 16–18: R2-L-1 zeroization of decoded secret keys (agent-state.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * R2-L-1 fix verification: publishAgentState / publishAgentSchedule decode
+ * signerNsec to raw key bytes and must fill(0) them on every exit path,
+ * mirroring profile-builder.ts. The mocked finalizeEvent receives the real
+ * key buffer, so we can assert its contents after the call settles.
+ */
+describe('agent-state key zeroization (R2-L-1)', () => {
+  function lastKeyBuffer(): Uint8Array | undefined {
+    const calls = vi.mocked(finalizeEvent).mock.calls;
+    const last = calls[calls.length - 1];
+    return last?.[1] as Uint8Array | undefined;
+  }
+
+  beforeEach(() => {
+    vi.mocked(finalizeEvent).mockClear();
+  });
+
+  it('16. publishAgentState zeroes the secret key on success', async () => {
+    const ceps = makeMockCeps();
+    const state: AgentOperationalState = {
+      status: 'idle',
+      lastHeartbeat: Math.floor(Date.now() / 1000),
+      metrics: {
+        tasksCompleted: 0,
+        tasksFailed: 0,
+        totalSpentMsats: BigInt(0),
+        uptimeSeconds: 0,
+      },
+    };
+
+    await publishAgentState({
+      agentPubkey: 'agent-pubkey-hex',
+      state,
+      signerNsec: TEST_NSEC_HEX, // hex path → decodeSecretKey returns live bytes
+      governorPubkey: 'gov-pubkey-hex',
+      ceps: ceps as any,
+    });
+
+    const key = lastKeyBuffer();
+    expect(key).toBeDefined();
+    expect(key!.length).toBe(32);
+    expect(Array.from(key!).every((b) => b === 0)).toBe(true);
+  });
+
+  it('17. publishAgentState zeroes the secret key when publishing fails', async () => {
+    const ceps = makeMockCeps();
+    (ceps.publishEvent as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('relay down'),
+    );
+
+    const state: AgentOperationalState = {
+      status: 'error',
+      lastHeartbeat: Math.floor(Date.now() / 1000),
+      metrics: {
+        tasksCompleted: 0,
+        tasksFailed: 1,
+        totalSpentMsats: BigInt(0),
+        uptimeSeconds: 0,
+      },
+    };
+
+    await expect(
+      publishAgentState({
+        agentPubkey: 'agent-pubkey-hex',
+        state,
+        signerNsec: TEST_NSEC_HEX,
+        governorPubkey: 'gov-pubkey-hex',
+        ceps: ceps as any,
+      }),
+    ).rejects.toThrow(/relay down/);
+
+    // Error path must still have wiped the key
+    const key = lastKeyBuffer();
+    expect(key).toBeDefined();
+    expect(Array.from(key!).every((b) => b === 0)).toBe(true);
+  });
+
+  it('18. publishAgentSchedule zeroes the secret key on success', async () => {
+    const ceps = makeMockCeps();
+
+    await publishAgentSchedule({
+      agentPubkey: 'agent-pk',
+      heartbeatIntervalSecs: 60,
+      signerNsec: TEST_NSEC_HEX,
+      ceps: ceps as any,
+    });
+
+    const key = lastKeyBuffer();
+    expect(key).toBeDefined();
+    expect(Array.from(key!).every((b) => b === 0)).toBe(true);
   });
 });
 

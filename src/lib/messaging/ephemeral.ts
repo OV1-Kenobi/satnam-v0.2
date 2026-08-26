@@ -17,6 +17,8 @@
 
 import type { Message, EphemeralConfig } from './types.js';
 import { TTL_PRESETS } from './types.js';
+import { bytesToHex, bytesToUtf8, hexToBytes, utf8ToBytes } from '@noble/hashes/utils';
+import { getVault } from '../vault/vault.js';
 
 // ============================================================================
 // Re-export presets for convenience
@@ -37,6 +39,28 @@ export interface GcResult {
   burnedRemoved: number;
   /** unix timestamp of the GC run */
   ranAt: number;
+  /**
+   * Message stores skipped because the vault was LOCKED (H-1/R2-M-1 fix,
+   * 2026-08-25). Since commit aa59c0a these stores hold hex ciphertext under
+   * the vault master key; GC must never touch them while locked. Skipped
+   * stores are left untouched and retried on a later pass.
+   */
+  skippedLocked: number;
+  /**
+   * Message stores REMOVED because they could not be decrypted (R2-M-1 fix,
+   * 2026-08-25). Undecryptable policy: count + remove.
+   *
+   * Rationale (pre-launch alpha): a store that fails hex-decode or
+   * XChaCha20-Poly1305 authentication is either (a) corrupt, (b) written
+   * under a different/rotated master key and permanently unreadable, or
+   * (c) a legacy PLAINTEXT leftover from before aa59c0a. In all three cases
+   * no future reader can render it, it can never honour burn-after-read
+   * semantics, and retaining case (c) keeps plaintext message content in
+   * localStorage indefinitely. Removal is therefore both the privacy-
+   * minimizing and storage-hygienic choice; retention was rejected because
+   * it preserves dead bytes with zero recovery value.
+   */
+  undecryptableRemoved: number;
 }
 
 /** Storage namespace used by EphemeralManager */
@@ -226,18 +250,36 @@ export class EphemeralManager {
    * Removes messages whose NIP-40 expiration timestamp has passed.
    * Also removes messages marked `deleted`.
    *
-   * @returns GcResult summary
+   * Since commit aa59c0a these stores hold HEX CIPHERTEXT produced by the
+   * vault's encryptBytes (XChaCha20-Poly1305 under the master key) — the
+   * exact format written by group-chat/direct-chat storage helpers. This
+   * pass therefore decrypts before parsing (R2-M-1 regression fix):
+   *
+   * - Vault locked: the key is SKIPPED gracefully (counted in
+   *   `skippedLocked`); data is never thrown away and never decrypted.
+   * - Undecryptable store (corrupt / wrong-key / legacy plaintext):
+   *   removed and counted in `undecryptableRemoved` — see GcResult docs.
+   * - Otherwise: expired/deleted entries are filtered and, only when
+   *   something was actually removed, the remainder is RE-ENCRYPTED under a
+   *   fresh nonce and written back as hex ciphertext.
+   *
+   * @returns GcResult summary (awaitable — vault crypto is async)
    */
-  processExpiredMessages(): GcResult {
+  async processExpiredMessages(): Promise<GcResult> {
     const now = Math.floor(Date.now() / 1000);
     const result: GcResult = {
       inspected: 0,
       expiredRemoved: 0,
       burnedRemoved: 0,
       ranAt: now,
+      skippedLocked: 0,
+      undecryptableRemoved: 0,
     };
 
     if (typeof localStorage === 'undefined') return result;
+
+    const vault = getVault();
+    const vaultLocked = !vault.isUnlocked();
 
     // Scan all localStorage keys for message stores
     const messageKeyPattern = /^satnam:(dm:msgs:|group:msgs:)/;
@@ -251,11 +293,38 @@ export class EphemeralManager {
     }
 
     for (const key of keysToProcess) {
+      // Locked vault: skip the key gracefully — never wipe user data we
+      // cannot read right now; a later unlocked pass will collect it.
+      if (vaultLocked) {
+        result.skippedLocked++;
+        continue;
+      }
+
       try {
         const raw = localStorage.getItem(key);
         if (!raw) continue;
 
-        const messages: Message[] = JSON.parse(raw);
+        // ── Decrypt-before-parse (same helpers as group-chat/direct-chat) ──
+        let messages: Message[];
+        try {
+          const ciphertextBytes = hexToBytes(raw);
+          const plaintextBytes = await vault.decryptBytes(ciphertextBytes);
+          const parsed: unknown = JSON.parse(bytesToUtf8(plaintextBytes));
+          if (!Array.isArray(parsed)) throw new Error('not a message array');
+          messages = parsed as Message[];
+        } catch {
+          // Undecryptable entry policy (documented on GcResult): count +
+          // remove. Covers invalid hex (legacy plaintext leftovers from
+          // before aa59c0a), authentication failures (wrong/rotated master
+          // key), corrupted blobs, and valid decryptions that are not
+          // message arrays.
+          try {
+            localStorage.removeItem(key);
+          } catch {}
+          result.undecryptableRemoved++;
+          continue;
+        }
+
         const before = messages.length;
         result.inspected += before;
 
@@ -274,10 +343,20 @@ export class EphemeralManager {
         });
 
         if (kept.length < before) {
-          localStorage.setItem(key, JSON.stringify(kept));
+          // Re-encrypt under a fresh nonce and write back hex ciphertext so
+          // plaintext never touches persistent storage.
+          const encrypted = await vault.encryptBytes(
+            utf8ToBytes(JSON.stringify(kept)),
+          );
+          try {
+            localStorage.setItem(key, bytesToHex(encrypted));
+          } catch {
+            // Quota errors — leave the original store intact rather than
+            // losing data; next pass will retry collection.
+          }
         }
       } catch {
-        // Skip malformed entries
+        // Defensive outer guard: never let one bad key abort the whole pass.
       }
     }
 

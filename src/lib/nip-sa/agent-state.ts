@@ -138,27 +138,40 @@ export async function publishAgentState(params: {
   const { agentPubkey, state, signerNsec, governorPubkey, ceps } = params;
 
   const secretKey = decodeSecretKey(signerNsec);
+  let conversationKey: Uint8Array | null = null;
 
-  // Derive a shared NIP-44 conversation key with self (agent encrypts to own pubkey)
-  // This allows the agent to re-read its own state and the Governor (holding nsec) to decrypt
-  const conversationKey = nip44.v2.utils.getConversationKey(secretKey, agentPubkey);
-  const encryptedContent = nip44.v2.encrypt(serializeState(state), conversationKey);
+  // R2-L-1 fix (2026-08-25): mirror profile-builder.ts — zeroize the decoded
+  // secret key on ALL exit paths (success, encryption failure, signing
+  // failure, publish failure). The NIP-44 conversation key is derived key
+  // material and is zeroized alongside it.
+  try {
+    // Derive a shared NIP-44 conversation key with self (agent encrypts to own pubkey)
+    // This allows the agent to re-read its own state and the Governor (holding nsec) to decrypt
+    conversationKey = nip44.v2.utils.getConversationKey(secretKey, agentPubkey);
+    const encryptedContent = nip44.v2.encrypt(
+      serializeState(state),
+      conversationKey,
+    );
 
-  const signed = finalizeEvent(
-    {
-      kind: 39201,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['d', 'state'],
-        ['p', governorPubkey],
-        ['status', state.status],
-      ],
-      content: encryptedContent,
-    },
-    secretKey
-  );
+    const signed = finalizeEvent(
+      {
+        kind: 39201,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['d', 'state'],
+          ['p', governorPubkey],
+          ['status', state.status],
+        ],
+        content: encryptedContent,
+      },
+      secretKey
+    );
 
-  return ceps.publishEvent(signed as any);
+    return await ceps.publishEvent(signed as any);
+  } finally {
+    if (conversationKey) conversationKey.fill(0);
+    secretKey.fill(0);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -287,33 +300,40 @@ export async function publishAgentSchedule(
 
   const secretKey = decodeSecretKey(signerNsec);
 
-  const scheduleContent = {
-    heartbeatIntervalSeconds: heartbeatIntervalSecs,
-    maxConcurrentTasks: 1, // Conservative default; agent runner can override
-    ...(activeHours
-      ? { preferredWorkingHoursUTC: activeHours }
-      : {}),
-  };
+  // R2-L-1 fix (2026-08-25): zeroize the decoded secret key on ALL exit
+  // paths, mirroring profile-builder.ts (publishAgentProfile/updateAgentProfile/
+  // deactivateAgent try/finally pattern).
+  try {
+    const scheduleContent = {
+      heartbeatIntervalSeconds: heartbeatIntervalSecs,
+      maxConcurrentTasks: 1, // Conservative default; agent runner can override
+      ...(activeHours
+        ? { preferredWorkingHoursUTC: activeHours }
+        : {}),
+    };
 
-  const tags: string[][] = [
-    ['d', 'schedule'],
-    ['heartbeat_interval', String(heartbeatIntervalSecs)],
-  ];
+    const tags: string[][] = [
+      ['d', 'schedule'],
+      ['heartbeat_interval', String(heartbeatIntervalSecs)],
+    ];
 
-  if (activeHours) {
-    tags.push(['active_hours', String(activeHours.start), String(activeHours.end)]);
+    if (activeHours) {
+      tags.push(['active_hours', String(activeHours.start), String(activeHours.end)]);
+    }
+
+    const signed = finalizeEvent(
+      {
+        kind: 39202,
+        created_at: Math.floor(Date.now() / 1000),
+        tags,
+        content: JSON.stringify(scheduleContent),
+      },
+      secretKey
+    );
+
+    return await ceps.publishEvent(signed as any);
+  } finally {
+    secretKey.fill(0);
   }
-
-  const signed = finalizeEvent(
-    {
-      kind: 39202,
-      created_at: Math.floor(Date.now() / 1000),
-      tags,
-      content: JSON.stringify(scheduleContent),
-    },
-    secretKey
-  );
-
-  return ceps.publishEvent(signed as any);
 }
 

@@ -24,6 +24,7 @@
 
 import type { Handler, HandlerResponse } from "@netlify/functions";
 import { verifyNip98 } from '../../src/lib/nip98/verify';
+import { checkAndRecordAuthEvent, createSupabaseReplayStore } from './_lib/nip98-replay';
 
 // ============================================================================
 // Constants
@@ -58,16 +59,19 @@ const RATE_LIMIT_MAX_IP = 60;
 // Security headers
 // ============================================================================
 
+// Layer 2 fix (2026-08-25): EXACT origin matching — startsWith() prefix
+// matching admitted lookalike origins such as https://satnam.pub.evil.com
+const DEFAULT_ORIGIN = `https://${NIP05_DOMAIN}`;
+const ALLOWED_ORIGINS = new Set([
+  `https://${NIP05_DOMAIN}`,
+  'https://satnam.pub',
+  'http://localhost:5173',
+  'http://localhost:8888',
+]);
+
 function corsHeaders(origin?: string): Record<string, string> {
-  const allowedOrigins = [
-    `https://${NIP05_DOMAIN}`,
-    'https://satnam.pub',
-    'http://localhost:5173',
-    'http://localhost:8888',
-  ];
-  const resolvedOrigin: string = (origin && allowedOrigins.some((o) => origin.startsWith(o)))
-    ? origin
-    : (allowedOrigins[0] ?? 'https://satnam.pub');
+  const resolvedOrigin: string =
+    origin && ALLOWED_ORIGINS.has(origin) ? origin : DEFAULT_ORIGIN;
   return {
     'Access-Control-Allow-Origin': resolvedOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -300,6 +304,21 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
   }
 
   const pubkey = authOutcome.pubkey;
+
+  // ── NIP-98 replay dedupe (H-2 fix, 2026-08-25; split policy per founder
+  //    Decision 2): forwarder → FAIL-OPEN-WITH-ALERTING. Byte-identical
+  //    replays are partly neutralized downstream (relay event-id dedupe);
+  //    availability outranks the bounded duplicate-forward nuisance here. ──
+  if (authOutcome.eventId) {
+    const replay = await checkAndRecordAuthEvent(
+      createSupabaseReplayStore(),
+      authOutcome.eventId,
+      { outagePolicy: 'fail-open' },
+    );
+    if (!replay.allowed) {
+      return errorResponse(401, 'Unauthorized: replay_detected', requestOrigin);
+    }
+  }
 
   // ── Parse + validate request body ──
   let body: { encrypted_payload?: string; relay_url?: string };

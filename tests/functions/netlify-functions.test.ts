@@ -97,11 +97,86 @@ function makeEvent(
 }
 
 /** Mock a successful NIP-98 auth result. */
-function mockAuthSuccess(pubkey: string = 'a'.repeat(64)) {
+function mockAuthSuccess(
+  pubkey: string = 'a'.repeat(64),
+  eventId: string = 'b'.repeat(64),
+) {
   vi.mocked(verifyNip98).mockReturnValue({
     authenticated: true,
     pubkey,
+    eventId,
   });
+}
+
+/**
+ * Default generic Supabase mock matching the module-level factory shape.
+ * Used to restore a sane implementation after replay-specific overrides.
+ */
+async function installDefaultSupabaseMock(): Promise<void> {
+  const { createClient } = await import('@supabase/supabase-js');
+  vi.mocked(createClient).mockReturnValue(({
+    from: () => ({
+      select: () => ({
+        eq: vi.fn().mockReturnThis(),
+        not: vi.fn().mockReturnThis(),
+        gt: vi.fn().mockReturnThis(),
+        gte: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        single: vi.fn().mockResolvedValue({ data: null, error: null }),
+        range: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+      }),
+      insert: vi.fn().mockResolvedValue({ error: null }),
+      upsert: vi.fn().mockResolvedValue({ error: null }),
+      delete: () => ({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+        lt: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    }),
+  } as unknown) as ReturnType<typeof createClient>);
+}
+
+/** Replay-aware Supabase mock: insert succeeds `okCount` times, then unique-violation. */
+async function installReplaySupabaseMock(okCount = 1): Promise<void> {
+  const { createClient } = await import('@supabase/supabase-js');
+  let inserts = 0;
+  vi.mocked(createClient).mockReturnValue(({
+    from: () => ({
+      select: () => ({
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      insert: async () => {
+        inserts += 1;
+        if (inserts <= okCount) return { error: null };
+        return { error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
+      },
+      upsert: vi.fn().mockResolvedValue({ error: null }),
+      delete: () => ({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+        lt: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    }),
+  } as unknown) as ReturnType<typeof createClient>);
+}
+
+/** Outage mock: seen-events insert always fails with a NON-unique DB error. */
+async function installOutageSupabaseMock(): Promise<void> {
+  const { createClient } = await import('@supabase/supabase-js');
+  vi.mocked(createClient).mockReturnValue(({
+    from: () => ({
+      select: () => ({
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      }),
+      insert: async () => ({ error: { code: '08006', message: 'connection failure to server' } }),
+      upsert: vi.fn().mockResolvedValue({ error: null }),
+      delete: () => ({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+        lt: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    }),
+  } as unknown) as ReturnType<typeof createClient>);
 }
 
 /** Mock a failed NIP-98 auth result. */
@@ -171,6 +246,14 @@ describe('check-username', () => {
           gt: vi.fn().mockReturnThis(),
           maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
         })),
+        // Full canonical shape: later authed flows share this mocked client
+        // instance and MUST find insert/delete or fail-closed dedupe 503s.
+        insert: vi.fn().mockResolvedValue({ error: null }),
+        upsert: vi.fn().mockResolvedValue({ error: null }),
+        delete: () => ({
+          eq: vi.fn().mockResolvedValue({ error: null }),
+          lt: vi.fn().mockResolvedValue({ error: null }),
+        }),
       })),
     } as never);
 
@@ -202,6 +285,12 @@ describe('check-username', () => {
           gt: vi.fn().mockReturnThis(),
           maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
         })),
+        insert: vi.fn().mockResolvedValue({ error: null }),
+        upsert: vi.fn().mockResolvedValue({ error: null }),
+        delete: () => ({
+          eq: vi.fn().mockResolvedValue({ error: null }),
+          lt: vi.fn().mockResolvedValue({ error: null }),
+        }),
       })),
     } as any);
 
@@ -304,7 +393,20 @@ describe('register-identity', () => {
   it('calls verifyNip98 before any database logic (S10 invariant)', async () => {
     mockAuthFailure('expired');
     const { createClient } = await import('@supabase/supabase-js');
-    const mockFrom = vi.fn();
+    // Full-chain spy: this implementation PERSISTS across later describes
+    // (vi.mock factories survive resetModules), so it must stay complete.
+    const mockFrom = vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      })),
+      insert: vi.fn().mockResolvedValue({ error: null }),
+      upsert: vi.fn().mockResolvedValue({ error: null }),
+      delete: () => ({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+        lt: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    }));
     vi.mocked(createClient).mockReturnValue({ from: mockFrom } as any);
 
     await handler(
@@ -531,6 +633,13 @@ describe('issuer-registry', () => {
             eq: vi.fn().mockReturnThis(),
             maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
           })),
+          // Canonical shape so later authed-POST dedupe finds insert/delete
+          insert: vi.fn().mockResolvedValue({ error: null }),
+          upsert: vi.fn().mockResolvedValue({ error: null }),
+          delete: () => ({
+            eq: vi.fn().mockResolvedValue({ error: null }),
+            lt: vi.fn().mockResolvedValue({ error: null }),
+          }),
         })),
       } as any);
 
@@ -605,7 +714,19 @@ describe('issuer-registry', () => {
     it('calls verifyNip98 before DB write (S10 invariant)', async () => {
       mockAuthFailure('expired');
       const { createClient } = await import('@supabase/supabase-js');
-      const mockFrom = vi.fn();
+      // Full-chain spy (persists across later describes — see register-identity note)
+      const mockFrom = vi.fn(() => ({
+        select: vi.fn(() => ({
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        })),
+        insert: vi.fn().mockResolvedValue({ error: null }),
+        upsert: vi.fn().mockResolvedValue({ error: null }),
+        delete: () => ({
+          eq: vi.fn().mockResolvedValue({ error: null }),
+          lt: vi.fn().mockResolvedValue({ error: null }),
+        }),
+      }));
       vi.mocked(createClient).mockReturnValue({ from: mockFrom } as any);
 
       await handler(
@@ -827,4 +948,378 @@ describe('S10 invariant — auth function imports', () => {
       expect(src).toContain('verifyNip98');
     });
   }
+});
+
+// ============================================================================
+// WP2 / H-1 fix: EXACT-origin CORS on all authed functions
+// ============================================================================
+
+describe('WP2/H-1 — exact-origin CORS', () => {
+  type AnyHandler = (event: HandlerEvent, ctx: unknown) => Promise<{ statusCode?: number; headers?: Record<string, string>; body?: string } | undefined>;
+
+  const functionNames = [
+    'register-identity',
+    'nwc-proxy',
+    'unified-comms',
+    'simpleproof-anchor',
+  ] as const;
+
+  let handlers: Record<string, AnyHandler>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    handlers = {};
+    for (const name of functionNames) {
+      const mod = await import(`../../netlify/functions/${name}`);
+      handlers[name] = mod.handler as AnyHandler;
+    }
+  });
+
+  // Prefix lookalikes that startsWith() matching ADMITTED but exact
+  // Set-matching must REJECT (response must fall back to the default origin,
+  // never reflect the attacker-controlled value):
+  const evilOrigins = [
+    'https://satnam.pub.evil.com',   // classic suffix lookalike
+    'https://satnam.pubx',           // no-dot extension
+    'https://satnam.pub.evil.co.uk', // multi-label suffix
+  ];
+
+  for (const name of functionNames) {
+    for (const evil of evilOrigins) {
+      it(`${name}: preflight does NOT admit lookalike origin ${evil}`, async () => {
+        const result = await handlers[name](
+          makeEvent({
+            httpMethod: 'OPTIONS',
+            headers: { host: 'satnam.pub', origin: evil },
+          }),
+          {} as never,
+        );
+        expect(result?.statusCode).toBe(204);
+        const acao = result?.headers?.['Access-Control-Allow-Origin'];
+        expect(acao).not.toContain('evil');
+        expect(acao).not.toBe(evil);
+        expect(acao).toBe('https://satnam.pub'); // fixed fallback origin
+      });
+    }
+
+    it(`${name}: still echoes exactly-whitelisted origins`, async () => {
+      const result = await handlers[name](
+        makeEvent({
+          httpMethod: 'OPTIONS',
+          headers: { host: 'satnam.pub', origin: 'http://localhost:5173' },
+        }),
+        {} as never,
+      );
+      expect(result?.headers?.['Access-Control-Allow-Origin']).toBe(
+        'http://localhost:5173',
+      );
+    });
+  }
+
+  it('nwc-proxy: error responses on the POST path also refuse lookalike origins', async () => {
+    mockAuthFailure('missing_header');
+    const result = await handlers['nwc-proxy'](
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({}),
+        headers: {
+          host: 'satnam.pub',
+          origin: 'https://satnam.pub.evil.com',
+          authorization: 'Nostr whatever',
+        },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(401);
+    const acao = result?.headers?.['Access-Control-Allow-Origin'];
+    expect(acao).toBe('https://satnam.pub');
+    expect(acao).not.toContain('evil');
+  });
+});
+
+// ============================================================================
+// H-2 fix: NIP-98 replay dedupe wiring across all five authed functions
+// ============================================================================
+
+describe('H-2 — NIP-98 replay dedupe wiring', () => {
+  let handler: (event: HandlerEvent, ctx: unknown) => Promise<{ statusCode?: number; headers?: Record<string, string>; body?: string } | undefined>;
+
+  it('simpleproof-anchor: allows first sighting, rejects identical auth event id', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/simpleproof-anchor')) as unknown as { handler: typeof handler });
+    await installReplaySupabaseMock(1);
+
+    // Request 1: dedupe insert succeeds; invalid body stops the flow BEFORE
+    // any network I/O — reaching 400 proves the dedupe gate allowed us through.
+    mockAuthSuccess();
+    const first = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({}),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(first?.statusCode).toBe(400);
+
+    // Request 2: SAME auth event id — primary-key conflict → 401 replay
+    const second = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({ event_ids: ['a'.repeat(64)] }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(second?.statusCode).toBe(401);
+    expect(second?.body).toContain('replay_detected');
+    await installDefaultSupabaseMock();
+  });
+
+  it('register-identity: rejects a replayed auth event id before business logic', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/register-identity')) as unknown as { handler: typeof handler });
+    // Zero OK inserts: even the FIRST sighting reports duplicate here,
+    // proving rejection happens before username/body handling.
+    await installReplaySupabaseMock(0);
+
+    mockAuthSuccess();
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({}),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(401);
+    expect(result?.body).toContain('replay_detected');
+    await installDefaultSupabaseMock();
+  });
+
+  it('nwc-proxy: rejects a replayed auth event id', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/nwc-proxy')) as unknown as { handler: typeof handler });
+    await installReplaySupabaseMock(0);
+    mockAuthSuccess();
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({ encrypted_payload: '{}', relay_url: 'wss://relay.getalby.com' }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(401);
+    expect(result?.body).toContain('replay_detected');
+    await installDefaultSupabaseMock();
+  });
+
+  it('unified-comms: rejects a replayed auth event id', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/unified-comms')) as unknown as { handler: typeof handler });
+    await installReplaySupabaseMock(0);
+    mockAuthSuccess();
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({ gift_wrapped_event: { kind: 1059 } }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(401);
+    expect(result?.body).toContain('replay_detected');
+    await installDefaultSupabaseMock();
+  });
+
+  it('issuer-registry POST: rejects a replayed auth event id', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/issuer-registry')) as unknown as { handler: typeof handler });
+    await installReplaySupabaseMock(0);
+    mockAuthSuccess();
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({ name: 'Issuer', capabilities: ['x'], credential_types: [] }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(401);
+    expect(result?.body).toContain('replay_detected');
+    await installDefaultSupabaseMock();
+  });
+
+  it('all five authed functions wire the _lib/nip98-replay helper', async () => {
+    const fs = await import('fs');
+    for (const fn of [
+      'register-identity.ts',
+      'nwc-proxy.ts',
+      'simpleproof-anchor.ts',
+      'issuer-registry.ts',
+      'unified-comms.ts',
+    ]) {
+      const src = fs.readFileSync(`netlify/functions/${fn}`, 'utf-8');
+      expect(src).toContain('_lib/nip98-replay');
+      expect(src).toContain('checkAndRecordAuthEvent');
+    }
+  });
+
+  // ── Split outage policy (founder Decision 2, 2026-08-25) ──
+  // Mutating endpoints FAIL CLOSED: store outage → 503 + Retry-After.
+  it('register-identity returns 503 when the seen-events store is unavailable', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/register-identity')) as unknown as { handler: typeof handler });
+    await installOutageSupabaseMock();
+    mockAuthSuccess();
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({}),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(503);
+    expect(result?.headers?.['Retry-After']).toBe('30');
+    expect(result?.body).toContain('store unavailable');
+    await installDefaultSupabaseMock();
+  });
+
+  it('issuer-registry POST returns 503 when the seen-events store is unavailable', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/issuer-registry')) as unknown as { handler: typeof handler });
+    await installOutageSupabaseMock();
+    mockAuthSuccess();
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({ name: 'Issuer', capabilities: ['x'], credential_types: [] }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(503);
+    expect(result?.headers?.['Retry-After']).toBe('30');
+    await installDefaultSupabaseMock();
+  });
+
+  it('simpleproof-anchor returns 503 when the seen-events store is unavailable', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/simpleproof-anchor')) as unknown as { handler: typeof handler });
+    await installOutageSupabaseMock();
+    mockAuthSuccess();
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({ event_ids: ['a'.repeat(64)] }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(503);
+    expect(result?.headers?.['Retry-After']).toBe('30');
+    await installDefaultSupabaseMock();
+  });
+
+  // Forwarders stay FAIL OPEN: outage → request proceeds past the gate.
+  it('nwc-proxy proceeds past dedupe during a store outage (fail-open)', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/nwc-proxy')) as unknown as { handler: typeof handler });
+    await installOutageSupabaseMock();
+    mockAuthSuccess();
+    // Reaching the 400 missing-payload validation proves the gate let us through
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({ relay_url: 'wss://relay.getalby.com' }),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(400);
+    expect(JSON.parse(result?.body || '{}').error).toMatch(/encrypted_payload/);
+    await installDefaultSupabaseMock();
+  });
+
+  it('unified-comms proceeds past dedupe during a store outage (fail-open)', async () => {
+    vi.resetModules();
+    ({ handler } = (await import('../../netlify/functions/unified-comms')) as unknown as { handler: typeof handler });
+    await installOutageSupabaseMock();
+    mockAuthSuccess();
+    const result = await handler(
+      makeEvent({
+        httpMethod: 'POST',
+        body: JSON.stringify({}),
+        headers: { host: 'satnam.pub', authorization: 'Nostr x' },
+      }),
+      {} as never,
+    );
+    expect(result?.statusCode).toBe(400);
+    expect(JSON.parse(result?.body || '{}').error).toMatch(/gift_wrapped_event/);
+    await installDefaultSupabaseMock();
+  });
+});
+
+// ============================================================================
+// WP3 / H-4 fix: CSP connect-src explicit relay allowlist
+// ============================================================================
+
+describe('WP3/H-4 — CSP connect-src allowlist', () => {
+  it('netlify.toml lists every inventoried runtime relay host explicitly', async () => {
+    const fs = await import('fs');
+    const toml = fs.readFileSync('netlify.toml', 'utf-8');
+    // Assert against the actual directive line, not the whole file —
+    // explanatory comments may legitimately mention the old wildcards.
+    const cspLine = toml
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l.startsWith('Content-Security-Policy ='));
+    expect(cspLine).toBeDefined();
+
+    const requiredHosts = [
+      'wss://pylon.openagents.com',   // primary relay (env VITE_PYLON_RELAY)
+      'wss://relay.satnam.pub',       // FROST coordinator / PoL default
+      'wss://nos.lol',                // CEPS/NIP-17/NIP-90 defaults
+      'wss://relay.damus.io',
+      'wss://relay.nostr.band',
+      'wss://nostr.wine',             // relay-manager pinned registry
+      'wss://relay.primal.net',       // relay-manager pinned registry
+      // NWC wallet-relay carve-out (founder Decision 3) — mirrors
+      // nwc-proxy ALLOWED_RELAY_PREFIXES; all explicit hosts, no wildcards:
+      'wss://relay.getalby.com',
+      'wss://relay.mutinywallet.com',
+      'wss://nostr.mutinywallet.com',
+      'wss://nostr.bitcoiner.social',
+    ];
+    for (const host of requiredHosts) {
+      expect(cspLine).toContain(host);
+    }
+
+    // Supabase wildcard retained — genuinely justified (project-ref subdomains)
+    expect(cspLine).toContain('https://*.supabase.co');
+  });
+
+  it('netlify.toml no longer contains unmatchable relay wildcards', async () => {
+    const fs = await import('fs');
+    const toml = fs.readFileSync('netlify.toml', 'utf-8');
+    // wss://*.nostr.com and wss://*.relay.* could never match real hosts:
+    // CSP host wildcards are leading-label only. Check the ACTIVE directive
+    // line only — the fix's own comment documents the old patterns.
+    const cspLine = toml
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l.startsWith('Content-Security-Policy ='));
+    expect(cspLine).toBeDefined();
+    expect(cspLine!).not.toMatch(/wss:\/\/\*\.nostr\.com/);
+    expect(cspLine!).not.toMatch(/wss:\/\/\*\.relay\.\*/);
+  });
+
+  it('no duplicate CSP definitions exist in index.html (meta tag check)', async () => {
+    const fs = await import('fs');
+    const html = fs.readFileSync('index.html', 'utf-8');
+    expect(html).not.toContain('Content-Security-Policy');
+    expect(html).not.toContain('http-equiv');
+  });
 });

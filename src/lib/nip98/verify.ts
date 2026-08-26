@@ -42,6 +42,14 @@ export interface AuthResult {
   /** Hex-encoded secp256k1 pubkey of the event signer. */
   readonly pubkey: string;
   /**
+   * Hex-encoded event id of the NIP-98 auth event (H-2 replay-dedupe fix,
+   * 2026-08-25). This is the natural dedupe key: it is unique per signed
+   * auth event and is a PSEUDONYMOUS identifier (no direct identity link
+   * beyond what the pubkey already conveys). Optional for backward
+   * compatibility with existing mocks; the real verifier always sets it.
+   */
+  readonly eventId?: string;
+  /**
    * Hex-encoded pubkey of the delegator, if the event includes a valid
    * NIP-26 delegation tag and the delegation is verified.
    */
@@ -397,6 +405,7 @@ export function verifyNip98(
     return {
       authenticated: true,
       pubkey: event.pubkey,
+      eventId: event.id,
       delegatedBy: delegationResult.delegatorPubkey,
       delegationConditions: delegationResult.conditions,
     };
@@ -406,6 +415,7 @@ export function verifyNip98(
   return {
     authenticated: true,
     pubkey: event.pubkey,
+    eventId: event.id,
   };
 }
 

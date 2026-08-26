@@ -94,6 +94,20 @@ async function encryptForStorage(value: unknown): Promise<string> {
   return bytesToHex(out);
 }
 
+const { bytesToUtf8 } = await import('@noble/hashes/utils');
+
+/** Test helper: decrypt a hex store produced by encryptForStorage / group-chat. */
+async function decryptFromStorage<T>(hex: string): Promise<T> {
+  const raw = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    raw[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  }
+  const nonce = raw.slice(0, 24);
+  const ct = raw.slice(24);
+  const plain = xchacha20poly1305(testVaultKey, nonce).decrypt(ct);
+  return JSON.parse(bytesToUtf8(plain)) as T;
+}
+
 vi.mock('../../src/lib/vault/vault.js', async () => {
   const vault = {
     isUnlocked: () => true,
@@ -585,10 +599,15 @@ describe('Ephemeral utilities', () => {
    * processExpiredMessages scans localStorage for keys matching
    * satnam:(dm:msgs:|group:msgs:) and removes expired/deleted messages.
    *
+   * Since commit aa59c0a these stores hold HEX CIPHERTEXT under the vault
+   * master key (R2-M-1 fix, 2026-08-25): GC must decrypt before parsing,
+   * re-encrypt when something was removed, skip stores while the vault is
+   * locked, and remove undecryptable (corrupt / legacy plaintext) stores.
+   *
    * The beforeEach clear ensures only the keys we set here are in storage,
-   * so `inspected` reflects exactly the 2 messages we stored.
+   * so `inspected` reflects exactly the messages we stored.
    */
-  it('EphemeralManager.processExpiredMessages: removes expired from storage', () => {
+  it('EphemeralManager.processExpiredMessages: removes expired from encrypted store', async () => {
     const now = Math.floor(Date.now() / 1000);
     const expired: Message = makeMessage({
       id: 'exp-1',
@@ -600,33 +619,96 @@ describe('Ephemeral utilities', () => {
     });
     localStorageMock.setItem(
       'satnam:dm:msgs:somecontact',
-      JSON.stringify([expired, live]),
+      await encryptForStorage([expired, live]),
     );
 
     const manager = new EphemeralManager();
-    const result = manager.processExpiredMessages();
+    const result = await manager.processExpiredMessages();
 
     expect(result.expiredRemoved).toBe(1);
     expect(result.inspected).toBe(2);
+    expect(result.skippedLocked).toBe(0);
+    expect(result.undecryptableRemoved).toBe(0);
 
-    const remaining = JSON.parse(
-      localStorageMock.getItem('satnam:dm:msgs:somecontact')!,
-    ) as Message[];
+    // Remaining store must still be hex ciphertext decrypting to [live]
+    const stored = localStorageMock.getItem('satnam:dm:msgs:somecontact')!;
+    expect(stored).toMatch(/^[0-9a-f]+$/); // hex ciphertext, not JSON
+    const remaining = await decryptFromStorage<Message[]>(stored);
     expect(remaining.length).toBe(1);
-    expect(remaining[0].id).toBe('live-1');
+    expect(remaining[0]!.id).toBe('live-1');
   });
 
-  it('EphemeralManager.processExpiredMessages: removes deleted messages', () => {
+  it('EphemeralManager.processExpiredMessages: removes deleted messages from encrypted store', async () => {
     const deleted: Message = makeMessage({ id: 'del-1', deleted: true });
     localStorageMock.setItem(
       'satnam:group:msgs:grp1',
-      JSON.stringify([deleted]),
+      await encryptForStorage([deleted]),
     );
 
     const manager = new EphemeralManager();
-    const result = manager.processExpiredMessages();
+    const result = await manager.processExpiredMessages();
 
     expect(result.burnedRemoved).toBe(1);
+  });
+
+  it('EphemeralManager.processExpiredMessages: skips all stores gracefully while vault is locked', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const expired: Message = makeMessage({
+      id: 'exp-locked',
+      expiresAt: now - 10,
+    });
+    const ciphertext = await encryptForStorage([expired]);
+    localStorageMock.setItem('satnam:dm:msgs:contactA', ciphertext);
+    localStorageMock.setItem('satnam:group:msgs:grpB', ciphertext);
+
+    const { getVault } = await import('../../src/lib/vault/vault.js');
+    const vaultInstance = getVault() as { isUnlocked: () => boolean };
+    const spy = vi.spyOn(vaultInstance, 'isUnlocked').mockReturnValue(false);
+
+    try {
+      const manager = new EphemeralManager();
+      const result = await manager.processExpiredMessages();
+
+      // Locked: nothing removed, both keys skipped, data intact
+      expect(result.skippedLocked).toBe(2);
+      expect(result.expiredRemoved).toBe(0);
+      expect(result.inspected).toBe(0);
+      expect(result.undecryptableRemoved).toBe(0);
+      expect(localStorageMock.getItem('satnam:dm:msgs:contactA')).toBe(ciphertext);
+      expect(localStorageMock.getItem('satnam:group:msgs:grpB')).toBe(ciphertext);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('EphemeralManager.processExpiredMessages: removes legacy plaintext store as undecryptable', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    // Pre-aa59c0a format: raw plaintext JSON array in localStorage
+    localStorageMock.setItem(
+      'satnam:dm:msgs:legacy',
+      JSON.stringify([makeMessage({ id: 'old-1', expiresAt: now - 10 })]),
+    );
+
+    const manager = new EphemeralManager();
+    const result = await manager.processExpiredMessages();
+
+    expect(result.undecryptableRemoved).toBe(1);
+    expect(result.expiredRemoved).toBe(0);
+    // Plaintext leftover is GONE from storage
+    expect(localStorageMock.getItem('satnam:dm:msgs:legacy')).toBeNull();
+  });
+
+  it('EphemeralManager.processExpiredMessages: removes corrupt non-hex store as undecryptable', async () => {
+    localStorageMock.setItem(
+      'satnam:group:msgs:corrupt',
+      'zzz-not-hex-at-all',
+    );
+
+    const manager = new EphemeralManager();
+    const result = await manager.processExpiredMessages();
+
+    expect(result.undecryptableRemoved).toBe(1);
+    expect(localStorageMock.getItem('satnam:group:msgs:corrupt')).toBeNull();
   });
 
   it('EphemeralManager.filterExpired: excludes expired messages', () => {

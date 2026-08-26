@@ -208,8 +208,9 @@ export function useMessaging({
       if (activeThreadId) {
         void loadMessages(activeThreadId);
       }
-      // Run ephemeral GC on each refresh
-      ephemeralManager.processExpiredMessages();
+      // Run ephemeral GC on each refresh (async since R2-M-1 fix — vault
+      // decrypt-before-parse; result intentionally ignored here)
+      void ephemeralManager.processExpiredMessages();
     }, refreshInterval);
     return () => clearInterval(id);
   }, [refreshInterval, activeThreadId, loadThreads, loadMessages]);

@@ -15,7 +15,20 @@
   for = "/*"
   [headers.values]
     # CSP: no unsafe-eval, no external fonts, wasm-unsafe-eval for FROSTR bifrost
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://pylon.openagents.com wss://*.nostr.com wss://*.relay.* https://*.supabase.co; img-src 'self' data: blob: https:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    # H-4 fix (2026-08-25): connect-src rewritten with an EXPLICIT relay
+    # allowlist inventoried from src/, public/sw.js and index.html. The old
+    # wss://*.nostr.com / wss://*.relay.* wildcards could never match real
+    # hosts (CSP host wildcards are leading-label only), silently blocking
+    # relay.damus.io, nos.lol, relay.nostr.band etc. in production.
+    # Founder Decision 3 carve-out: the NWC wallet-relay catalog below mirrors
+    # nwc-proxy ALLOWED_RELAY_PREFIXES so user-configured Nostr Wallet Connect
+    # relays stay functional client-side. All hosts remain EXPLICIT — no
+    # wildcards reintroduced. Residual exposure (documented in engineering
+    # notes 2026-08-25): these are third-party WS origins; NWC payloads are
+    # NIP-44 end-to-end encrypted, so a listed relay sees ciphertext plus
+    # metadata only. Relays OUTSIDE this catalog stay blocked pending the
+    # future nwc-proxy transport upgrade.
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://pylon.openagents.com wss://relay.satnam.pub wss://nos.lol wss://relay.damus.io wss://relay.nostr.band wss://nostr.wine wss://relay.primal.net wss://relay.getalby.com wss://relay.mutinywallet.com wss://nostr.mutinywallet.com wss://nostr.bitcoiner.social https://*.supabase.co; img-src 'self' data: blob: https:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     X-XSS-Protection = "1; mode=block"

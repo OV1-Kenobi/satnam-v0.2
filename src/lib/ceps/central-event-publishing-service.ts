@@ -283,6 +283,51 @@ function defaultRelays(): string[] {
 // CentralEventPublishingService
 // ============================================================================
 
+/**
+ * Non-DM event kinds the DEFAULT signing-consent policy auto-approves
+ * (F-11 / R2-M-2 founder Decision 1, 2026-08-25 — fail-closed whitelist per
+ * Security round-2 §6 Option A). Every entry is a first-party feature whose
+ * in-app initiation is the consent act; each was cross-checked against its
+ * live sign site:
+ *
+ * - 5      NIP-09 deletion (direct-chat.ts:365; skill-registration.ts:505/:535)
+ * - 30078  group state (group-chat.ts:532)
+ * - 443    MLS KeyPackage stub (protocol-bridge.ts:239 via KIND_MLS_KEY_PACKAGE=443)
+ * - 22456  push register/heartbeat/offline/unregister (notifications.ts:147/:181/:209/:237)
+ * - 33400  skill manifest (skill-registration.ts:409)
+ * - 33401  skill version log (skill-registration.ts:496)
+ * - 1985   skill attestation label (skill-registration.ts:437)
+ * - 39240  credit intent (nip-ac/client.ts:571)
+ * - 39242  credit envelope (nip-ac/client.ts:603)
+ * - 39243  spend authorization (nip-ac/client.ts:626)
+ * - 39244  settlement receipt (nip-ac/client.ts:650)
+ * - 39245  default notice (nip-ac/client.ts:663)
+ * - 10050  inbox relays (central-event-publishing-service.ts publishInboxRelaysKind10050)
+ *
+ * DELTA vs Security memo §6: kind 39241 (Credit Offer) from the memo's
+ * "39240–39245" range is EXCLUDED — repo-wide verification shows it is
+ * inbound-only (parseCreditOffer / monitor subscriptions), never signed
+ * locally. DM-core kinds 4/14/1059 bypass this hook entirely upstream.
+ *
+ * Maintenance rule: a new legitimate kind must be added here AND get a
+ * consent pass-through test — failure mode is loud (sign-time rejection).
+ */
+export const CONSENT_AUTO_APPROVED_KINDS: ReadonlySet<number> = new Set([
+  5,
+  30078,
+  443,
+  22456,
+  33400,
+  33401,
+  1985,
+  39240,
+  39242,
+  39243,
+  39244,
+  39245,
+  10050,
+]);
+
 export class CentralEventPublishingService {
   private pool: SimplePool | null = null;
   private relays: string[];
@@ -461,25 +506,34 @@ export class CentralEventPublishingService {
   }
 
   /**
-   * Request user consent before signing a non-DM event kind.
-   * Override this method in the UI layer to show a confirmation dialog.
-   * Default implementation logs and approves (for non-browser/testing use).
+   * Request consent before signing a non-DM event kind with the vault nsec.
+   *
+   * F-11 / R2-M-2 fix (2026-08-25, founder Decision 1): the DEFAULT policy is
+   * now FAIL-CLOSED WHITELIST. Kinds on CONSENT_AUTO_APPROVED_KINDS are
+   * first-party features whose in-app initiation IS the consent act; every
+   * other kind is REJECTED by default ("[CEPS] Signing rejected by user" via
+   * the gate in signEventWithActiveSession). An injected in-session caller
+   * can therefore no longer mint arbitrary-kind events under the user's key.
+   *
+   * The method stays overridable so a UI confirmation modal can be layered
+   * on later without touching this gate again.
    * @internal
    */
   protected async requestSigningConsent(
     unsignedEvent: Record<string, unknown>
   ): Promise<boolean> {
-    // In production, this should be overridden to show a modal with:
-    //   - Event kind and human-readable description
-    //   - Content preview (truncated)
-    //   - Recipient pubkeys (p tags)
-    //   - Target relays
-    // For now, log the signing request and approve. Replace with a UI hook.
-    console.warn(
-      "[CEPS] Signing request for non-DM kind:",
-      (unsignedEvent as { kind?: number }).kind
-    );
-    return true;
+    const kind = (unsignedEvent as { kind?: number }).kind;
+    const approved = kind !== undefined && CONSENT_AUTO_APPROVED_KINDS.has(kind);
+    if (!approved) {
+      // LOUD failure mode (per Security round-2 §6 Option A): a legitimate
+      // new kind missing from the whitelist fails visibly here instead of
+      // silently signing.
+      console.warn(
+        "[CEPS] Signing request for non-whitelisted kind:",
+        kind
+      );
+    }
+    return approved;
   }
 
   // ---- Publishing ----
