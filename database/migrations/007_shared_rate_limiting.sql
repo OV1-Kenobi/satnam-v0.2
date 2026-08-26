@@ -69,6 +69,9 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION increment_rate_limit(text, text, timestamptz, integer) FROM PUBLIC;
+-- N-6 fix: EXECUTE defaults to PUBLIC, so the REVOKE above would strip the
+-- service role too and leave the shared limiter silently inert (fail-open).
+GRANT EXECUTE ON FUNCTION increment_rate_limit(text, text, timestamptz, integer) TO service_role;
 REVOKE ALL ON TABLE rate_limit_counters FROM anon, authenticated;
 
 COMMENT ON TABLE rate_limit_counters IS
