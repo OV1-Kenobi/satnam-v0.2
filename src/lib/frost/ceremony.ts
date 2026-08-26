@@ -1,37 +1,47 @@
 /**
  * @module frost/ceremony
- * @description FROST Distributed Key Generation (DKG) and threshold signing
- * ceremony coordination over Nostr relays.
+ * @description FROST group creation, share distribution, and threshold
+ * signing coordination for Satnam v2, backed END-TO-END by
+ * @frostr/bifrost v2's real APIs (FB-1..FB-4 remediation, 2026-08-25).
  *
- * ## Architecture
+ * ## Trust model (explicit)
  *
- * Ceremonies are coordinated via ephemeral Nostr events (kind 20100) on a
- * shared relay. Participants discover each other's round messages by
- * subscribing to events tagged with the session ID.
+ * @frostr/bifrost v2 key generation is a TRUSTED-DEALER model:
+ * generate_dealer_package(threshold, n) produces the group package and ALL
+ * n shares in one call inside the dealer's memory. This is inherent to the
+ * installed library — there is no interactive DKG on this API surface. We
+ * ACCEPT that model with hardened custody:
  *
- * The @frostr/bifrost package performs all cryptographic operations. This
- * module is the coordination layer: it manages state machines, relay
- * communication, and vault persistence. If @frostr/bifrost is not installed,
- * all functions degrade gracefully with {@link FrostError.BifrostUnavailable}.
+ * - Only the Guardian runs the dealer, transiently. The output lives in
+ *   function scope ONLY — the former module-scope cache holding every
+ *   member's shares is DELETED.
+ * - Every other member receives THEIR OWN encoded share credential via a
+ *   NIP-44-encrypted gift-wrapped direct message (CEPS). Shares are never
+ *   published to relays and never held server-side.
+ * - Protocol/coordinator announcements are signed by participants' PERSONAL
+ *   identity keys — never by secret shares.
+ * - Residual trust: the dealer sees all shares at creation time and could
+ *   retain them. Mitigation path (future, not built): bifrost re-share /
+   DKG refresh ceremonies once the library exposes them.
  *
- * ## DKG State Machine
- * ```
- * idle → round1_initiated → round1_collecting → round2_initiated
- *      → round2_collecting → completed
- *                          → failed (timeout or crypto error)
- * ```
+ * ## What was DELETED vs prior versions
  *
- * ## Signing State Machine
- * ```
- * idle → request_published → collecting_partial_sigs
- *      → combining → completed
- *      → failed (timeout or insufficient participants)
- * ```
+ * - The simulated signing core (zero-byte signatures, first-partial-sig
+ *   "aggregation", fabricated nonce commitments, plain-schnorr "partial"
+ *   signatures) — replaced by BifrostNode's real req.sign/handler machinery.
+ * - The custom kind-20100 DKG round-1/round-2 scaffolding — bifrost's own
+ *   relay protocol supersedes it; the dead publish/wait code never
+ *   transmitted anything peers consumed. Coordinator ANNOUNCEMENT events
+ *   (dkg_init / signing_request) remain as signed, best-effort UI records.
+ * - joinDkg's synthetic-session fallback ("so tests pass").
+ * - rotateShares' silent fake rotation (no reshare API exists in installed
+ *   bifrost; the function now says so instead of lying).
  *
- * @see SPECIFICATION.md §4.3 — FROST Threshold Signatures
+ * @see SPECIFICATION.md §4.3
+ * @see node_modules/@frostr/bifrost/dist/class/client.d.ts — verified API
  */
 
-import { bytesToHex, hexToBytes, utf8ToBytes, randomBytes } from '@noble/hashes/utils';
+import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils';
 import { sha256 } from '@noble/hashes/sha256';
 import { schnorr, secp256k1 } from '@noble/curves/secp256k1.js';
 
@@ -46,7 +56,6 @@ import {
   type FrostConfig,
   type DkgInitPayload,
   type SigningRequestPayload,
-  type PartialSigPayload,
   type FrostCoordinatorPayload,
   DEFAULT_FROST_CONFIG,
   FrostError,
@@ -58,219 +67,29 @@ import {
   generateSessionId,
   computeEventId,
 } from './vault-storage.js';
+import {
+  encodeGroupPackage,
+  encodeSharePackage,
+  decodeGroupPackage,
+  decodeSharePackage,
+  createConnectedNode,
+  closeNodeQuietly,
+  requestThresholdSignature,
+} from './node.js';
+import type { BifrostNode } from '@frostr/bifrost';
+// Re-exports for client.ts convenience (single import surface)
+export { closeNodeQuietly, requestThresholdSignature, createConnectedNode } from './node.js';
+import type { GroupPackage, SharePackage } from '@frostr/bifrost';
 
 // ---------------------------------------------------------------------------
-// Bifrost Integration
-// ---------------------------------------------------------------------------
-
-/**
- * Minimal interface for the @frostr/bifrost package's DKG API.
- * The full package provides many more methods; these are the ones used here.
- * @internal
- */
-interface BifrostDkg {
-  generateRound1Package(
-    participantIndex: number,
-    threshold: number,
-    totalShares: number,
-  ): { commitments: Uint8Array; secretPackage: Uint8Array };
-
-  processRound1Packages(
-    mySecretPackage: Uint8Array,
-    round1Packages: { index: number; commitments: Uint8Array }[],
-  ): { sharePackages: { index: number; encryptedShare: Uint8Array }[]; secretPackage: Uint8Array };
-
-  processRound2Packages(
-    mySecretPackage: Uint8Array,
-    round2Packages: { index: number; encryptedShare: Uint8Array }[],
-  ): { secretShare: Uint8Array; publicShare: Uint8Array; groupPubkey: Uint8Array };
-}
-
-/**
- * Minimal interface for the @frostr/bifrost package's signing API.
- * @internal
- */
-interface BifrostSigning {
-  generateNonceCommitment(secretShare: Uint8Array): {
-    nonce: Uint8Array;
-    commitment: Uint8Array;
-  };
-
-  sign(
-    secretShare: Uint8Array,
-    nonce: Uint8Array,
-    message: Uint8Array,
-    signingPackage: { commitments: { index: number; commitment: Uint8Array }[] },
-  ): Uint8Array;
-
-  aggregate(
-    partialSigs: { index: number; sig: Uint8Array }[],
-    signingPackage: { commitments: { index: number; commitment: Uint8Array }[] },
-    message: Uint8Array,
-    groupPubkey: Uint8Array,
-  ): Uint8Array;
-}
-
-/**
- * Module-level cache for the bifrost dealer output. The trusted-dealer model
- * produces the group + all shares in a single generate_dealer_package call,
- * but our round-based DKG interface splits that across round1/round2/finalize.
- * The cache bridges that gap within one ceremony.
- * @internal
- */
-let _bifrostDealerCache: {
-  group: { group_pk: string; threshold: number; members: unknown[] } | null;
-  shares: { idx: number; seckey: string }[] | null;
-} | null = null;
-
-/**
- * Attempt to load the @frostr/bifrost package.
- * Returns null if not available — callers degrade gracefully.
- *
- * @internal
- */
-async function loadBifrost(): Promise<{
-  dkg: BifrostDkg;
-  signing: BifrostSigning;
-} | null> {
-  try {
-    // @frostr/bifrost ^2.0.2 exports:
-    //   generate_dealer_pkg(threshold, members, [secretKey])  → { group, shares }
-    //   encode_group_pkg(group) / encode_share_pkg(share)     → string credentials
-    //   BifrostNode(group, share, relays, opts)               → node instance
-    //   node.req.sign(message, opts)                          → Promise<{ok, data}>
-    //   node.req.ecdh(ecdh_pk, peer_pks)                      → Promise<{ok, data}>
-    //
-    // The BifrostDkg / BifrostSigning interfaces defined above are the
-    // coordination-layer contracts used by the DKG ceremony. They are
-    // implemented by adapting the @frostr/bifrost dealer-keygen + node API.
-    //
-    // @frostr/bifrost uses a trusted-dealer DKG model (generate_dealer_package),
-    // not a round-based interactive DKG. The BifrostDkg interface abstracts
-    // over this: generateRound1Package delegates to generate_dealer_package,
-    // while round 2 distributes the resulting shares via NIP-17 messages.
-    //
-    // Actual @frostr/bifrost ^2.0.2 API surface (verified against node_modules):
-    //   generate_dealer_package(threshold, members) → {
-    //     group:  { group_pk: hex, threshold: number, members: [...] }
-    //     shares: { idx: number, seckey: hex }[]
-    //   }
-    const libLib = await import('@frostr/bifrost/lib');
-
-    interface BifrostGroup { group_pk: string; threshold: number; members: unknown[] }
-    interface BifrostShare { idx: number; seckey: string }
-    const bifLib = libLib as unknown as {
-      generate_dealer_package: (threshold: number, members: number) => {
-        group: BifrostGroup;
-        shares: BifrostShare[];
-      };
-    };
-    if (typeof bifLib.generate_dealer_package !== 'function') {
-      throw new Error('bifrost: generate_dealer_package export not found');
-    }
-
-    // Module-level dealer output cache: generate_dealer_package produces the
-    // group + all shares in one call, so we cache the result between the
-    // round1/round2/finalize calls within a single ceremony. loadBifrost() is
-    // invoked per ceremony function, so the cache must live at module scope.
-    if (!_bifrostDealerCache) {
-      _bifrostDealerCache = { group: null, shares: null };
-    }
-    const dealerCache = _bifrostDealerCache;
-
-    // Adapter: map bifrost dealer API to our BifrostDkg interface
-    const dkgAdapter: BifrostDkg = {
-      generateRound1Package(participantIndex, threshold, totalShares) {
-        // Dealer-keygen: generate a new group + shares for the given parameters.
-        const result = bifLib.generate_dealer_package(threshold, totalShares);
-        dealerCache.group = result.group;
-        dealerCache.shares = result.shares;
-        // Commitments = JSON of the group package (public info all participants need)
-        const commitments = utf8ToBytes(JSON.stringify(result.group));
-        // Secret package = this participant's share (idx is 1-based)
-        const myShare = result.shares[(participantIndex - 1)] ?? result.shares[0]!;
-        const secretPackage = utf8ToBytes(JSON.stringify(myShare));
-        return { commitments, secretPackage };
-      },
-
-      processRound1Packages(_mySecretPackage, round1Packages) {
-        // In the dealer model, every participant's "round 2 package" is their
-        // share. The dealer distributes each share to its owner; here we forward
-        // the cached shares keyed by participant index.
-        if (!dealerCache.shares) {
-          throw new Error('bifrost: DKG round1 must be called before round2');
-        }
-        const shares = dealerCache.shares;
-        const sharePackages = round1Packages.map((pkg) => {
-          const share = shares[pkg.index - 1] ?? shares[0]!;
-          return {
-            index: pkg.index,
-            encryptedShare: utf8ToBytes(JSON.stringify(share)),
-          };
-        });
-        return { sharePackages, secretPackage: _mySecretPackage };
-      },
-
-      processRound2Packages(mySecretPackage, round2Packages) {
-        // Decode our own share from round 2 and the group package from the cache.
-        const decoder = new TextDecoder();
-        const myShare = JSON.parse(decoder.decode(mySecretPackage)) as BifrostShare;
-        void round2Packages;
-        if (!dealerCache.group) {
-          throw new Error('bifrost: DKG state lost between rounds');
-        }
-        const groupPubkey = hexToBytes(dealerCache.group.group_pk.slice(0, 64));
-        const shareSecret = hexToBytes(myShare.seckey);
-        const publicShare = secp256k1.getPublicKey(shareSecret, true);
-        return {
-          secretShare: shareSecret,
-          publicShare,
-          groupPubkey,
-        };
-      },
-    };
-
-    // Adapter: map bifrost BifrostNode.req.sign to our BifrostSigning interface
-    const signingAdapter: BifrostSigning = {
-      generateNonceCommitment(_secretShare) {
-        // BifrostNode handles nonce generation internally — return placeholder
-        return { nonce: new Uint8Array(32), commitment: new Uint8Array(32) };
-      },
-
-      sign(_secretShare, _nonce, _message, _signingPackage) {
-        // Partial signing is managed by BifrostNode.req.sign asynchronously.
-        // This synchronous adapter is a placeholder — real signing uses the
-        // BifrostNode event-driven API below.
-        return new Uint8Array(64);
-      },
-
-      aggregate(partialSigs, _signingPackage, _message, _groupPubkey) {
-        // Return the first valid 64-byte partial sig as the aggregate placeholder.
-        // Real aggregation is handled by BifrostNode internally.
-        return partialSigs[0]?.sig ?? new Uint8Array(64);
-      },
-    };
-
-    return { dkg: dkgAdapter, signing: signingAdapter };
-  } catch {
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Relay Communication Helpers
+// Relay Communication Helpers (announcement channel only)
 // ---------------------------------------------------------------------------
 
 /** Maximum time (ms) to wait for a relay message before giving up. */
 const RELAY_CONNECT_TIMEOUT = 10_000;
 
 /**
- * Publish a FROST coordinator event to a relay.
- * Uses a raw WebSocket connection (compatible with browser and Node.js).
- *
- * @param relayUrl - WebSocket URL of the relay
- * @param event - Signed Nostr event to publish
- * @returns true if the relay acknowledged the event
+ * Publish a FROST coordinator event to a relay (raw WebSocket, best-effort).
  * @internal
  */
 async function publishToRelay(relayUrl: string, event: NostrEvent): Promise<boolean> {
@@ -319,8 +138,7 @@ async function publishToRelay(relayUrl: string, event: NostrEvent): Promise<bool
 
 /**
  * Subscribe to FROST coordinator events on a relay and collect responses.
- * Returns after receiving the expected number of messages or timing out.
- *
+ * Used for dkg_init discovery during join; announcements only.
  * @internal
  */
 export async function collectRelayMessages(
@@ -348,7 +166,7 @@ export async function collectRelayMessages(
       return;
     }
 
-    const subId = bytesToHex(randomBytes(8));
+    const subId = bytesToHex(new Uint8Array(8).map(() => Math.floor(Math.random() * 256)));
 
     ws.onopen = () => {
       ws.send(JSON.stringify(['REQ', subId, filter]));
@@ -366,7 +184,6 @@ export async function collectRelayMessages(
             done();
           }
         } else if (data[0] === 'EOSE') {
-          // End of stored events — if we have enough, we're done
           if (events.length >= expectedCount) {
             clearTimeout(timeout);
             done();
@@ -385,12 +202,8 @@ export async function collectRelayMessages(
 // ---------------------------------------------------------------------------
 
 /**
- * Build and sign a FROST coordinator event.
- *
- * @param payload - FROST coordinator payload to serialize into the event content
- * @param sessionId - Session identifier (used as `d` tag)
- * @param signerNsec - Hex-encoded 32-byte signer secret key
- * @param kind - Nostr event kind (default: 20100)
+ * Build and sign a FROST coordinator event with a PARTICIPANT'S PERSONAL
+ * identity key (never a secret share — FB-2).
  * @internal
  */
 function buildCoordinatorEvent(
@@ -401,7 +214,6 @@ function buildCoordinatorEvent(
 ): NostrEvent {
   const nsecBytes = hexToBytes(signerNsec);
   const pubkeyBytes = secp256k1.getPublicKey(nsecBytes, true);
-  // NIP-01: pubkey is the 32-byte x-coordinate of the compressed public key
   const pubkey = bytesToHex(pubkeyBytes.slice(1));
 
   const created_at = Math.floor(Date.now() / 1000);
@@ -412,8 +224,6 @@ function buildCoordinatorEvent(
   ];
 
   const id = computeEventId(pubkey, created_at, kind, tags, content);
-
-  // Sign using schnorr (NIP-01 Schnorr over secp256k1)
   const eventIdBytes = hexToBytes(id);
   const sig = bytesToHex(schnorr.sign(eventIdBytes, nsecBytes));
 
@@ -422,7 +232,6 @@ function buildCoordinatorEvent(
 
 /**
  * Parse a FROST coordinator payload from a Nostr event.
- * Returns null if the event content is not valid JSON or not a known type.
  * @internal
  */
 function parseCoordinatorPayload(event: NostrEvent): FrostCoordinatorPayload | null {
@@ -434,26 +243,237 @@ function parseCoordinatorPayload(event: NostrEvent): FrostCoordinatorPayload | n
 }
 
 // ---------------------------------------------------------------------------
-// DKG Ceremonies
+// Group Creation — trusted-dealer with hardened custody (FB-2)
+// ---------------------------------------------------------------------------
+
+export interface ShareDistribution {
+  /** Recipient's hex pubkey */
+  recipientPubkey: string;
+  /** 1-based share index assigned to this recipient */
+  shareIndex: number;
+  /** Encoded bfshare1… credential delivered via NIP-44 DM */
+  encodedShare: string;
+}
+
+export interface TrustedDealerResult {
+  profile: BfProfile;
+  /** The GUARDIAN's own share (already persisted to vault by this call) */
+  guardianShare: BfShare;
+  /** Payloads to deliver to every OTHER participant via NIP-44 DM */
+  distributions: Array<{ recipientPubkey: string; payload: ShareInvitationPayload }>;
+  /** The transient dealer output — caller MUST drop references after delivery */
+  _dealerTransient?: never;
+}
+
+/**
+ * Payload delivered to each non-Guardian member via NIP-44 gift-wrapped DM.
+ * Contains everything needed to construct a BifrostNode: the PUBLIC group
+ * package plus THIS member's own encoded share.
+ */
+export interface ShareInvitationPayload {
+  v: 2;
+  /** Encoded bfgroup1… credential (public data) */
+  groupPkg: string;
+  /** Encoded bfshare1… credential — THIS recipient's share only */
+  sharePkg: string;
+  /** Assigned 1-based share index (redundant with sharePkg.idx; explicit for UX) */
+  idx: number;
+  /** Group public key (hex) */
+  groupPubkey: string;
+}
+
+/**
+ * Run the trusted-dealer group creation as the Guardian (transient custody).
+ *
+ * Generates the bifrost dealer package IN FUNCTION SCOPE, assigns shares to
+ * participants BY POSITION (participants[0] = Guardian = share idx 1), maps
+ * bifrost compressed member pubkeys onto the caller-supplied participant
+ * pubkeys for the profile, persists the Guardian's profile+share to the
+ * vault, and returns the per-member invitation payloads for NIP-44 delivery.
+ *
+ * NOTE on participant mapping: bifrost derives each member's pubkey FROM the
+ * generated shares, so caller-provided participant pubkeys are recorded as
+ * the human directory (BfProfile.participants, positional) while the
+ * cryptographic member keys live inside the encoded group package. Delivery
+ * targets are the caller-supplied pubkeys.
+ *
+ * @throws if threshold/participants are invalid
+ */
+export async function runTrustedDealerCreation(config: {
+  threshold: number;
+  participants: string[]; // hex pubkeys, [0] = Guardian/dealer
+  metadata: GroupMetadata;
+}): Promise<{ profile: BfProfile; guardianShare: BfShare; distributions: TrustedDealerResult['distributions'] }> {
+  const { threshold, participants, metadata } = config;
+
+  if (threshold < 2) {
+    throw new Error('FROST threshold must be at least 2');
+  }
+  if (participants.length < threshold) {
+    throw new Error('Total participants must be >= threshold');
+  }
+
+  // TRANSIENT dealer execution — function scope only, no module cache (FB-2).
+  const lib = (await import('@frostr/bifrost/lib')) as unknown as {
+    generate_dealer_package: (threshold: number, count: number) => {
+      group: GroupPackage;
+      shares: SharePackage[];
+    };
+  };
+  const dealer = lib.generate_dealer_package(threshold, participants.length);
+
+  if (dealer.shares.length !== participants.length) {
+    throw frostErr(FrostError.AggregationFailed);
+  }
+
+  const encodedGroup = encodeGroupPackage(dealer.group);
+
+  const now = Math.floor(Date.now() / 1000);
+  const profile: BfProfile = {
+    groupPubkey: dealer.group.group_pk,
+    threshold,
+    totalShares: participants.length,
+    participants: [...participants],
+    metadata: { ...metadata },
+    createdAt: now,
+    encodedGroupPkg: encodedGroup,
+  };
+
+  const [guardianShareRaw] = dealer.shares;
+  if (!guardianShareRaw) throw frostErr(FrostError.AggregationFailed);
+
+  const guardianShare: BfShare = {
+    index: guardianShareRaw.idx,
+    secretShare: guardianShareRaw.seckey,
+    publicShare: bytesToHex(secp256k1.getPublicKey(hexToBytes(guardianShareRaw.seckey), true)),
+    groupPubkey: dealer.group.group_pk,
+    encodedShare: encodeSharePackage(guardianShareRaw),
+  };
+
+  await storeBfProfileAndRegister(profile.groupPubkey, profile);
+  await storeBfShare(profile.groupPubkey, guardianShare);
+
+  const distributions = participants.slice(1).map((recipientPubkey, i) => {
+    const share = dealer.shares[i + 1];
+    if (!share) throw frostErr(FrostError.AggregationFailed);
+    return {
+      recipientPubkey,
+      payload: {
+        v: 2 as const,
+        groupPkg: encodedGroup,
+        sharePkg: encodeSharePackage(share),
+        idx: share.idx,
+        groupPubkey: dealer.group.group_pk,
+      } satisfies ShareInvitationPayload,
+    };
+  });
+
+  return { profile, guardianShare, distributions };
+}
+
+/**
+ * Deliver one share-invitation payload to a member via NIP-44-encrypted
+ * gift-wrapped DM through CEPS (FB-2). Fire-and-forget friendly; returns
+ * the CEPS event id or null on failure.
+ */
+export async function deliverShareInvitation(
+  payload: ShareInvitationPayload,
+  recipientPubkey: string,
+): Promise<string | null> {
+  try {
+    const ceps = await import('../ceps/ceps-client.js');
+    const wrapped = JSON.stringify({ type: 'satnam:frost:share_invite', ...payload });
+    const eventId = await ceps.sendGiftwrappedMessageWithCeps(recipientPubkey, wrapped);
+    return eventId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Join flow — validated acceptance of an assigned share (FB-3)
 // ---------------------------------------------------------------------------
 
 /**
- * Initiate a FROST Distributed Key Generation ceremony (Guardian only).
+ * Accept a decrypted share invitation: validate the credentials against the
+ * group package (index within range; derived pubkey matches the member
+ * record), persist profile + own share to the vault, and return the profile.
  *
- * Creates a new DkgSession, publishes a DKG initiation event (kind 20100)
- * to the coordinator relay inviting all participants, and returns the session
- * in `round1_initiated` state.
+ * @param invitationJson - The decrypted ShareInvitationPayload (transport
+ *   NIP-44 unwrapping happens at the messaging boundary before this call)
+ * @throws FrostError.InvalidBackup on any validation failure
+ */
+export async function acceptShareInvitation(invitationJson: string): Promise<BfProfile> {
+  let payload: ShareInvitationPayload;
+  try {
+    payload = JSON.parse(invitationJson) as ShareInvitationPayload;
+  } catch {
+    throw frostErr(FrostError.InvalidBackup);
+  }
+
+  if (payload.v !== 2 || !payload.groupPkg || !payload.sharePkg) {
+    throw frostErr(FrostError.InvalidBackup);
+  }
+
+  const group = decodeGroupPackage(payload.groupPkg);
+  const share = decodeSharePackage(payload.sharePkg);
+
+  // Validation 1: index within range
+  if (share.idx < 1 || share.idx > group.members.length) {
+    throw frostErr(FrostError.InvalidBackup);
+  }
+
+  // Validation 2: the share's derived pubkey matches its member record
+  const member = group.members[share.idx - 1];
+  const derived = bytesToHex(secp256k1.getPublicKey(hexToBytes(share.seckey), true));
+  if (!member || member.pubkey.toLowerCase() !== derived.toLowerCase()) {
+    throw frostErr(FrostError.InvalidBackup);
+  }
+
+  // Validation 3: explicit idx agreement
+  if (payload.idx !== share.idx) {
+    throw frostErr(FrostError.InvalidBackup);
+  }
+
+  const bfShare: BfShare = {
+    index: share.idx,
+    secretShare: share.seckey,
+    publicShare: derived,
+    groupPubkey: group.group_pk,
+    encodedShare: payload.sharePkg,
+  };
+
+  const profile: BfProfile = {
+    groupPubkey: group.group_pk,
+    threshold: group.threshold,
+    totalShares: group.members.length,
+    participants: [],
+    metadata: { name: `FROST Group (${group.threshold}-of-${group.members.length})` },
+    createdAt: Math.floor(Date.now() / 1000),
+    encodedGroupPkg: payload.groupPkg,
+  };
+
+  await storeBfProfileAndRegister(profile.groupPubkey, profile);
+  await storeBfShare(profile.groupPubkey, bfShare);
+
+  return profile;
+}
+
+// ---------------------------------------------------------------------------
+// DKG announcement sessions (UI/persistence state machines — FB-4 keeps these)
+// ---------------------------------------------------------------------------
+
+/**
+ * Initiate a FROST group-creation ANNOUNCEMENT (Guardian only).
  *
- * The caller is responsible for calling {@link processDkgRound1} once the
- * relay message has been published and round-1 commitments begin arriving.
- *
- * @param config - DKG initiation configuration
- * @returns The new DkgSession in `round1_initiated` state
- * @throws {FrostError.BifrostUnavailable} if @frostr/bifrost is not installed
+ * Publishes a signed dkg_init event (kind 20100) to the coordinator relay as
+ * a discoverable record for invitees' UIs. Cryptographic key material flows
+ * exclusively through runTrustedDealerCreation + NIP-44 DMs — this event
+ * carries none.
  */
 export async function initiateDkg(config: {
   threshold: number;
-  participants: string[]; // hex pubkeys
+  participants: string[];
   groupMetadata: GroupMetadata;
   coordinatorRelay: string;
   initiatorNsec: string;
@@ -485,7 +505,6 @@ export async function initiateDkg(config: {
     coordinatorRelay,
   };
 
-  // Build and publish the DKG init event
   const initPayload: DkgInitPayload = {
     type: 'dkg_init',
     sessionId,
@@ -499,25 +518,20 @@ export async function initiateDkg(config: {
 
   const initEvent = buildCoordinatorEvent(initPayload, sessionId, initiatorNsec);
 
-  // Publish — fire and forget; continue even if relay is unreachable
   try {
     await publishToRelay(coordinatorRelay, initEvent);
   } catch {
-    // Non-fatal: participants may already be subscribed or connect later
+    // Non-fatal: announcements are best-effort records
   }
 
   return session;
 }
 
 /**
- * Join an existing DKG ceremony (Steward responding to Guardian's invitation).
- *
- * Fetches the DKG init event from the relay, validates the session parameters,
- * and returns a DkgSession in `round1_initiated` state ready for Round 1.
- *
- * @param config - Join configuration
- * @returns The DkgSession for the existing ceremony
- * @throws {FrostError.CeremonyTimeout} if the init event cannot be found
+ * Discover an announced ceremony by sessionId. Throws when the announcement
+ * cannot be found — the previous synthetic-session fallback ("so tests pass")
+ * is DELETED (FB-3): a join that cannot see the announcement is an error,
+ * not an offline mode.
  */
 export async function joinDkg(config: {
   sessionId: string;
@@ -526,7 +540,6 @@ export async function joinDkg(config: {
 }): Promise<DkgSession> {
   const { sessionId, coordinatorRelay } = config;
 
-  // Fetch the DKG init event from the relay
   const events = await collectRelayMessages(
     coordinatorRelay,
     { kinds: [DEFAULT_FROST_CONFIG.signingRequestKind], '#d': [sessionId] },
@@ -534,245 +547,36 @@ export async function joinDkg(config: {
     RELAY_CONNECT_TIMEOUT,
   );
 
-  // Find the dkg_init event
-  let initPayload: DkgInitPayload | null = null;
   for (const event of events) {
     const payload = parseCoordinatorPayload(event);
     if (payload?.type === 'dkg_init') {
-      initPayload = payload;
-      break;
+      return {
+        state: 'round1_initiated',
+        groupId: sessionId,
+        threshold: payload.threshold,
+        totalShares: payload.totalShares,
+        participants: payload.participants,
+        round1Commitments: new Map(),
+        round2Shares: new Map(),
+        createdAt: Math.floor(Date.now() / 1000),
+        coordinatorRelay,
+      };
     }
   }
 
-  if (!initPayload) {
-    // Session not found on relay — create a minimal session for offline/mock use
-    // In production this would throw; here we return a synthetic session so tests pass
-    return {
-      state: 'round1_initiated',
-      groupId: sessionId,
-      threshold: 2,
-      totalShares: 2,
-      participants: [],
-      round1Commitments: new Map(),
-      round2Shares: new Map(),
-      createdAt: Math.floor(Date.now() / 1000),
-      coordinatorRelay,
-      error: 'Init event not found on relay — operating in offline mode',
-    };
-  }
-
-  return {
-    state: 'round1_initiated',
-    groupId: sessionId,
-    threshold: initPayload.threshold,
-    totalShares: initPayload.totalShares,
-    participants: initPayload.participants,
-    round1Commitments: new Map(),
-    round2Shares: new Map(),
-    createdAt: Math.floor(Date.now() / 1000),
-    coordinatorRelay,
-  };
-}
-
-/**
- * Process DKG Round 1: generate commitment packages and exchange them with
- * all participants over the coordinator relay.
- *
- * If @frostr/bifrost is available, uses its DKG round-1 implementation.
- * Otherwise, uses secp256k1 Pedersen commitments as a fallback simulation.
- *
- * @param session - The DkgSession in `round1_initiated` state
- * @returns Updated DkgSession in `round1_collecting` or `round2_initiated` state
- */
-export async function processDkgRound1(session: DkgSession): Promise<DkgSession> {
-  if (session.state !== 'round1_initiated') {
-    throw new Error(`processDkgRound1: invalid state ${session.state}`);
-  }
-
-  const bifrost = await loadBifrost();
-  if (!bifrost) {
-    throw frostErr(FrostError.BifrostUnavailable);
-  }
-
-  // Generate our Round 1 commitment package using @frostr/bifrost
-  // Participant index is 1-based; determined by our position in the participants array
-  const participantIndex = 1; // caller sets this based on their pubkey position
-  const { commitments } = bifrost.dkg.generateRound1Package(
-    participantIndex,
-    session.threshold,
-    session.totalShares,
-  );
-  const commitmentBytes = commitments;
-
-  const updated: DkgSession = {
-    ...session,
-    state: 'round1_collecting',
-    round1Commitments: new Map(session.round1Commitments),
-  };
-
-  // Store our own commitment (participant 0 = index 1)
-  // In a real implementation this would be keyed by our own pubkey
-  if (session.participants.length > 0) {
-    updated.round1Commitments.set(session.participants[0] ?? 'self', commitmentBytes);
-  } else {
-    updated.round1Commitments.set('self', commitmentBytes);
-  }
-
-  return updated;
-}
-
-/**
- * Process DKG Round 2: exchange secret share packages after all Round 1
- * commitments have been collected.
- *
- * Called after all participants have submitted their Round 1 commitments
- * (i.e., `session.round1Commitments.size === session.totalShares`).
- *
- * @param session - The DkgSession in `round2_initiated` state
- * @returns Updated DkgSession in `round2_collecting` state
- */
-export async function processDkgRound2(session: DkgSession): Promise<DkgSession> {
-  if (session.state !== 'round2_initiated') {
-    throw new Error(`processDkgRound2: invalid state ${session.state}`);
-  }
-
-  const bifrost = await loadBifrost();
-  if (!bifrost) {
-    throw frostErr(FrostError.BifrostUnavailable);
-  }
-
-  // Call bifrost.dkg.processRound1Packages(mySecretPackage, allRound1Packages)
-  // to derive our round-2 share packages. In the trusted-dealer model, the
-  // dealer holds all shares after round 1 and distributes them in round 2, so
-  // we request packages for every participant slot.
-  const mySecretPackage = new Uint8Array(32);
-  const allParticipantSlots = Array.from({ length: session.totalShares }, (_, i) => ({
-    index: i + 1,
-    commitments: session.round1Commitments.get(session.participants[i] ?? 'self') ?? new Uint8Array(64),
-  }));
-  const { sharePackages } = bifrost.dkg.processRound1Packages(
-    mySecretPackage,
-    allParticipantSlots,
-  );
-
-  const updated: DkgSession = {
-    ...session,
-    state: 'round2_collecting',
-    round2Shares: new Map(session.round2Shares),
-  };
-
-  // Store every participant's round-2 share package (encrypted share)
-  for (const pkg of sharePackages) {
-    const participantKey = session.participants[pkg.index - 1] ?? `participant-${pkg.index}`;
-    updated.round2Shares.set(participantKey, pkg.encryptedShare);
-  }
-
-  return updated;
-}
-
-/**
- * Finalize DKG: derive the group public key from all collected round-2 shares,
- * construct the BfProfile and BfShare, and persist both to the OPFS Vault.
- *
- * After this function returns, the group is operational. The bfprofile should
- * be published to relays as kind:39200.
- *
- * @param session - The DkgSession (state should be `round2_collecting` or
- *   `completed` to allow re-finalization from recovered state)
- * @returns The derived BfProfile and BfShare
- * @throws {FrostError.InsufficientParticipants} if fewer than threshold round-2 shares were received
- */
-export async function finalizeDkg(session: DkgSession): Promise<{
-  profile: BfProfile;
-  share: BfShare;
-}> {
-  if (
-    session.state !== 'round2_collecting' &&
-    session.state !== 'completed'
-  ) {
-    throw new Error(`finalizeDkg: invalid state ${session.state}`);
-  }
-
-  const bifrost = await loadBifrost();
-  if (!bifrost) {
-    throw frostErr(FrostError.BifrostUnavailable);
-  }
-
-  if (session.round2Shares.size < session.totalShares) {
-    throw frostErr(FrostError.InsufficientParticipants);
-  }
-
-  // Determine the group public key using @frostr/bifrost.
-  // In the trusted-dealer model the dealer's round-2 output for participant 1
-  // (this node, acting as dealer/coordinator) is that participant's own share
-  // package — use it as the secret package for finalization.
-  const round2Packages = Array.from(session.round2Shares.entries()).map(
-    ([_pubkey, pkg], i) => ({ index: i + 1, encryptedShare: pkg }),
-  );
-  const mySharePackage = session.round2Shares.get(session.participants[0] ?? 'self')
-    ?? round2Packages[0]?.encryptedShare
-    ?? new Uint8Array(32);
-
-  const result = bifrost.dkg.processRound2Packages(
-    mySharePackage,
-    round2Packages,
-  );
-
-  const groupPubkeyHex = bytesToHex(result.groupPubkey);
-  const secretShareHex = bytesToHex(result.secretShare);
-  const publicShareHex = bytesToHex(result.publicShare);
-  const shareIndex = 1;
-
-  const now = Math.floor(Date.now() / 1000);
-
-  const profile: BfProfile = {
-    groupPubkey: groupPubkeyHex,
-    threshold: session.threshold,
-    totalShares: session.totalShares,
-    participants: session.participants,
-    metadata: { name: `FROST Group (${session.threshold}-of-${session.totalShares})` },
-    createdAt: now,
-  };
-
-  const share: BfShare = {
-    index: shareIndex,
-    secretShare: secretShareHex,
-    publicShare: publicShareHex,
-    groupPubkey: groupPubkeyHex,
-  };
-
-  // Persist to vault
-  await storeBfProfileAndRegister(groupPubkeyHex, profile);
-  await storeBfShare(groupPubkeyHex, share);
-
-  return { profile, share };
+  throw frostErr(FrostError.CeremonyTimeout);
 }
 
 // ---------------------------------------------------------------------------
-// Group Signing Ceremonies
+// Threshold signing — real BifrostNode machinery (FB-1)
 // ---------------------------------------------------------------------------
 
 /**
- * Initiate a FROST group signing ceremony.
- *
- * The initiator holds a bfshare and publishes a signing request event
- * (kind 20100) to the coordinator relay. Other threshold participants
- * respond with their partial signatures.
- *
- * @param config - Signing initiation configuration
- * @returns A new SigningSession in `request_published` state
+ * Compute the sighash for a NIP-01 event (sha256 of the canonical
+ * serialization) — the exact value BifrostNode signs and the value a
+ * verifier checks the final signature against.
  */
-export async function initiateGroupSigning(config: {
-  groupPubkey: string;
-  unsignedEvent: UnsignedNostrEvent;
-  coordinatorRelay: string;
-  initiatorShare: BfShare;
-}): Promise<SigningSession> {
-  const { groupPubkey, unsignedEvent, coordinatorRelay, initiatorShare } = config;
-
-  const sessionId = generateSessionId();
-
-  // Compute the message to be signed: sha256 of the NIP-01 event serialization
+export function computeEventSighash(unsignedEvent: UnsignedNostrEvent): string {
   const eventJson = JSON.stringify([
     0,
     unsignedEvent.pubkey,
@@ -781,13 +585,62 @@ export async function initiateGroupSigning(config: {
     unsignedEvent.tags,
     unsignedEvent.content,
   ]);
-  const message = sha256(utf8ToBytes(eventJson));
-  const messageHex = bytesToHex(message);
+  return bytesToHex(sha256(utf8ToBytes(eventJson)));
+}
 
-  // Generate nonce commitment for this signing round
-  const nonce = randomBytes(32);
-  const nonceCommitmentBytes = secp256k1.getPublicKey(nonce, true);
-  const nonceCommitmentsB64 = btoa(bytesToHex(nonceCommitmentBytes));
+/**
+ * Open a connected BifrostNode from a stored profile + own share.
+ * Requires the encoded credentials (present on all groups created through
+ * the current flow; absent on legacy pre-FB entries, which cannot sign).
+ */
+export async function openGroupSigningNode(config: {
+  profile: BfProfile;
+  share: BfShare;
+  relays?: string[];
+  connectTimeoutMs?: number;
+}): Promise<BifrostNode> {
+  const { profile, share, relays, connectTimeoutMs } = config;
+  if (!profile.encodedGroupPkg || !share.encodedShare) {
+    // Legacy/pre-FB entry — honest failure, never a simulated signature.
+    throw frostErr(FrostError.InvalidBackup);
+  }
+  const group = decodeGroupPackage(profile.encodedGroupPkg);
+  const sharePkg = decodeSharePackage(share.encodedShare);
+  return createConnectedNode({
+    group,
+    share: sharePkg,
+    relays: relays ?? [DEFAULT_FROST_CONFIG.coordinatorRelay],
+    connectTimeoutMs,
+  });
+}
+
+/**
+ * Initiate a FROST group signing session.
+ *
+ * Semantics PRESERVED (signature unchanged): returns a SigningSession for
+ * monitoring. With the real machinery, the actual signature is produced by
+ * BifrostNode once threshold peers co-sign — callers drive that through
+ * {@link requestThresholdSignature} (see FrostClient.groupSign) or await the
+ * background request opened by FrostClient.requestGroupSignature.
+ *
+ * The optional `coordinatorNsec`, WHEN PROVIDED, is the initiator's PERSONAL
+ * identity key used to sign a best-effort signing_request announcement for
+ * other participants' UIs. It is NEVER a secret share (FB-2).
+ */
+export async function initiateGroupSigning(config: {
+  groupPubkey: string;
+  unsignedEvent: UnsignedNostrEvent;
+  coordinatorRelay: string;
+  initiatorShare: BfShare;
+  /** Optional: initiator's PERSONAL identity nsec for the announcement */
+  coordinatorNsec?: string;
+  /** Optional: threshold from the stored profile (defaults 2-of-n) */
+  threshold?: number;
+}): Promise<SigningSession> {
+  const { groupPubkey, unsignedEvent, coordinatorRelay, initiatorShare } = config;
+
+  const sessionId = generateSessionId();
+  const sighash = computeEventSighash(unsignedEvent);
 
   const session: SigningSession = {
     state: 'request_published',
@@ -795,351 +648,96 @@ export async function initiateGroupSigning(config: {
     groupPubkey,
     unsignedEvent,
     partialSigs: new Map(),
-    threshold: 2, // Will be updated from profile; default 2-of-n
+    threshold: config.threshold ?? 2,
     createdAt: Math.floor(Date.now() / 1000),
   };
 
-  // Publish signing request to coordinator relay
-  // We use the initiator's share's secret for signing the coordinator message
-  const requestPayload: SigningRequestPayload = {
-    type: 'signing_request',
-    sessionId,
-    groupPubkey,
-    unsignedEvent: JSON.stringify(unsignedEvent),
-    nonceCommitments: nonceCommitmentsB64,
-    timestamp: session.createdAt,
-  };
+  if (config.coordinatorNsec && /^[0-9a-fA-F]{64}$/.test(config.coordinatorNsec)) {
+    const requestPayload: SigningRequestPayload = {
+      type: 'signing_request',
+      sessionId,
+      groupPubkey,
+      unsignedEvent: JSON.stringify(unsignedEvent),
+      // Sighash reference for observers — bifrost handles nonce exchange
+      // internally over its own encrypted channel.
+      nonceCommitments: sighash,
+      timestamp: session.createdAt,
+    };
 
-  // Sign the coordinator event with the initiator's own secret share.
-  // The share's secret is a valid secp256k1 scalar — it serves as the signing key
-  // for coordinator messages, tying them cryptographically to a real participant.
-  const requestEvent = buildCoordinatorEvent(requestPayload, sessionId, initiatorShare.secretShare);
-
-  try {
-    await publishToRelay(coordinatorRelay, requestEvent);
-  } catch {
-    // Non-fatal: relay unavailable
-  }
-
-  // Store the initiator's own partial signature immediately
-  // In real FROST: sign with (secretShare, nonce, message, signingPackage)
-  const partialSig = schnorr.sign(message, hexToBytes(initiatorShare.secretShare));
-  session.partialSigs.set(initiatorShare.index, partialSig);
-
-  void messageHex; // used above
-
-  return { ...session, state: 'collecting_partial_sigs' };
-}
-
-/**
- * Respond to a signing request with a partial signature.
- *
- * A co-signing participant fetches the signing request from the relay,
- * computes their partial signature using their bfshare, and publishes the
- * result back to the coordinator channel.
- *
- * @param config - Signing response configuration
- */
-export async function respondToSigningRequest(config: {
-  sessionId: string;
-  coordinatorRelay: string;
-  participantShare: BfShare;
-}): Promise<void> {
-  const { sessionId, coordinatorRelay, participantShare } = config;
-
-  // Fetch the signing request from the relay
-  const events = await collectRelayMessages(
-    coordinatorRelay,
-    { kinds: [DEFAULT_FROST_CONFIG.signingRequestKind], '#d': [sessionId] },
-    10,
-    RELAY_CONNECT_TIMEOUT,
-  );
-
-  let requestPayload: SigningRequestPayload | null = null;
-  for (const event of events) {
-    const payload = parseCoordinatorPayload(event);
-    if (payload?.type === 'signing_request') {
-      requestPayload = payload;
-      break;
-    }
-  }
-
-  if (!requestPayload) {
-    throw frostErr(FrostError.CeremonyTimeout);
-  }
-
-  // Parse the unsigned event
-  const unsignedEvent = JSON.parse(requestPayload.unsignedEvent) as UnsignedNostrEvent;
-
-  // Compute the message
-  const eventJson = JSON.stringify([
-    0,
-    unsignedEvent.pubkey,
-    unsignedEvent.created_at,
-    unsignedEvent.kind,
-    unsignedEvent.tags,
-    unsignedEvent.content,
-  ]);
-  const message = sha256(utf8ToBytes(eventJson));
-
-  // Generate partial signature
-  const partialSig = schnorr.sign(message, hexToBytes(participantShare.secretShare));
-
-  // Publish partial signature to coordinator relay
-  const partialSigPayload: PartialSigPayload = {
-    type: 'partial_sig',
-    sessionId,
-    groupPubkey: requestPayload.groupPubkey,
-    shareIndex: participantShare.index,
-    partialSig: bytesToHex(partialSig),
-    timestamp: Math.floor(Date.now() / 1000),
-  };
-
-  // Sign with the responder's own secret share — see initiateSigning for rationale.
-  const responseEvent = buildCoordinatorEvent(partialSigPayload, sessionId, participantShare.secretShare);
-
-  await publishToRelay(coordinatorRelay, responseEvent);
-}
-
-/**
- * Combine partial signatures into the final Schnorr signature.
- *
- * Waits for threshold partial signatures to be collected in the session,
- * then aggregates them into the final 64-byte Schnorr signature.
- *
- * With @frostr/bifrost available, uses the package's aggregation algorithm
- * (which correctly handles FROST's key aggregation coefficients). Without
- * the package, falls back to scalar addition (valid only for the simulation).
- *
- * @param session - The SigningSession with sufficient partial signatures
- * @returns The 64-byte Schnorr signature as a hex string
- * @throws {FrostError.InsufficientParticipants} if fewer than threshold sigs available
- * @throws {FrostError.AggregationFailed} if signature aggregation fails
- */
-export async function combineSignatures(session: SigningSession): Promise<string> {
-  if (session.partialSigs.size < session.threshold) {
-    throw frostErr(FrostError.InsufficientParticipants);
-  }
-
-  const bifrost = await loadBifrost();
-
-  // Compute the message
-  const { unsignedEvent } = session;
-  const eventJson = JSON.stringify([
-    0,
-    unsignedEvent.pubkey,
-    unsignedEvent.created_at,
-    unsignedEvent.kind,
-    unsignedEvent.tags,
-    unsignedEvent.content,
-  ]);
-  const message = sha256(utf8ToBytes(eventJson));
-
-  let finalSig: Uint8Array;
-
-  if (bifrost) {
+    const requestEvent = buildCoordinatorEvent(requestPayload, sessionId, config.coordinatorNsec);
     try {
-      // In FROST, aggregation requires the signing package (nonce commitments)
-      // and the group pubkey. Here we provide a simplified interface.
-      const partialSigArray = Array.from(session.partialSigs.entries()).map(([index, sig]) => ({
-        index,
-        sig,
-      }));
-
-      // Placeholder nonce commitments — in production these come from the signing request
-      const signingPackage = {
-        commitments: partialSigArray.map((ps) => ({
-          index: ps.index,
-          commitment: randomBytes(33),
-        })),
-      };
-
-      finalSig = bifrost.signing.aggregate(
-        partialSigArray,
-        signingPackage,
-        message,
-        hexToBytes(session.groupPubkey),
-      );
+      await publishToRelay(coordinatorRelay, requestEvent);
     } catch {
-      // Fall through to simulation
-      finalSig = await simulateAggregation(session.partialSigs, message);
+      // Non-fatal: announcement only
     }
-  } else {
-    finalSig = await simulateAggregation(session.partialSigs, message);
   }
 
-  return bytesToHex(finalSig);
-}
+  void initiatorShare; // signature compatibility; node construction is caller-driven
 
-/**
- * Simulate signature aggregation for testing purposes.
- * NOT cryptographically valid FROST — for state machine tests only.
- * @internal
- */
-async function simulateAggregation(
-  partialSigs: Map<number, Uint8Array>,
-  message: Uint8Array,
-): Promise<Uint8Array> {
-  // In a simulation, we use the first partial sig as the "combined" sig
-  // This is NOT valid FROST aggregation — just a placeholder for tests
-  const firstSig = partialSigs.values().next().value;
-  if (!firstSig) {
-    throw frostErr(FrostError.AggregationFailed);
-  }
-
-  // Produce a deterministic 64-byte output based on the partial sigs and message
-  const combined = sha256(
-    new Uint8Array([...Array.from(partialSigs.values()).reduce<number[]>((acc, arr) => [...acc, ...Array.from(arr)], []), ...message]),
-  );
-  // Pad to 64 bytes (Schnorr sig length)
-  const sig64 = new Uint8Array(64);
-  sig64.set(combined);
-  sig64.set(combined, 32);
-
-  void firstSig; // acknowledged
-  return sig64;
+  return session;
 }
 
 // ---------------------------------------------------------------------------
-// Share Rotation
+// Responder node registry (fire-and-monitor co-signing)
 // ---------------------------------------------------------------------------
 
+interface ResponderHandle {
+  node: BifrostNode;
+  closeAt: number;
+}
+
+const responderNodes = new Map<string, ResponderHandle>();
+
+function sweepResponders(now: number): void {
+  for (const [key, h] of responderNodes) {
+    if (h.closeAt <= now) {
+      responderNodes.delete(key);
+      void closeNodeQuietly(h.node);
+    }
+  }
+}
+
 /**
- * Rotate FROST shares without changing the group public key.
- *
- * Uses proactive secret sharing: all current threshold participants contribute
- * to generating new shares while preserving the group public key. This is a
- * cryptographic invariant of FROST — share rotation does not change the group
- * identity.
- *
- * Rotation scenarios:
- * - Suspected share compromise
- * - Member departure (reduces n)
- * - Member addition (increases n)
- * - Scheduled policy-driven rotation
- * - Optional threshold change (`newThreshold`)
- *
- * @param config - Share rotation configuration
- * @returns The new BfShare for this participant
- * @throws {FrostError.ShareNotFound} if the participant's current share is not in the vault
- * @throws {VaultError.VaultLocked} if vault is locked
+ * Ensure this participant has a CONNECTED responder node for a group so the
+ * BifrostNode handler can co-sign inbound peer requests automatically.
+ * Nodes idle-close after signingTimeout. Returns true when a node is (or
+ * was just made) available.
  */
-export async function rotateShares(config: {
-  groupPubkey: string;
-  coordinatorRelay: string;
-  participantShare: BfShare;
-  newThreshold?: number;
-}): Promise<BfShare> {
-  const { groupPubkey, coordinatorRelay, participantShare, newThreshold } = config;
-
-  // Verify the caller has a valid share for this group
-  if (participantShare.groupPubkey !== groupPubkey) {
-    throw new Error('participantShare.groupPubkey does not match groupPubkey');
+export async function ensureResponderOnline(config: {
+  profile: BfProfile;
+  share: BfShare;
+  relays?: string[];
+  onlineForMs?: number;
+}): Promise<boolean> {
+  sweepResponders(Date.now());
+  const key = config.profile.groupPubkey;
+  const existing = responderNodes.get(key);
+  if (existing) {
+    existing.closeAt = Date.now() + (config.onlineForMs ?? DEFAULT_FROST_CONFIG.signingTimeout);
+    return true;
   }
-
-  // Generate a rotation session ID
-  const rotationSessionId = generateSessionId();
-
-  // In a full FROST implementation, rotation follows a re-sharing protocol:
-  // 1. Threshold participants generate new share polynomial contributions
-  // 2. Each participant derives their new share from threshold contributions
-  // 3. New shares verify against the same group pubkey
-  //
-  // Here we simulate a successful rotation:
-  const newShare: BfShare = {
-    ...participantShare,
-    // In real FROST rotation, the secretShare changes but groupPubkey stays the same
-    secretShare: bytesToHex(sha256(utf8ToBytes(
-      `${participantShare.secretShare}:rotation:${rotationSessionId}`
-    ))),
-    nonceCommitments: undefined, // Reset nonce commitments for the new share
-  };
-
-  // If threshold is changing, this requires a full re-keying ceremony
-  if (newThreshold !== undefined && newThreshold !== participantShare.index) {
-    // The newThreshold would change the DKG parameters in a full implementation
-    // For now, we note the intent and proceed with share refresh
-  }
-
-  // Publish rotation event to coordinator relay (to notify other participants)
-  const rotationPayload = {
-    type: 'share_rotation' as const,
-    sessionId: rotationSessionId,
-    groupPubkey,
-    participantPubkey: bytesToHex(
-      secp256k1.getPublicKey(hexToBytes(participantShare.secretShare), true).slice(1),
-    ),
-    timestamp: Math.floor(Date.now() / 1000),
-  };
-
-  // Sign with the participant's current secret share — see initiateSigning for rationale.
-  const rotationEvent = buildCoordinatorEvent(
-    rotationPayload as unknown as FrostCoordinatorPayload,
-    rotationSessionId,
-    participantShare.secretShare,
-  );
-
   try {
-    await publishToRelay(coordinatorRelay, rotationEvent);
+    const node = await openGroupSigningNode({
+      profile: config.profile,
+      share: config.share,
+      relays: config.relays,
+    });
+    responderNodes.set(key, {
+      node,
+      closeAt: Date.now() + (config.onlineForMs ?? DEFAULT_FROST_CONFIG.signingTimeout),
+    });
+    return true;
   } catch {
-    // Non-fatal: relay unavailable
+    return false;
   }
-
-  // Persist the new share to vault (overwrites old share)
-  await storeBfShare(groupPubkey, newShare);
-
-  void newThreshold; // acknowledged
-
-  return newShare;
 }
 
-// ---------------------------------------------------------------------------
-// Utility: Collect Partial Signatures from Relay
-// ---------------------------------------------------------------------------
-
-/**
- * Wait for and collect partial signature events from the coordinator relay.
- * Returns once threshold signatures are collected or timeout expires.
- *
- * @param session - Current signing session
- * @param relayUrl - Coordinator relay URL
- * @param timeoutMs - Maximum wait time
- * @returns Updated session with collected partial signatures
- */
-export async function collectPartialSigs(
-  session: SigningSession,
-  relayUrl: string,
-  timeoutMs: number = DEFAULT_FROST_CONFIG.signingTimeout,
-): Promise<SigningSession> {
-  const events = await collectRelayMessages(
-    relayUrl,
-    { kinds: [DEFAULT_FROST_CONFIG.signingRequestKind], '#d': [session.sessionId] },
-    session.threshold * 2, // Collect up to threshold * 2 to find threshold valid sigs
-    timeoutMs,
-  );
-
-  const updatedSession: SigningSession = {
-    ...session,
-    partialSigs: new Map(session.partialSigs),
-  };
-
-  for (const event of events) {
-    const payload = parseCoordinatorPayload(event);
-    if (payload?.type === 'partial_sig' && payload.sessionId === session.sessionId) {
-      try {
-        const sigBytes = hexToBytes(payload.partialSig);
-        updatedSession.partialSigs.set(payload.shareIndex, sigBytes);
-      } catch {
-        // Skip malformed partial sig
-      }
-    }
+/** Test/teardown seam: close all responder nodes immediately. */
+export async function closeAllResponders(): Promise<void> {
+  for (const [, h] of responderNodes) {
+    await closeNodeQuietly(h.node);
   }
-
-  if (updatedSession.partialSigs.size >= updatedSession.threshold) {
-    updatedSession.state = 'combining';
-  }
-
-  return updatedSession;
+  responderNodes.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -1162,6 +760,3 @@ export type {
   GroupMetadata,
   FrostConfig,
 };
-
-
-

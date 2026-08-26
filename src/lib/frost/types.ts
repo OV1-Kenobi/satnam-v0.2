@@ -49,6 +49,14 @@ export interface BfProfile {
 
   /** Unix timestamp when this group was created */
   createdAt: number;
+
+  /**
+   * FB-1/FB-3 (2026-08-25): the ENCODED @frostr/bifrost group package
+   * credential (`bfgroup1…` token). PUBLIC data (members + group pubkey +
+   * threshold, all already public in this profile) carried so any
+   * participant can construct a BifrostNode from profile+share alone.
+   */
+  encodedGroupPkg?: string;
 }
 
 /**
@@ -82,6 +90,15 @@ export interface BfShare {
    * Refreshed after each signing ceremony.
    */
   nonceCommitments?: string[];
+
+  /**
+   * FB-2/FB-3 (2026-08-25): the participant's ENCODED @frostr/bifrost share
+   * package credential (`bfshare1…` token). Required to construct a
+   * BifrostNode; present on all shares created through the current trusted-
+   * dealer flow. Optional for backward compatibility with pre-existing
+   * vault entries (those cannot sign until re-provisioned).
+   */
+  encodedShare?: string;
 }
 
 /**
@@ -452,14 +469,25 @@ export type FrostCoordinatorPayload =
 
 /**
  * Metadata stored in the content of a kind:10000 share backup event.
- * The actual bfshare bytes are NIP-44 encrypted before embedding.
+ * The actual share material is NIP-44 encrypted as part of the event
+ * content (the outer NIP-44 layer to self is the confidentiality boundary).
+ *
+ * VERSION HISTORY:
+ * - v1: {encryptedShare: base64(JSON(BfShare))} — legacy; restorable but the
+ *   restored share cannot construct a BifrostNode (no encoded credential).
+ * - v2 (current): adds encodedShare (`bfshare1…`) + encodedGroupPkg
+ *   (`bfgroup1…`) so a restored participant can sign again immediately.
  */
 export interface ShareBackupContent {
-  version: number;
+  version: 1 | 2;
   groupPubkey: string;
   shareIndex: number;
-  /** Base64-encoded NIP-44 ciphertext of the serialized BfShare */
+  /** v1: base64(JSON(BfShare)). Kept for v2 backward-compat reads. */
   encryptedShare: string;
+  /** v2: encoded @frostr/bifrost share package credential */
+  encodedShare?: string;
+  /** v2: encoded @frostr/bifrost group package credential */
+  encodedGroupPkg?: string;
   createdAt: number;
 }
 

@@ -92,15 +92,35 @@ export {
 export {
   initiateDkg,
   joinDkg,
-  processDkgRound1,
-  processDkgRound2,
-  finalizeDkg,
   initiateGroupSigning,
-  respondToSigningRequest,
-  combineSignatures,
-  collectPartialSigs,
-  rotateShares,
+  computeEventSighash,
+  runTrustedDealerCreation,
+  deliverShareInvitation,
+  acceptShareInvitation,
+  openGroupSigningNode,
+  ensureResponderOnline,
+  closeAllResponders,
+  collectRelayMessages,
 } from './ceremony.js';
+
+export type {
+  ShareInvitationPayload,
+} from './ceremony.js';
+
+// ---------------------------------------------------------------------------
+// BifrostNode wrapper
+// ---------------------------------------------------------------------------
+
+export {
+  decodeGroupPackage,
+  decodeSharePackage,
+  encodeGroupPackage,
+  encodeSharePackage,
+  createConnectedNode,
+  closeNodeQuietly,
+  requestThresholdSignature,
+  NODE_CONNECT_TIMEOUT_MS,
+} from './node.js';
 
 // ---------------------------------------------------------------------------
 // High-level Client

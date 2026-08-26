@@ -344,15 +344,28 @@ export async function createShareBackupEvent(
   const userPubkeyBytes = secp256k1.getPublicKey(userNsec, true);
   const userPubkey = bytesToHex(userPubkeyBytes.slice(1));
 
-  // Serialize the share for encryption
+  // Serialize the share for the legacy compatibility field
   const shareJson = JSON.stringify(share);
   const shareBase64 = btoa(shareJson);
 
+  // v2 payload: include the encoded bifrost credentials so a restored
+  // participant can construct a BifrostNode and sign again immediately.
+  // The group package is PUBLIC data; the encoded share is confidential but
+  // lives inside the NIP-44 self-encryption boundary.
+  let encodedGroupPkg: string | undefined;
+  try {
+    encodedGroupPkg = (await retrieveBfProfile(groupPubkey))?.encodedGroupPkg;
+  } catch {
+    encodedGroupPkg = undefined;
+  }
+
   const backupContent: ShareBackupContent = {
-    version: 1,
+    version: share.encodedShare ? 2 : 1,
     groupPubkey,
     shareIndex: share.index,
     encryptedShare: shareBase64,
+    ...(share.encodedShare ? { encodedShare: share.encodedShare } : {}),
+    ...(encodedGroupPkg ? { encodedGroupPkg } : {}),
     createdAt: Math.floor(Date.now() / 1000),
   };
 
@@ -428,7 +441,10 @@ export async function restoreShareFromBackup(event: NostrEvent, userNsec: Uint8A
   }
 
   // Validate share structure
-  if (backupContent.version !== 1 || !backupContent.encryptedShare) {
+  if (backupContent.version !== 1 && backupContent.version !== 2) {
+    throw frostErr(FrostError.InvalidBackup);
+  }
+  if (!backupContent.encryptedShare) {
     throw frostErr(FrostError.InvalidBackup);
   }
 
@@ -439,6 +455,11 @@ export async function restoreShareFromBackup(event: NostrEvent, userNsec: Uint8A
     share = JSON.parse(shareJson) as BfShare;
   } catch {
     throw frostErr(FrostError.InvalidBackup);
+  }
+
+  // v2: restore the encoded bifrost credentials (required for signing)
+  if (backupContent.version === 2 && backupContent.encodedShare) {
+    share.encodedShare = backupContent.encodedShare;
   }
 
   // Validate share structure
@@ -458,6 +479,20 @@ export async function restoreShareFromBackup(event: NostrEvent, userNsec: Uint8A
 
   // Store the recovered share in the vault
   await storeBfShare(groupPubkey, share);
+
+  // v2: also backfill the stored profile with the encoded group package so
+  // the restored participant can construct a BifrostNode.
+  if (backupContent.version === 2 && backupContent.encodedGroupPkg) {
+    try {
+      const profile = await retrieveBfProfile(groupPubkey);
+      if (profile && !profile.encodedGroupPkg) {
+        profile.encodedGroupPkg = backupContent.encodedGroupPkg;
+        await storeBfProfile(groupPubkey, profile);
+      }
+    } catch {
+      // Profile backfill is best-effort; share restore already succeeded
+    }
+  }
 
   return share;
 }

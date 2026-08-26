@@ -11,13 +11,18 @@ export default defineConfig(({ mode }) => ({
     topLevelAwait(),
   ],
   resolve: {
-    alias: {
-      '@': resolve(__dirname, './src'),
-      '@lib': resolve(__dirname, './src/lib'),
-      '@components': resolve(__dirname, './src/components'),
-      '@types': resolve(__dirname, './src/types'),
-      '@config': resolve(__dirname, './src/config'),
-    },
+    alias: [
+      { find: '@', replacement: resolve(__dirname, './src') },
+      { find: '@lib', replacement: resolve(__dirname, './src/lib') },
+      { find: '@components', replacement: resolve(__dirname, './src/components') },
+      { find: '@types', replacement: resolve(__dirname, './src/types') },
+      { find: '@config', replacement: resolve(__dirname, './src/config') },
+      // FROST: stub the Node-only 'ws' package. @vbyte/nostr-sdk's optional
+      // relay-SERVER module imports WebSocketServer from 'ws' at top level;
+      // Satnam uses only BifrostNode (client) over the global WebSocket.
+      // Without this alias the browser bundle would try to ship 'ws'.
+      { find: /^ws$/, replacement: resolve(__dirname, './stubs/ws-stub.js') },
+    ],
   },
   build: {
     target: 'es2022',
