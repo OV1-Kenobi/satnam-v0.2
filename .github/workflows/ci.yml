@@ -21,12 +21,12 @@ jobs:
       - name: "S1: No key-material columns in SQL"
         run: |
           echo "::group::S1 — No encrypted_nsec/nsec/secret_key/private_key in SQL files"
-          # Exclude SQL comment lines (-- prefix) before pattern matching
-          # Use grep -P (Perl regex) for proper \s whitespace matching
+          # Exclude SQL comment lines (-- prefix). grep -rn outputs file:line:content.
+          # Filter lines where content (after 2nd colon) starts with optional whitespace + --
           MATCHES=$(grep -rn \
             --include="*.sql" \
             -E 'encrypted_nsec|nsec\s+(TEXT|CHAR|VARCHAR|BYTEA)|secret_key|private_key' \
-            . | grep -Pv '^\s*--' || true)
+            . | grep -Pv '^[^:]+:[0-9]+:\s*--' || true)
           if [ -n "$MATCHES" ]; then
             echo "::error::S1 FAILED — key-material column found in SQL:"
             echo "$MATCHES"
