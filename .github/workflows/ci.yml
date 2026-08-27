@@ -22,10 +22,11 @@ jobs:
         run: |
           echo "::group::S1 — No encrypted_nsec/nsec/secret_key/private_key in SQL files"
           # Exclude SQL comment lines (-- prefix) before pattern matching
+          # Use grep -P (Perl regex) for proper \s whitespace matching
           MATCHES=$(grep -rn \
             --include="*.sql" \
             -E 'encrypted_nsec|nsec\s+(TEXT|CHAR|VARCHAR|BYTEA)|secret_key|private_key' \
-            . | grep -v '\s*--' || true)
+            . | grep -Pv '^\s*--' || true)
           if [ -n "$MATCHES" ]; then
             echo "::error::S1 FAILED — key-material column found in SQL:"
             echo "$MATCHES"
@@ -174,8 +175,10 @@ jobs:
           if [ -d "netlify/functions" ]; then
             # Find functions that reference NIP-98 auth requirement (nip98 marker comment or usage)
             # Any function that imports or mentions nip98 must also call verifyNip98
+            # Exclude _lib/ helper directory — these are shared modules, not deployed function endpoints
             NIP98_FUNCS=$(grep -rl \
               --include="*.ts" --include="*.js" --include="*.mjs" \
+              --exclude-dir=_lib \
               -E "NIP-98|nip98|NIP98" \
               netlify/functions/ 2>/dev/null || true)
 
