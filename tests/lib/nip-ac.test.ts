@@ -4,23 +4,23 @@
  *
  * Tests cover:
  * 1. buildCreditIntent — kind:39240, correct tags and content
- * 2. buildCreditIntent — budget converted from msats to sats
+ * 2. buildCreditIntent — sats budget passthrough
  * 3. buildCreditIntent — required_skills and preferred_providers tags
  * 4. parseCreditOffer — parses kind:39241 event correctly
  * 5. parseCreditOffer — throws on wrong kind
  * 6. parseCreditOffer — throws on invalid JSON content
- * 7. buildCreditEnvelope — kind:39242, all required tags
- * 8. buildCreditEnvelope — performance_bond tag when provided
- * 9. buildSpendAuth — kind:39243 with bolt11 tag
- * 10. buildSpendAuth — kind:39243 without bolt11
- * 11. buildSettlementReceipt — kind:39244, score normalized 0–100
- * 12. buildSettlementReceipt — calculates reputation delta in content
+ * 7. buildCreditEnvelope — kind:39242, single-e grammar
+ * 8. buildCreditEnvelope — never emits performance_bond
+ * 9. buildSpendAuth — kind:39243, sats amount, p tag, rail in content
+ * 10. buildSpendAuth — kind:39243, default rail, exact tag grammar (no bolt11)
+ * 11. buildSettlementReceipt — kind:39244, score 0–100 tag, no spent/bond_redeemed tags
+ * 12. buildSettlementReceipt — reputation delta on 0–100 scale + required fields in content
  * 13. buildDefaultNotice — kind:39245, reason tag
  * 14. buildDefaultNotice — normalizes unknown reasons to 'expired'
- * 15. calculateReputationDelta — formula: base_rep = score * weight
- * 16. calculateReputationDelta — sig4sats_bonus = base_rep * 0.15 when bond
- * 17. calculateReputationDelta — no bonus when hasPerformanceBond=false
- * 18. calculateReputationDelta — score clamped to [0, 1]
+ * 15. calculateReputationDelta — positional (score 0–100, weight, bond): base_rep = score * weight
+ * 16. calculateReputationDelta — positional: sig4sats_bonus = base_rep * 0.15 when bond
+ * 17. calculateReputationDelta — positional: no bonus when hasPerformanceBond=false
+ * 18. buildSettlementReceipt — score clamped to [0, 100] at the builder seam
  * 19. CreditLifecycleManager.createIntent — signs and publishes via CEPS
  * 20. CreditLifecycleManager.acceptOffer — creates envelope, removes offer
  * 21. CreditLifecycleManager.settleEnvelope — publishes settlement
@@ -142,7 +142,7 @@ describe('buildCreditIntent', () => {
     const deadline = Math.floor(Date.now() / 1000) + 3600;
     const event = buildCreditIntent({
       description: 'Research 5 AI companies',
-      budgetMsats: BigInt(5_000_000),
+      budgetSats: 5000,
       deadlineTimestamp: deadline,
       requiredSkills: [],
     });
@@ -163,7 +163,7 @@ describe('buildCreditIntent', () => {
   it('2. budget is correctly converted from msats to sats', () => {
     const event = buildCreditIntent({
       description: 'Test',
-      budgetMsats: BigInt(1_500_000), // 1500 sats
+      budgetSats: 1500,
       deadlineTimestamp: 9999999,
       requiredSkills: [],
     });
@@ -178,7 +178,7 @@ describe('buildCreditIntent', () => {
   it('3. adds skill and preferred provider tags', () => {
     const event = buildCreditIntent({
       description: 'Test',
-      budgetMsats: BigInt(1_000_000),
+      budgetSats: 1000,
       deadlineTimestamp: 9999999,
       requiredSkills: ['research-v2', 'analysis-v1'],
       preferredProviders: ['provider-pk-1', 'provider-pk-2'],
@@ -196,7 +196,7 @@ describe('buildCreditIntent', () => {
   it('3b. content includes required_skills array', () => {
     const event = buildCreditIntent({
       description: 'Analysis task',
-      budgetMsats: BigInt(2_000_000),
+      budgetSats: 2000,
       deadlineTimestamp: 9999999,
       requiredSkills: ['analysis-v1'],
     });
@@ -252,9 +252,9 @@ describe('buildCreditEnvelope', () => {
   it('7. produces kind:39242 with all required tags', () => {
     const expiry = Math.floor(Date.now() / 1000) + 7200;
     const event = buildCreditEnvelope({
-      intentEventId: 'intent-id',
       offerEventId: 'offer-id',
       providerPubkey: 'provider-pk',
+      governorPubkey: 'b'.repeat(64),
       maxSats: 1000,
       scopeConstraintsHash: 'scope-hash-abc123',
       expiryTimestamp: expiry,
@@ -263,9 +263,8 @@ describe('buildCreditEnvelope', () => {
     expect(event.kind).toBe(39242);
 
     const eTags = event.tags.filter((t) => t[0] === 'e');
-    expect(eTags).toHaveLength(2);
-    expect(eTags[0][1]).toBe('intent-id');
-    expect(eTags[1][1]).toBe('offer-id');
+    expect(eTags).toHaveLength(1);
+    expect(eTags[0][1]).toBe('offer-id');
 
     const pTag = event.tags.find((t) => t[0] === 'p');
     expect(pTag?.[1]).toBe('provider-pk');
@@ -280,33 +279,17 @@ describe('buildCreditEnvelope', () => {
     expect(scopeTag?.[1]).toBe('scope-hash-abc123');
   });
 
-  it('8. adds performance_bond tag when performanceBondSats > 0', () => {
+  it('8. never emits performance_bond tag (bond facts live in settlement content)', () => {
     const event = buildCreditEnvelope({
-      intentEventId: 'intent-id',
       offerEventId: 'offer-id',
       providerPubkey: 'provider-pk',
-      maxSats: 1000,
-      scopeConstraintsHash: 'scope-hash',
-      expiryTimestamp: 9999999,
-      performanceBondSats: 100,
-    });
-
-    const bondTag = event.tags.find((t) => t[0] === 'performance_bond');
-    expect(bondTag?.[1]).toBe('100');
-  });
-
-  it('8b. omits performance_bond tag when not provided', () => {
-    const event = buildCreditEnvelope({
-      intentEventId: 'intent-id',
-      offerEventId: 'offer-id',
-      providerPubkey: 'provider-pk',
+      governorPubkey: 'b'.repeat(64),
       maxSats: 1000,
       scopeConstraintsHash: 'scope-hash',
       expiryTimestamp: 9999999,
     });
 
-    const bondTag = event.tags.find((t) => t[0] === 'performance_bond');
-    expect(bondTag).toBeUndefined();
+    expect(event.tags.find((t) => t[0] === 'performance_bond')).toBeUndefined();
   });
 });
 
@@ -315,12 +298,13 @@ describe('buildCreditEnvelope', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildSpendAuth', () => {
-  it('9. produces kind:39243 with bolt11 tag', () => {
+  it('9. produces kind:39243, sats amount, p tag, rail in content', () => {
     const event = buildSpendAuth({
       envelopeEventId: 'env-id',
-      amountMsats: BigInt(100_000),
-      description: 'Pay for research results',
-      invoiceBolt11: 'lnbc1234...',
+      agentPubkey: 'a'.repeat(64),
+      amountSats: 100,
+      purpose: 'Pay for research results',
+      rail: 'lightning',
     });
 
     expect(event.kind).toBe(39243);
@@ -328,26 +312,39 @@ describe('buildSpendAuth', () => {
     const eTag = event.tags.find((t) => t[0] === 'e');
     expect(eTag?.[1]).toBe('env-id');
 
-    const amountTag = event.tags.find((t) => t[0] === 'amount');
-    expect(amountTag?.[1]).toBe('100000');
+    const pTag = event.tags.find((t) => t[0] === 'p');
+    expect(pTag?.[1]).toBe('a'.repeat(64));
 
-    const bolt11Tag = event.tags.find((t) => t[0] === 'bolt11');
-    expect(bolt11Tag?.[1]).toBe('lnbc1234...');
+    const amountTag = event.tags.find((t) => t[0] === 'amount');
+    expect(amountTag?.[1]).toBe('100'); // sats string
+
+    const content = JSON.parse(event.content);
+    expect(content.envelope_id).toBe('env-id');
+    expect(content.agent_pubkey).toBe('a'.repeat(64));
+    expect(content.amount_sats).toBe(100);
+    expect(content.purpose).toBe('Pay for research results');
+    expect(content.rail).toBe('lightning');
   });
 
-  it('10. omits bolt11 tag when not provided', () => {
+  it('10. defaults rail to lightning and emits exactly the schema tag set', () => {
     const event = buildSpendAuth({
       envelopeEventId: 'env-id',
-      amountMsats: BigInt(50_000),
-      description: 'Cashu payment',
+      agentPubkey: 'a'.repeat(64),
+      amountSats: 100,
+      purpose: 'Cashu payment',
     });
 
     expect(event.kind).toBe(39243);
-    expect(event.tags.find((t) => t[0] === 'bolt11')).toBeUndefined();
+    expect(event.tags).toEqual([
+      ['e', 'env-id'],
+      ['p', 'a'.repeat(64)],
+      ['amount', '100'],
+    ]);
 
     const content = JSON.parse(event.content);
-    expect(content.description).toBe('Cashu payment');
-    expect(content.amount_msats).toBe('50000');
+    expect(content.rail).toBe('lightning');
+    expect('amount_msats' in content).toBe(false);
+    expect('recipient' in content).toBe(false);
   });
 });
 
@@ -356,42 +353,47 @@ describe('buildSpendAuth', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildSettlementReceipt', () => {
-  it('11. produces kind:39244 with score normalized to 0–100', () => {
+  it('11. produces kind:39244 with score tag and no spent/bond_redeemed tags', () => {
     const event = buildSettlementReceipt({
       envelopeEventId: 'env-id',
-      taskCompletionScore: 0.85,
-      totalSpentMsats: BigInt(900_000),
+      agentPubkey: 'a'.repeat(64),
+      governorPubkey: 'b'.repeat(64),
+      taskCompletionScore: 85,
+      totalSatsSpent: 900,
       performanceBondRedeemed: false,
     });
 
     expect(event.kind).toBe(39244);
 
     const scoreTag = event.tags.find((t) => t[0] === 'score');
-    expect(scoreTag?.[1]).toBe('85'); // 0.85 * 100 = 85
+    expect(scoreTag?.[1]).toBe('85');
 
-    const spentTag = event.tags.find((t) => t[0] === 'spent');
-    expect(spentTag?.[1]).toBe('900000');
-
-    const bondTag = event.tags.find((t) => t[0] === 'bond_redeemed');
-    expect(bondTag?.[1]).toBe('false');
+    expect(event.tags.find((t) => t[0] === 'spent')).toBeUndefined();
+    expect(event.tags.find((t) => t[0] === 'bond_redeemed')).toBeUndefined();
   });
 
-  it('12. content includes calculated reputation_delta', () => {
+  it('12. content includes reputation_delta on the 0–100 scale and required fields', () => {
     const event = buildSettlementReceipt({
       envelopeEventId: 'env-id',
-      taskCompletionScore: 1.0,
-      totalSpentMsats: BigInt(1_000_000),
+      agentPubkey: 'a'.repeat(64),
+      governorPubkey: 'b'.repeat(64),
+      taskCompletionScore: 100,
+      totalSatsSpent: 1000,
       performanceBondRedeemed: true,
     });
 
     const content = JSON.parse(event.content);
-    // score=1.0, weight=1.0, has_bond=true
-    // base_rep = 1.0 * 1.0 = 1.0
-    // sig4sats_bonus = 1.0 * 0.15 = 0.15
-    // total = 1.15
-    expect(content.reputation_delta).toBeCloseTo(1.15, 5);
+    // score=100 (0–100), weight=1.0, has_bond=true
+    // base_rep = 100 * 1.0 = 100
+    // sig4sats_bonus = 100 * 0.15 = 15
+    // total = 115
+    expect(content.reputation_delta).toBeCloseTo(115, 5);
     expect(content.has_performance_bond).toBe(true);
     expect(content.task_completion_score).toBe(100);
+    expect(content.agent_pubkey).toBe('a'.repeat(64));
+    expect(content.governor_pubkey).toBe('b'.repeat(64));
+    expect('sig4sats_proof' in content).toBe(false);
+    expect('completion_proof' in content).toBe(false);
   });
 });
 
@@ -440,64 +442,52 @@ describe('buildDefaultNotice', () => {
 
 describe('calculateReputationDelta', () => {
   it('15. base_rep = score * weight (no bond)', () => {
-    const delta = calculateReputationDelta({
-      taskCompletionScore: 0.8,
-      weight: 2.0,
-      hasPerformanceBond: false,
-    });
-    // base_rep = 0.8 * 2.0 = 1.6, no bonus
-    expect(delta).toBeCloseTo(1.6, 10);
+    const delta = calculateReputationDelta(80, 2.0, false);
+    // base_rep = 80 * 2.0 = 160, no bonus
+    expect(delta).toBeCloseTo(160, 10);
   });
 
   it('16. sig4sats_bonus = base_rep * 0.15 when bond present', () => {
-    const delta = calculateReputationDelta({
-      taskCompletionScore: 1.0,
-      weight: 1.0,
-      hasPerformanceBond: true,
-    });
-    // base_rep = 1.0, bonus = 0.15, total = 1.15
-    expect(delta).toBeCloseTo(1.15, 10);
+    const delta = calculateReputationDelta(100, 1.0, true);
+    // base_rep = 100, bonus = 15, total = 115
+    expect(delta).toBeCloseTo(115, 10);
   });
 
   it('17. no sig4sats bonus when hasPerformanceBond=false', () => {
-    const withBond = calculateReputationDelta({
-      taskCompletionScore: 0.9,
-      weight: 1.0,
-      hasPerformanceBond: true,
-    });
-    const withoutBond = calculateReputationDelta({
-      taskCompletionScore: 0.9,
-      weight: 1.0,
-      hasPerformanceBond: false,
-    });
+    const withBond = calculateReputationDelta(90, 1, true);
+    const withoutBond = calculateReputationDelta(90, 1, false);
     expect(withBond).toBeGreaterThan(withoutBond);
-    expect(withoutBond).toBeCloseTo(0.9, 10);
+    expect(withoutBond).toBeCloseTo(90, 10);
   });
 
-  it('18. score is clamped to [0, 1]', () => {
-    const overScore = calculateReputationDelta({
-      taskCompletionScore: 1.5,
-      weight: 1.0,
-      hasPerformanceBond: false,
+  it('18. score is clamped to [0, 100] at the builder seam', () => {
+    const overEvent = buildSettlementReceipt({
+      envelopeEventId: 'env-id',
+      agentPubkey: 'a'.repeat(64),
+      governorPubkey: 'b'.repeat(64),
+      taskCompletionScore: 150,
+      totalSatsSpent: 900,
+      performanceBondRedeemed: false,
     });
-    const underScore = calculateReputationDelta({
-      taskCompletionScore: -0.5,
-      weight: 1.0,
-      hasPerformanceBond: false,
-    });
+    const overContent = JSON.parse(overEvent.content);
+    expect(overContent.task_completion_score).toBe(100);
+    expect(overContent.reputation_delta).toBe(100);
 
-    // Clamped to 1.0
-    expect(overScore).toBeCloseTo(1.0, 10);
-    // Clamped to 0.0
-    expect(underScore).toBeCloseTo(0.0, 10);
+    const underEvent = buildSettlementReceipt({
+      envelopeEventId: 'env-id',
+      agentPubkey: 'a'.repeat(64),
+      governorPubkey: 'b'.repeat(64),
+      taskCompletionScore: -5,
+      totalSatsSpent: 900,
+      performanceBondRedeemed: false,
+    });
+    const underContent = JSON.parse(underEvent.content);
+    expect(underContent.task_completion_score).toBe(0);
+    expect(underContent.reputation_delta).toBe(0);
   });
 
   it('18b. zero weight gives zero delta regardless of score', () => {
-    const delta = calculateReputationDelta({
-      taskCompletionScore: 1.0,
-      weight: 0,
-      hasPerformanceBond: true,
-    });
+    const delta = calculateReputationDelta(100, 0, true);
     expect(delta).toBe(0);
   });
 });
@@ -519,7 +509,7 @@ describe('CreditLifecycleManager', () => {
   it('19. createIntent signs and publishes via CEPS session', async () => {
     const eventId = await manager.createIntent({
       description: 'Research task',
-      budgetMsats: BigInt(3_000_000),
+      budgetSats: 3000,
       deadlineTimestamp: 9999999,
       requiredSkills: ['research-v2'],
     });
@@ -531,7 +521,7 @@ describe('CreditLifecycleManager', () => {
 
   it('20. acceptOffer constructs and publishes an envelope', async () => {
     const offer = parseCreditOffer(makeOfferEvent());
-    const eventId = await manager.acceptOffer(offer);
+    const eventId = await manager.acceptOffer(offer, 'b'.repeat(64));
 
     expect(ceps.signEventWithActiveSession).toHaveBeenCalledOnce();
     expect(ceps.publishEvent).toHaveBeenCalledOnce();
@@ -541,8 +531,10 @@ describe('CreditLifecycleManager', () => {
   it('21. settleEnvelope publishes kind:39244 settlement', async () => {
     const eventId = await manager.settleEnvelope(
       'envelope-id',
-      0.9,
-      BigInt(800_000)
+      'a'.repeat(64),
+      'b'.repeat(64),
+      90,
+      800
     );
 
     expect(ceps.signEventWithActiveSession).toHaveBeenCalledOnce();
@@ -550,6 +542,9 @@ describe('CreditLifecycleManager', () => {
 
     const signedEvent = (ceps.signEventWithActiveSession as any).mock.calls[0][0];
     expect(signedEvent.kind).toBe(39244);
+    const settledContent = JSON.parse(signedEvent.content);
+    expect(settledContent.agent_pubkey).toBe('a'.repeat(64));
+    expect(settledContent.governor_pubkey).toBe('b'.repeat(64));
     expect(typeof eventId).toBe('string');
   });
 
@@ -603,5 +598,207 @@ describe('CreditLifecycleManager', () => {
     expect(envelopes).toHaveLength(1);
     expect(envelopes[0].eventId).toBe('env-active');
     expect(envelopes[0].maxSats).toBe(1000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NIP-AC schema conformance (builders ↔ types.ts)
+// ---------------------------------------------------------------------------
+
+describe('NIP-AC schema conformance (builders ↔ types.ts)', () => {
+  const AGENT_PK = 'a'.repeat(64);
+  const GOVERNOR_PK = 'b'.repeat(64);
+  const HEX64 = /^[0-9a-f]{64}$/;
+
+  it('C1. buildCreditEnvelope output conforms to CreditEnvelopeContent/Tags', () => {
+    const event = buildCreditEnvelope({
+      offerEventId: 'offer-id',
+      providerPubkey: AGENT_PK,
+      governorPubkey: GOVERNOR_PK,
+      maxSats: 1000,
+      scopeConstraintsHash: 'scope-hash',
+      expiryTimestamp: 9999999,
+    });
+
+    expect(event.kind).toBe(39242);
+
+    // Exactly ONE e tag, equal to the offer id
+    const eTags = event.tags.filter((t) => t[0] === 'e');
+    expect(eTags).toHaveLength(1);
+    expect(eTags[0][1]).toBe('offer-id');
+
+    // p tag = agent pubkey
+    const pTag = event.tags.find((t) => t[0] === 'p');
+    expect(pTag?.[1]).toBe(AGENT_PK);
+
+    // Required tags all present
+    const dTag = event.tags.find((t) => t[0] === 'd');
+    expect(dTag?.[1]).toMatch(/^envelope-/);
+    const maxSatsTag = event.tags.find((t) => t[0] === 'max_sats');
+    expect(maxSatsTag?.[1]).toBe('1000');
+    const expiresTag = event.tags.find((t) => t[0] === 'expires_at');
+    expect(expiresTag?.[1]).toBe('9999999');
+    const scopeTag = event.tags.find((t) => t[0] === 'scope_hash');
+    expect(scopeTag?.[1]).toBe('scope-hash');
+
+    // Content key set EXACTLY matches the schema (no extra, no missing)
+    const content = JSON.parse(event.content);
+    expect(Object.keys(content).sort()).toEqual([
+      'agent_pubkey',
+      'expires_at',
+      'governor_pubkey',
+      'max_sats',
+      'offer_id',
+      'scope_constraints_hash',
+    ]);
+    expect(content.offer_id).toBe('offer-id');
+    expect(content.agent_pubkey).toBe(AGENT_PK);
+    expect(content.governor_pubkey).toBe(GOVERNOR_PK);
+    expect(content.governor_pubkey).toMatch(HEX64);
+    expect(typeof content.max_sats).toBe('number');
+
+    // No performance_bond tag
+    expect(event.tags.find((t) => t[0] === 'performance_bond')).toBeUndefined();
+  });
+
+  it('C2. buildSpendAuth output conforms to SpendAuthorizationContent/Tags', () => {
+    const event = buildSpendAuth({
+      envelopeEventId: 'env-id',
+      agentPubkey: AGENT_PK,
+      amountSats: 100,
+      purpose: 'pay invoice',
+      rail: 'cashu',
+      recipient: 'merchant@example.com',
+    });
+
+    expect(event.kind).toBe(39243);
+
+    // Tags EXACTLY the schema set
+    expect(event.tags).toEqual([
+      ['e', 'env-id'],
+      ['p', AGENT_PK],
+      ['amount', '100'],
+    ]);
+
+    // Content key set EXACTLY matches the schema
+    const content = JSON.parse(event.content);
+    expect(Object.keys(content).sort()).toEqual([
+      'agent_pubkey',
+      'amount_sats',
+      'envelope_id',
+      'purpose',
+      'rail',
+      'recipient',
+    ]);
+    expect(typeof content.amount_sats).toBe('number');
+    expect(content.amount_sats).toBe(100);
+    expect(content.rail).toBe('cashu');
+    expect(JSON.stringify(content)).not.toContain('msats');
+
+    // Default rail + omitted recipient when not provided
+    const defaultEvent = buildSpendAuth({
+      envelopeEventId: 'env-id',
+      agentPubkey: AGENT_PK,
+      amountSats: 100,
+      purpose: 'pay invoice',
+    });
+    const defaultContent = JSON.parse(defaultEvent.content);
+    expect(defaultContent.rail).toBe('lightning');
+    expect('recipient' in defaultContent).toBe(false);
+  });
+
+  it('C3. buildSettlementReceipt output conforms to SettlementReceiptContent/Tags', () => {
+    const event = buildSettlementReceipt({
+      envelopeEventId: 'env-id',
+      agentPubkey: AGENT_PK,
+      governorPubkey: GOVERNOR_PK,
+      taskCompletionScore: 85,
+      totalSatsSpent: 900,
+      performanceBondRedeemed: false,
+    });
+
+    expect(event.kind).toBe(39244);
+
+    // Tags EXACTLY the schema set
+    expect(event.tags).toEqual([
+      ['e', 'env-id'],
+      ['p', AGENT_PK],
+      ['score', '85'],
+    ]);
+
+    // Content key set EXACTLY matches the schema (required fields present incl. D2 scoring fields)
+    const content = JSON.parse(event.content);
+    expect(Object.keys(content).sort()).toEqual([
+      'agent_pubkey',
+      'envelope_id',
+      'governor_pubkey',
+      'has_performance_bond',
+      'reputation_delta',
+      'task_completion_score',
+      'total_sats_spent',
+    ]);
+    expect(content.reputation_delta).toBe(85); // 0–100 in, 0–100-scale delta
+
+    // Optionals omitted (never nulled)
+    expect('sig4sats_proof' in content).toBe(false);
+    expect('completion_proof' in content).toBe(false);
+
+    // Proof passes through only when provided; completion_proof stays independent
+    const proofEvent = buildSettlementReceipt({
+      envelopeEventId: 'env-id',
+      agentPubkey: AGENT_PK,
+      governorPubkey: GOVERNOR_PK,
+      taskCompletionScore: 85,
+      totalSatsSpent: 900,
+      performanceBondRedeemed: false,
+      cashuRedemptionProof: 'cashu-token-xyz',
+    });
+    const proofContent = JSON.parse(proofEvent.content);
+    expect(proofContent.sig4sats_proof).toBe('cashu-token-xyz');
+    expect('completion_proof' in proofContent).toBe(false);
+
+    // Single-seam clamp at the builder
+    const overEvent = buildSettlementReceipt({
+      envelopeEventId: 'env-id',
+      agentPubkey: AGENT_PK,
+      governorPubkey: GOVERNOR_PK,
+      taskCompletionScore: 150,
+      totalSatsSpent: 900,
+      performanceBondRedeemed: false,
+    });
+    const overContent = JSON.parse(overEvent.content);
+    expect(overContent.task_completion_score).toBe(100);
+    expect(overContent.reputation_delta).toBe(100);
+  });
+
+  it('C4. no msats field anywhere in builder output (kinds 39242/39243/39244)', () => {
+    const envelope = buildCreditEnvelope({
+      offerEventId: 'offer-id',
+      providerPubkey: AGENT_PK,
+      governorPubkey: GOVERNOR_PK,
+      maxSats: 1000,
+      scopeConstraintsHash: 'scope-hash',
+      expiryTimestamp: 9999999,
+    });
+    const spendAuth = buildSpendAuth({
+      envelopeEventId: 'env-id',
+      agentPubkey: AGENT_PK,
+      amountSats: 100,
+      purpose: 'pay invoice',
+    });
+    const settlement = buildSettlementReceipt({
+      envelopeEventId: 'env-id',
+      agentPubkey: AGENT_PK,
+      governorPubkey: GOVERNOR_PK,
+      taskCompletionScore: 85,
+      totalSatsSpent: 900,
+      performanceBondRedeemed: false,
+    });
+
+    for (const event of [envelope, spendAuth, settlement]) {
+      const serialized = JSON.stringify({ tags: event.tags, content: event.content });
+      expect(serialized).not.toContain('msats');
+      expect(serialized).not.toContain('_msats');
+    }
   });
 });

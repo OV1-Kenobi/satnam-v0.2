@@ -13,6 +13,12 @@
  * Event flow (from spec §7.2):
  *   Intent (39240) → Offer (39241) → Envelope (39242) → SpendAuth (39243)
  *     → Settlement (39244) or Default Notice (39245)
+ *
+ * Units policy (v0.2): ALL NIP-AC amounts are sats — `budget_sats`, `max_sats`,
+ * `amount_sats`, `total_sats_spent`, and every `amount`/`max_sats`/`budget` tag
+ * value. Millisats are a PLANNED, VERSIONED LATER UPGRADE (new content-schema
+ * version + explicit unit marker; never mixed units within one event). v0.2
+ * builds no msats path. See SPECIFICATION.md §7.2.
  */
 
 // ============================================================================

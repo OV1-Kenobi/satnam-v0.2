@@ -769,6 +769,8 @@ const sig4sats_bonus = has_performance_bond ? base_rep * 0.15 : 0;
 const total_rep_delta = base_rep + sig4sats_bonus;
 ```
 
+**Units and the sats→msats upgrade path (v0.2):** All NIP-AC event amounts are sats-canonical — `budget_sats`, `max_sats`, `amount_sats`, `total_sats_spent`, and the `budget`/`max_sats`/`amount` tag values — and task scores are 0–100. Millisatoshis are a planned, versioned later upgrade: when activated, it MUST be delivered as a new content-schema version with an explicit unit marker, never by mixing units within one event or tag. v0.2 implements no msats path.
+
 ### 7.3 NIP-SKL: Skill Registry (kinds 33400–33401)
 
 **Skill Manifest (kind:33400):**

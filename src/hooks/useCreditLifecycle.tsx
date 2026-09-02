@@ -28,7 +28,7 @@
  * // Create an intent
  * await createIntent({
  *   description: 'Research 5 AI companies',
- *   budgetMsats: BigInt(5_000_000),
+ *   budgetSats: 5000,
  *   deadlineTimestamp: Math.floor(Date.now() / 1000) + 3600,
  *   requiredSkills: ['research-v2'],
  * });
@@ -94,11 +94,11 @@ export interface UseCreditLifecycleResult {
   /** Create and publish a credit intent */
   createIntent: (params: IntentParams) => Promise<string>;
   /** Accept a provider's offer and create an envelope */
-  acceptOffer: (offer: CreditOffer) => Promise<string>;
+  acceptOffer: (offer: CreditOffer, governorPubkey: string) => Promise<string>;
   /** Authorize a spend within an envelope */
-  authorizeSpend: (envelopeId: string, amountMsats: bigint, description: string) => Promise<string>;
+  authorizeSpend: (envelopeId: string, agentPubkey: string, amountSats: number, purpose: string) => Promise<string>;
   /** Settle an envelope after task completion */
-  settleEnvelope: (envelopeId: string, score: number, totalSpentMsats: bigint) => Promise<string>;
+  settleEnvelope: (envelopeId: string, agentPubkey: string, governorPubkey: string, score: number, totalSatsSpent: number) => Promise<string>;
   /** Issue a default notice for an expired/abandoned envelope */
   issueDefault: (envelopeId: string, reason: string) => Promise<string>;
   /** Alias for activeEnvelopes — for callers that prefer shorter destructuring */
@@ -281,7 +281,7 @@ export function useCreditLifecycle(
   );
 
   const acceptOffer = useCallback(
-    async (offer: CreditOffer): Promise<string> => {
+    async (offer: CreditOffer, governorPubkey: string): Promise<string> => {
       if (!managerRef.current) {
         throw new Error('Credit lifecycle manager is not initialized');
       }
@@ -290,7 +290,7 @@ export function useCreditLifecycle(
       setError(null);
 
       try {
-        const eventId = await managerRef.current.acceptOffer(offer);
+        const eventId = await managerRef.current.acceptOffer(offer, governorPubkey);
 
         // Remove from pending offers
         setPendingOffers((prev) => prev.filter((o) => o.eventId !== offer.eventId));
@@ -311,7 +311,7 @@ export function useCreditLifecycle(
   );
 
   const authorizeSpend = useCallback(
-    async (envelopeId: string, amountMsats: bigint, description: string): Promise<string> => {
+    async (envelopeId: string, agentPubkey: string, amountSats: number, purpose: string): Promise<string> => {
       if (!managerRef.current) {
         throw new Error('Credit lifecycle manager is not initialized');
       }
@@ -322,8 +322,9 @@ export function useCreditLifecycle(
       try {
         const eventId = await managerRef.current.authorizeSpend(
           envelopeId,
-          amountMsats,
-          description
+          agentPubkey,
+          amountSats,
+          purpose
         );
         setStatus('success');
         return eventId;
@@ -340,8 +341,10 @@ export function useCreditLifecycle(
   const settleEnvelope = useCallback(
     async (
       envelopeId: string,
+      agentPubkey: string,
+      governorPubkey: string,
       score: number,
-      totalSpentMsats: bigint
+      totalSatsSpent: number
     ): Promise<string> => {
       if (!managerRef.current) {
         throw new Error('Credit lifecycle manager is not initialized');
@@ -353,8 +356,10 @@ export function useCreditLifecycle(
       try {
         const eventId = await managerRef.current.settleEnvelope(
           envelopeId,
+          agentPubkey,
+          governorPubkey,
           score,
-          totalSpentMsats
+          totalSatsSpent
         );
 
         // Remove from active envelopes

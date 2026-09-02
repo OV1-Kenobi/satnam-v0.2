@@ -247,7 +247,7 @@ function EnvelopeCard({
   isLoading,
 }: {
   envelope: CreditEnvelope;
-  onSettle?: (id: string) => void;
+  onSettle?: (id: string, agentPubkey: string, governorPubkey: string) => void;
   isLoading?: boolean;
 }) {
   const maxSats = envelope.maxSats;
@@ -299,7 +299,7 @@ function EnvelopeCard({
       {envelope.state === 'envelope_constructed' && onSettle && (
         <button
           type="button"
-          onClick={() => onSettle(envelope.eventId)}
+          onClick={() => onSettle(envelope.eventId, envelope.agentPubkey, envelope.governorPubkey)}
           disabled={isLoading}
           aria-label="Settle envelope"
           className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -325,8 +325,8 @@ export default function CreditEnvelopePanel({ agentId, jobId: _jobId }: CreditEn
     return true;
   });
 
-  const handleSettle = async (id: string) => {
-    await settleEnvelope(id, 5, 0n);
+  const handleSettle = async (id: string, agentPubkey: string, governorPubkey: string) => {
+    await settleEnvelope(id, agentPubkey, governorPubkey, 5, 0);
   };
 
   if (isLoading) {

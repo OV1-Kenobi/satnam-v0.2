@@ -25,6 +25,7 @@
 
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
+import { calculateReputationDelta } from '../agent/llm/cost.js';
 import type { CepsClient } from '../ceps/ceps-client.js';
 import type {
   NostrEvent,
@@ -32,6 +33,8 @@ import type {
   CreditEnvelopeContent,
   CreditLifecycleState,
 } from './types.js';
+
+export { calculateReputationDelta };
 
 // ---------------------------------------------------------------------------
 // Exported types (client-specific, not duplicating types.ts)
@@ -96,7 +99,8 @@ export interface CreditEnvelope {
  */
 export interface IntentParams {
   description: string;
-  budgetMsats: bigint;
+  /** Maximum budget in sats */
+  budgetSats: number;
   deadlineTimestamp: number;
   requiredSkills: string[];
   preferredProviders?: string[];
@@ -147,17 +151,14 @@ function generateDTag(prefix: string): string {
  * ```ts
  * const intent = buildCreditIntent({
  *   description: 'Research 5 companies in the AI sector',
- *   budgetMsats: BigInt(5_000_000), // 5000 sats
+ *   budgetSats: 5000, // sats
  *   deadlineTimestamp: Math.floor(Date.now() / 1000) + 3600,
  *   requiredSkills: ['research-v2'],
  * });
  * ```
  */
 export function buildCreditIntent(params: IntentParams): UnsignedEvent {
-  const { description, budgetMsats, deadlineTimestamp, requiredSkills, preferredProviders } = params;
-
-  // Convert msats to sats for the budget tag (NIP-AC uses sats natively)
-  const budgetSats = budgetMsats / BigInt(1000);
+  const { description, budgetSats, deadlineTimestamp, requiredSkills, preferredProviders } = params;
 
   const tags: string[][] = [
     ['d', generateDTag('intent')],
@@ -177,7 +178,7 @@ export function buildCreditIntent(params: IntentParams): UnsignedEvent {
 
   const content = JSON.stringify({
     description,
-    budget_sats: Number(budgetSats),
+    budget_sats: budgetSats,
     deadline_unix: deadlineTimestamp,
     required_skills: requiredSkills,
   });
@@ -247,41 +248,36 @@ export function parseCreditOffer(event: NostrEvent): CreditOffer {
  *
  * Tags:
  * - ["d", "<unique-envelope-id>"]
- * - ["e", "<intent_event_id>"]
- * - ["e", "<offer_event_id>"]
- * - ["p", "<provider_pubkey>"]
+ * - ["e", "<offer_event_id>"]          (single — the accepted offer)
+ * - ["p", "<agent_pubkey>"]
  * - ["max_sats", "<sats>"]
  * - ["expires_at", "<unix_timestamp>"]
  * - ["scope_hash", "<sha256_of_skill_manifest>"]
- * - ["performance_bond", "<sats>"]   (if sig4sats bond present)
  *
  * @param params - Envelope construction parameters
  * @returns Unsigned kind:39242 event
  */
 export function buildCreditEnvelope(params: {
-  intentEventId: string;
   offerEventId: string;
   providerPubkey: string;
+  /** The Principal/Guardian issuing the envelope (the signing identity) */
+  governorPubkey: string;
   maxSats: number;
   /** SHA-256 of the NIP-SKL skill manifest event ID */
   scopeConstraintsHash: string;
   expiryTimestamp: number;
-  /** Optional Sig4Sats performance bond amount in sats */
-  performanceBondSats?: number;
 }): UnsignedEvent {
   const {
-    intentEventId,
     offerEventId,
     providerPubkey,
+    governorPubkey,
     maxSats,
     scopeConstraintsHash,
     expiryTimestamp,
-    performanceBondSats,
   } = params;
 
   const tags: string[][] = [
     ['d', generateDTag('envelope')],
-    ['e', intentEventId],
     ['e', offerEventId],
     ['p', providerPubkey],
     ['max_sats', String(maxSats)],
@@ -289,14 +285,10 @@ export function buildCreditEnvelope(params: {
     ['scope_hash', scopeConstraintsHash],
   ];
 
-  if (performanceBondSats !== undefined && performanceBondSats > 0) {
-    tags.push(['performance_bond', String(performanceBondSats)]);
-  }
-
   const content: CreditEnvelopeContent = {
     offer_id: offerEventId,
     agent_pubkey: providerPubkey, // Provider acts as the authorized agent
-    governor_pubkey: '', // Filled by the signed event's pubkey field
+    governor_pubkey: governorPubkey,
     max_sats: maxSats,
     scope_constraints_hash: scopeConstraintsHash,
     expires_at: expiryTimestamp,
@@ -323,34 +315,38 @@ export function buildCreditEnvelope(params: {
  *
  * Tags:
  * - ["e", "<envelope_event_id>"]
- * - ["amount", "<msats>"]
- * - ["bolt11", "<invoice>"]          (if invoiceBolt11 provided)
+ * - ["p", "<agent_pubkey>"]
+ * - ["amount", "<sats>"]
+ *
+ * Content fields: envelope_id, agent_pubkey, amount_sats, purpose, rail,
+ * recipient? (omitted when absent).
  *
  * @param params - Spend authorization parameters
  * @returns Unsigned kind:39243 event
  */
 export function buildSpendAuth(params: {
   envelopeEventId: string;
-  amountMsats: bigint;
-  description: string;
-  invoiceBolt11?: string;
+  agentPubkey: string;
+  amountSats: number;
+  purpose: string;
+  rail?: "lightning" | "cashu";
+  recipient?: string;
 }): UnsignedEvent {
-  const { envelopeEventId, amountMsats, description, invoiceBolt11 } = params;
+  const { envelopeEventId, agentPubkey, amountSats, purpose, rail, recipient } = params;
 
   const tags: string[][] = [
     ['e', envelopeEventId],
-    ['amount', amountMsats.toString()],
+    ['p', agentPubkey],
+    ['amount', String(amountSats)],
   ];
-
-  if (invoiceBolt11) {
-    tags.push(['bolt11', invoiceBolt11]);
-  }
 
   const content = JSON.stringify({
     envelope_id: envelopeEventId,
-    amount_msats: amountMsats.toString(),
-    description,
-    ...(invoiceBolt11 ? { invoice_bolt11: invoiceBolt11 } : {}),
+    agent_pubkey: agentPubkey,
+    amount_sats: amountSats,
+    purpose,
+    rail: rail ?? 'lightning',
+    ...(recipient ? { recipient } : {}),
   });
 
   return {
@@ -371,62 +367,64 @@ export function buildSpendAuth(params: {
  * Published after task completion to close the envelope lifecycle.
  * Includes the Cashu redemption proof for any Sig4Sats bond.
  *
- * The reputation delta is calculated via `calculateReputationDelta()` and
- * included in the settlement content for on-chain verifiability.
+ * The reputation delta is calculated via `calculateReputationDelta()` (the
+ * canonical implementation from `../agent/llm/cost.ts`) on the 0–100 score
+ * and included in the settlement content for on-chain verifiability.
  *
  * Tags:
  * - ["e", "<envelope_event_id>"]
+ * - ["p", "<agent_pubkey>"]
  * - ["score", "<0-100>"]
- * - ["spent", "<msats>"]
- * - ["bond_redeemed", "true"|"false"]
  *
- * @param params - Settlement receipt parameters
+ * @param params - Settlement receipt parameters (score 0–100, total spent in sats)
  * @returns Unsigned kind:39244 event
  */
 export function buildSettlementReceipt(params: {
   envelopeEventId: string;
-  /** Task completion score 0–1 (will be stored as 0–100 internally) */
+  agentPubkey: string;
+  governorPubkey: string;
+  /** Task completion score 0–100 (clamped at this seam) */
   taskCompletionScore: number;
-  totalSpentMsats: bigint;
+  totalSatsSpent: number;
   performanceBondRedeemed: boolean;
   /** Cashu token proof for Sig4Sats bond redemption */
   cashuRedemptionProof?: string;
+  /** Completion proof for the finished task */
+  completionProof?: string;
 }): UnsignedEvent {
   const {
     envelopeEventId,
+    agentPubkey,
+    governorPubkey,
     taskCompletionScore,
-    totalSpentMsats,
+    totalSatsSpent,
     performanceBondRedeemed,
     cashuRedemptionProof,
+    completionProof,
   } = params;
 
-  // Normalize score to 0–100 for storage (spec uses 0–100 in SettlementReceiptContent)
-  const scoreNormalized = Math.round(
-    Math.min(1, Math.max(0, taskCompletionScore)) * 100
-  );
+  // Normalize score to 0–100 at this single seam (spec uses 0–100 in SettlementReceiptContent)
+  const score = Math.round(Math.min(100, Math.max(0, taskCompletionScore)));
 
-  // Calculate reputation delta
-  const repDelta = calculateReputationDelta({
-    taskCompletionScore,
-    weight: 1.0,
-    hasPerformanceBond: performanceBondRedeemed,
-  });
+  // Calculate reputation delta (canonical formula, 0–100 in)
+  const repDelta = calculateReputationDelta(score, 1.0, performanceBondRedeemed);
 
   const tags: string[][] = [
     ['e', envelopeEventId],
-    ['score', String(scoreNormalized)],
-    ['spent', totalSpentMsats.toString()],
-    ['bond_redeemed', performanceBondRedeemed ? 'true' : 'false'],
+    ['p', agentPubkey],
+    ['score', String(score)],
   ];
 
   const content = JSON.stringify({
     envelope_id: envelopeEventId,
-    task_completion_score: scoreNormalized,
-    total_sats_spent: Number(totalSpentMsats / BigInt(1000)),
-    has_performance_bond: performanceBondRedeemed,
-    sig4sats_proof: cashuRedemptionProof ?? null,
+    agent_pubkey: agentPubkey,
+    governor_pubkey: governorPubkey,
+    total_sats_spent: totalSatsSpent,
+    task_completion_score: score,
     reputation_delta: repDelta,
-    completion_proof: cashuRedemptionProof ?? null,
+    has_performance_bond: performanceBondRedeemed,
+    ...(cashuRedemptionProof ? { sig4sats_proof: cashuRedemptionProof } : {}),
+    ...(completionProof ? { completion_proof: completionProof } : {}),
   });
 
   return {
@@ -483,47 +481,6 @@ export function buildDefaultNotice(params: {
 }
 
 // ---------------------------------------------------------------------------
-// calculateReputationDelta
-// ---------------------------------------------------------------------------
-
-/**
- * Calculate the reputation delta for a completed task per spec §7.2.
- *
- * Formula:
- *   base_rep = score * weight
- *   sig4sats_bonus = has_performance_bond ? base_rep * 0.15 : 0
- *   total_rep_delta = base_rep + sig4sats_bonus
- *
- * @param params.taskCompletionScore - Score from 0 (failure) to 1 (perfect)
- * @param params.weight - Task weight multiplier (higher = more impactful)
- * @param params.hasPerformanceBond - Whether a Sig4Sats bond was staked
- * @returns Reputation delta (positive = reputation gain)
- *
- * @example
- * ```ts
- * const delta = calculateReputationDelta({
- *   taskCompletionScore: 0.85,
- *   weight: 2.0,
- *   hasPerformanceBond: true,
- * });
- * // base_rep = 0.85 * 2.0 = 1.70
- * // sig4sats_bonus = 1.70 * 0.15 = 0.255
- * // total = 1.955
- * ```
- */
-export function calculateReputationDelta(params: {
-  taskCompletionScore: number;
-  weight: number;
-  hasPerformanceBond: boolean;
-}): number {
-  const { taskCompletionScore, weight, hasPerformanceBond } = params;
-  const score = Math.min(1, Math.max(0, taskCompletionScore));
-  const base_rep = score * weight;
-  const sig4sats_bonus = hasPerformanceBond ? base_rep * 0.15 : 0;
-  return base_rep + sig4sats_bonus;
-}
-
-// ---------------------------------------------------------------------------
 // CreditLifecycleManager
 // ---------------------------------------------------------------------------
 
@@ -540,7 +497,7 @@ export function calculateReputationDelta(params: {
  * const manager = new CreditLifecycleManager(ceps);
  * const intentId = await manager.createIntent({
  *   description: 'Research 5 AI companies',
- *   budgetMsats: BigInt(5_000_000),
+ *   budgetSats: 5000,
  *   deadlineTimestamp: Math.floor(Date.now() / 1000) + 3600,
  *   requiredSkills: ['research-v2'],
  * });
@@ -579,9 +536,10 @@ export class CreditLifecycleManager {
    * derived from the offer's capability list.
    *
    * @param offer - Parsed CreditOffer from `parseCreditOffer()`
+   * @param governorPubkey - The accepting Principal's pubkey (the envelope governor)
    * @returns Published envelope event ID
    */
-  async acceptOffer(offer: CreditOffer): Promise<string> {
+  async acceptOffer(offer: CreditOffer, governorPubkey: string): Promise<string> {
     // Derive a deterministic scope constraints hash from the offer's capabilities
     const capabilityString = offer.capabilities.sort().join(',');
     const scopeConstraintsHash = bytesToHex(
@@ -592,9 +550,9 @@ export class CreditLifecycleManager {
       Math.floor(Date.now() / 1000) + offer.deliverySeconds + 3600; // 1h grace period
 
     const unsigned = buildCreditEnvelope({
-      intentEventId: offer.intentEventId,
       offerEventId: offer.eventId,
       providerPubkey: offer.providerPubkey,
+      governorPubkey,
       maxSats: offer.priceSats,
       scopeConstraintsHash,
       expiryTimestamp,
@@ -608,19 +566,22 @@ export class CreditLifecycleManager {
    * Authorize a spend within an envelope's cap (kind:39243).
    *
    * @param envelopeId - The envelope event ID to spend against
-   * @param amount - Amount in millisatoshis
-   * @param description - Purpose of the spend
+   * @param agentPubkey - The authorized agent's pubkey (content.agent_pubkey + p tag)
+   * @param amountSats - Amount in sats
+   * @param purpose - Description of what the spend is for
    * @returns Published spend auth event ID
    */
   async authorizeSpend(
     envelopeId: string,
-    amount: bigint,
-    description: string
+    agentPubkey: string,
+    amountSats: number,
+    purpose: string
   ): Promise<string> {
     const unsigned = buildSpendAuth({
       envelopeEventId: envelopeId,
-      amountMsats: amount,
-      description,
+      agentPubkey,
+      amountSats,
+      purpose,
     });
 
     const signed = await this.ceps.signEventWithActiveSession(unsigned as any);
@@ -631,19 +592,25 @@ export class CreditLifecycleManager {
    * Settle an envelope after task completion (kind:39244).
    *
    * @param envelopeId - The envelope event ID to settle
-   * @param score - Task completion score (0–1)
-   * @param totalSpent - Total millisatoshis spent
+   * @param agentPubkey - The authorized agent's pubkey (content.agent_pubkey + p tag)
+   * @param governorPubkey - The envelope governor's pubkey (content.governor_pubkey)
+   * @param score - Task completion score 0–100
+   * @param totalSatsSpent - Total sats spent
    * @returns Published settlement event ID
    */
   async settleEnvelope(
     envelopeId: string,
+    agentPubkey: string,
+    governorPubkey: string,
     score: number,
-    totalSpent: bigint
+    totalSatsSpent: number
   ): Promise<string> {
     const unsigned = buildSettlementReceipt({
       envelopeEventId: envelopeId,
+      agentPubkey,
+      governorPubkey,
       taskCompletionScore: score,
-      totalSpentMsats: totalSpent,
+      totalSatsSpent,
       performanceBondRedeemed: false,
     });
 
