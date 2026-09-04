@@ -110,6 +110,34 @@ export interface Nip46PairingState {
 
   /** Relay URLs for this NIP-46 session. */
   relays: string[];
+
+  /**
+   * Hex-encoded 32-byte NIP-46 pairing secret. Present ONLY between
+   * `nostrconnect://` URI generation and echo-verified binding; cleared from
+   * the entry immediately after binding succeeds (never persisted afterwards).
+   *
+   * WP-2 additive extension (optional — backward-compatible with the existing
+   * store/get/delete implementation). See docs/bunker-nip46-spec.md §3.6.
+   */
+  pairingSecret?: string;
+
+  /**
+   * Permission strings granted to this pairing, e.g. 'sign_event:1',
+   * 'sign_event:7'. Bare 'sign_event' (without the per-kind ':N' suffix) is
+   * never accepted.
+   *
+   * WP-2 additive extension (optional). Stored inside the pairing entry —
+   * capabilities are per-pairing, so deleting the pairing deletes them.
+   */
+  declaredMethods?: string[];
+
+  /**
+   * Per-kind signing allowlist parsed from this pairing's sign_event:N
+   * declarations. No wildcards; bare 'sign_event' never widens this list.
+   *
+   * WP-2 additive extension (optional).
+   */
+  signEventKinds?: number[];
 }
 
 // ---------------------------------------------------------------------------

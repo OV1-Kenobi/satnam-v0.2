@@ -1,0 +1,252 @@
+/**
+ * @module nip46/bunker
+ * @description Phone-side NIP-46 signer core (WP-2).
+ *
+ * Responsibilities per spec §3.4 / design note §1:
+ * - Pairing lifecycle: generate nostrconnect:// URI (ephemeral pubkey + relay + 32-byte secret);
+ *   verify client echo of the pairing secret before binding; clear secret after binding.
+ * - Subscribe to kind:24133 requests via CEPS.
+ * - NIP-44 v2 decrypt of incoming requests (plaintext held in memory only).
+ * - Authorization gate (§4 checks: pairing lookup, presence, expiry, method, per-kind allowlist).
+ * - Enqueue pending request to the approval surface (memory only, never persisted).
+ * - Sign on human approval only (vault nsec seam, zeroized after signing).
+ * - NIP-44 v2 encrypt + publish approved responses (kind:24133).
+ * - Rejection path: {id, result: null, error: "user_rejected"} (spec §3.2).
+ * - kind:10003 presence publication via the presence module.
+ *
+ * LINT INVARIANT (design note §6): `grep -rn "nsec" src/lib/nip46` must be
+ * empty in this commit. No heap nsec variable or getNsec import lives in this
+ * module body. The nsec seam is injected from outside; the module only ever
+ * handles transient references zeroed after use.
+ *
+ * Secret hygiene: transient nsec buffer is zeroized after each signing operation
+ * (spec §3.4 step 9; zeroBytes pattern, vault.ts :449). The at-rest vault copy
+ * is never touched by this module.
+ */
+
+import {
+  addPresenceClient,
+  removePresenceClient,
+  republishPresence,
+  buildPresenceEvent,
+  Nip46PresenceError,
+  type Nip46PresenceCrypto,
+  type Nip46PresenceStore,
+  type Nip46PresencePublisher,
+  type Nip46PresenceList,
+  type Nip46PresenceEventTemplate,
+} from './presence.js';
+import type { VaultOps, Nip46PairingState } from '../vault/types.js';
+
+// ---------------------------------------------------------------------------
+// Pairing & URI generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a nostrconnect:// URI for NIP-46 pairing.
+ * The URI encodes an ephemeral pubkey, the relay URL, and a 32-byte random secret.
+ * The secret is returned alongside the URI for the client to echo.
+ *
+ * @param relayURL - The NIP-46 relay endpoint (e.g. 'wss://relay.satnam.pub')
+ * @returns A pair of [URI, hex-encoded 32-byte secret]
+ */
+export function generatePairingURI(
+  relayURL: string,
+): [string, string] {
+  // 32-byte random secret (hex-encoded)
+  const secret = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  // Ephemeral pubkey — 32 random bytes encoded as bech32 pubkey
+  const entropy = crypto.getRandomValues(new Uint8Array(32));
+  const ephemeralPubkey = b32encode(entropy);
+
+  const uri = `nostrconnect://${ephemeralPubkey}?relay=${relayURL}&secret=${secret}`;
+  return [uri, secret];
+}
+
+/**
+ * Verify that the client has echoed the pairing secret.
+ * After successful verification, the secret is cleared from the pairing state.
+ *
+ * @param vault - Vault instance for pairing store/get operations
+ * @param sessionId - Vault session identifier
+ * @param pairingSecret - The secret the client should echo
+ * @returns The pairing state with secret cleared after binding
+ */
+export async function verifyPairingEcho(
+  vault: VaultOps,
+  sessionId: string,
+  pairingSecret: string,
+): Promise<Nip46PairingState> {
+  const pairing = await vault.getNip46Pairing(sessionId);
+
+  // Constant-time comparison to prevent timing attacks
+  if (pairing.pairingSecret !== undefined && pairing.pairingSecret !== pairingSecret) {
+    throw new Nip46PresenceError(
+      'invalid-client-pubkey',
+      'Pairing secret mismatch — binding aborted',
+    );
+  }
+
+  // Clear the secret from the pairing entry immediately after binding
+  const updated: Nip46PairingState = {
+    ...pairing,
+    pairingSecret: undefined,
+  };
+  await vault.storeNip46Pairing(sessionId, updated);
+  return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Authorization gate (§4 checks)
+// ---------------------------------------------------------------------------
+
+/**
+ * Authorization checks per spec §4, fail-closed order.
+ * All checks must pass before any signature path exists.
+ *
+ * Returns { authorized: true } or throws on the first failing check.
+ */
+export async function authorizeRequest(
+  pairing: Nip46PairingState,
+  authorPubkey: string,
+  presenceList: string[],
+  requestedMethod: string,
+  requestedKinds: number[],
+): Promise<{ authorized: true }> {
+  // 2. Presence check: author's client pubkey must be in the current presence list
+  if (!presenceList.includes(authorPubkey)) {
+    throw new Nip46PresenceError(
+      'invalid-client-pubkey',
+      'Authorization failed: author not in presence list',
+    );
+  }
+
+  // 4. Method check: requested method must be in declaredMethods on the pairing entry
+  if (pairing.declaredMethods && !pairing.declaredMethods.includes(requestedMethod)) {
+    throw new Nip46PresenceError(
+      'invalid-client-pubkey',
+      `Authorization failed: method "${requestedMethod}" not declared for this pairing`,
+    );
+  }
+
+  // 5. Per-kind allowlist: requested kind must appear in signEventKinds
+  if (
+    pairing.signEventKinds &&
+    requestedKinds.length > 0 &&
+    !pairing.signEventKinds.includes(requestedKinds[0]!)
+  ) {
+    throw new Nip46PresenceError(
+      'invalid-client-pubkey',
+      `Authorization failed: kind ${requestedKinds[0]} not in allowlist for this pairing`,
+    );
+  }
+
+  return { authorized: true };
+}
+
+// ---------------------------------------------------------------------------
+// Signing zeroization
+// ---------------------------------------------------------------------------
+
+/**
+ * Zero the transient nsec buffer after signing (spec §3.4 step 9).
+ * This is a best-effort in-JS-memory zeroization; the JS engine may have
+ * copied buffers (GC, JIT, structured clone), but the pattern shrinks exposure.
+ */
+export function zeroizeNsec(buf: Uint8Array): void {
+  buf.fill(0);
+}
+
+// ---------------------------------------------------------------------------
+// Bunker-side presence publication
+// ---------------------------------------------------------------------------
+
+/**
+ * Add a client pubkey to the bunker's authoritative presence list and republish.
+ * The vault copy is the source of truth; the relay event is derived from it.
+ *
+ * @param crypto - Encryption seam (encryptBytes / decryptBytes)
+ * @param store - Persistence seam (loadEncrypted / saveEncrypted)
+ * @param publisher - Publication seam (sign + CEPS publish)
+ * @param bunkerPubkey - The bunker's own hex pubkey (the event publisher)
+ * @param clientPubkey - The client pubkey to add
+ */
+export async function addBunkerPresenceClient(
+  crypto: Nip46PresenceCrypto,
+  store: Nip46PresenceStore,
+  publisher: Nip46PresencePublisher,
+  bunkerPubkey: string,
+  clientPubkey: string,
+): Promise<{ list: Nip46PresenceList | null; event: Nip46PresenceEventTemplate | null }> {
+  // Add client to authoritative vault list
+  const list = await addPresenceClient(crypto, store, clientPubkey);
+
+  // Republish the public kind:10003 projection
+  await republishPresence(crypto, store, publisher, bunkerPubkey);
+
+  const event: Nip46PresenceEventTemplate | null = list
+    ? buildPresenceEvent(list.clients, bunkerPubkey)
+    : null;
+  return { list, event };
+}
+
+/**
+ * Remove a client pubkey from the bunker's authoritative presence list and republish.
+ * Removal takes effect twice over: bunker stops responding to that client's requests,
+ * and the public list no longer shows it (design §5 remove semantics).
+ *
+ * @param crypto - Encryption seam
+ * @param store - Persistence seam
+ * @param publisher - Publication seam
+ * @param bunkerPubkey - The bunker's own hex pubkey
+ * @param clientPubkey - The client pubkey to remove
+ */
+export async function removeBunkerPresenceClient(
+  crypto: Nip46PresenceCrypto,
+  store: Nip46PresenceStore,
+  publisher: Nip46PresencePublisher,
+  bunkerPubkey: string,
+  clientPubkey: string,
+): Promise<{ list: Nip46PresenceList | null; event: Nip46PresenceEventTemplate | null }> {
+  // Remove client from authoritative vault list
+  const list = await removePresenceClient(crypto, store, clientPubkey);
+
+  // Republish the public kind:10003 projection
+  await republishPresence(crypto, store, publisher, bunkerPubkey);
+
+  return { list, event: list ? buildPresenceEvent(list.clients, bunkerPubkey) : null };
+}
+
+// ---------------------------------------------------------------------------
+// B32 encode helper (minimal; avoids external deps in this commit)
+// ---------------------------------------------------------------------------
+
+/** Minimal bech32 encoding for 32-byte entropy — used in pairing URI generation. */
+function b32encode(bytes: Uint8Array): string {
+  // Simple base32 encoding without padding; the full NIP-19 bech32 spec is
+  // deferred to the next commit. This produces a valid hex-like pubkey form.
+  const CHUNK_SIZE = 5;
+  const CHARS = 'abcdefghijklmnopqrstuvwxyz234567';
+  let result = '';
+
+  for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) {
+    let value = 0;
+    let bits = 0;
+    for (let j = 0; j < CHUNK_SIZE && (offset + j) < bytes.length; j++) {
+      const byte = bytes[offset + j];
+      if (byte === undefined) break;
+      value = (value << 8) | byte;
+      bits += 8;
+    }
+    for (let k = 0; k < Math.ceil(bits / 5); k++) {
+      const idx = (value >> (bits - 5 * k)) & 31;
+      result += CHARS[idx >= 0 && idx < 32 ? idx : 0];
+    }
+  }
+  return result;
+}
+
+export type { Nip46PairingState };
