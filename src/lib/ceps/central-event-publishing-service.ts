@@ -3,7 +3,7 @@
 //   getSupabaseClient(), SecureSessionManager, secure-nsec-session-registry,
 //   user-signing-preferences, relay-privacy-layer (v1 import path),
 //   family_* → group_* naming throughout
-// Added: TODO for NIP-42 AUTH handler on Pylon relay connections
+// Added: NIP-42 AUTH handler (fix-plan 10) on relay connections
 // v2: Session state is purely in-memory. No DB writes. Nsec sourced from OPFS Vault.
 
 /**
@@ -16,13 +16,21 @@
  * - Zero key material in Supabase
  * - No JWT / SecureSessionManager
  * - No Sentry
- * - NIP-42 AUTH on relay connections (TODO below)
+ * - NIP-42 AUTH on relay connections (implemented — fix-plan 10)
  *
- * TODO NIP-42 AUTH:
- *   When pool.on("auth", ...) fires on Pylon (wss://pylon.openagents.com),
- *   sign a kind:22242 event using the active session nsec and send it back:
- *     const authEvent = finalizeEvent({ kind: 22242, created_at, tags: [["relay", relayUrl], ["challenge", challenge]], content: "" }, nsecBytes);
- *     pool.publish([relayUrl], authEvent);
+ * NIP-42 AUTH (fix-plan 10, 2026-09-05):
+ *   nostr-tools 2.23.3 does NOT expose the v1 pool.on("auth", ...) API. The
+ *   supported mechanism (verified in the installed package) is the pool
+ *   constructor option `automaticallyAuth` — attached per relay connection as
+ *   relay.onauth — plus per-call `onauth` on publish/subscribe/list for the
+ *   "auth-required: " reactive retry. The library builds the kind:22242
+ *   template itself (relay + challenge tags, content "") and transmits the
+ *   signed event over the relay WebSocket (no pool.publish involved). The
+ *   signer uses the ACTIVE SESSION KEY (activeNsecBytes) directly via
+ *   finalizeEvent — the F-11 consent gate is NOT involved (kind 22242 stays
+ *   non-whitelisted; the consent tests' 22242-rejection assertion is
+ *   unchanged). No session key -> no signer attached -> the relay's
+ *   "auth-required: ..." rejection propagates (fail-closed).
  */
 
 import {
@@ -32,7 +40,9 @@ import {
   SimplePool,
   verifyEvent,
   type Event,
+  type EventTemplate,
   type Filter,
+  type VerifiedEvent,
 } from "nostr-tools";
 
 // Encoding utilities (inline — avoids v1 path dependencies)
@@ -328,6 +338,48 @@ export const CONSENT_AUTO_APPROVED_KINDS: ReadonlySet<number> = new Set([
   10050,
 ]);
 
+/**
+ * NIP-42 AUTH signer factory (fix-plan 10).
+ *
+ * Returns the `automaticallyAuth` option for SimplePool (nostr-tools 2.23.3):
+ * SimplePool.ensureRelay calls it per relay connection; when it returns a
+ * signer, that signer is attached as relay.onauth and answers the relay's
+ * AUTH challenges. The library builds the kind:22242 template itself
+ * (tags [["relay", url], ["challenge", challenge]], content "") and
+ * transmits the signed event back over the relay WebSocket — the service
+ * only signs. Verified against the installed package (abstract-relay.js
+ * makeAuthEvent lines 89-97, auth() lines 309-332, AUTH handler lines
+ * 476-482; abstract-pool.js ensureRelay lines 616-621).
+ *
+ * Fail-closed: with no active session key the factory returns null (no
+ * signer attached; the relay's "auth-required: ..." rejection propagates).
+ * The signer re-reads the key at sign time so a destroyed session cannot
+ * mint an auth event; the throw is defense-in-depth for a destroySession
+ * race and is never the normal path (a throwing signer would otherwise
+ * leave the library's authPromise pending — verified behavior, see the
+ * catch at abstract-relay.js lines 327-329).
+ *
+ * The key-getter is INJECTED (DI) so the handler is unit-testable with real
+ * crypto and no relay and no module-boundary mocks (plan 08 Amendment 2.0
+ * F-3 posture: no vi.mock in this change-group).
+ */
+export function createCepsAuthHandler(
+  getActiveKeyBytes: () => Uint8Array | null,
+): (
+  relayURL: string
+) => null | ((authTemplate: EventTemplate) => Promise<VerifiedEvent>) {
+  return (_relayURL) => {
+    if (!getActiveKeyBytes()) return null;
+    return async (authTemplate) => {
+      const keyBytes = getActiveKeyBytes();
+      if (!keyBytes) {
+        throw new Error("[CEPS] NIP-42 AUTH: no active session key");
+      }
+      return finalizeEvent(authTemplate, keyBytes);
+    };
+  };
+}
+
 export class CentralEventPublishingService {
   private pool: SimplePool | null = null;
   private relays: string[];
@@ -351,7 +403,18 @@ export class CentralEventPublishingService {
 
   private getPool(): SimplePool {
     if (!this.pool) {
-      this.pool = new SimplePool();
+      this.pool = new SimplePool(
+        // NIP-42 AUTH (fix-plan 10): answer relay AUTH challenges with the
+        // active session key. The SimplePool constructor TYPE only exposes
+        // enablePing/enableReconnect, but the runtime constructor spreads all
+        // options into AbstractSimplePool (verified: nostr-tools 2.23.3
+        // pool.js `super({ ..., ...options })`) — hence the boundary cast.
+        {
+          automaticallyAuth: createCepsAuthHandler(
+            () => this.activeNsecBytes
+          ),
+        } as never,
+      );
     }
     return this.pool;
   }
@@ -471,6 +534,21 @@ export class CentralEventPublishingService {
 
   // ---- Event signing ----
 
+  /**
+   * Per-call `onauth` signer for publish/subscribe/list (the reactive
+   * "auth-required: " retry path in nostr-tools 2.23.3). Undefined when no
+   * session key exists — the operation then fails closed with the relay's
+   * auth-required rejection instead of hanging (a throwing signer would
+   * leave the pool's authPromise pending — verified behavior, abstract-relay
+   * .js lines 327-329).
+   */
+  private getAuthSigner():
+    | ((authTemplate: EventTemplate) => Promise<VerifiedEvent>)
+    | undefined {
+    if (!this.activeNsecBytes) return undefined;
+    return async (authTemplate) => finalizeEvent(authTemplate, this.activeNsecBytes!);
+  }
+
   async signEventWithActiveSession(
     unsignedEvent: Record<string, unknown>
   ): Promise<Event> {
@@ -541,7 +619,9 @@ export class CentralEventPublishingService {
   async publishEvent(event: Event, relays?: string[]): Promise<string> {
     const targetRelays = relays ?? this.relays;
     const pool = this.getPool();
-    await Promise.allSettled(pool.publish(targetRelays, event));
+    await Promise.allSettled(
+      pool.publish(targetRelays, event, { onauth: this.getAuthSigner() })
+    );
     return event.id;
   }
 
@@ -609,7 +689,10 @@ export class CentralEventPublishingService {
     filter: Filter,
     handlers: Parameters<SimplePool["subscribeMany"]>[2]
   ) {
-    return this.getPool().subscribeMany(relays, filter, handlers);
+    return this.getPool().subscribeMany(relays, filter, {
+      ...handlers,
+      onauth: handlers.onauth ?? this.getAuthSigner(),
+    });
   }
 
   async list(
@@ -617,7 +700,9 @@ export class CentralEventPublishingService {
     relays: string[],
     _options?: { eoseTimeout?: number }
   ): Promise<Event[]> {
-    return this.getPool().querySync(relays, filter);
+    return this.getPool().querySync(relays, filter, {
+      onauth: this.getAuthSigner(),
+    } as unknown as Parameters<SimplePool["querySync"]>[2]);
   }
 
   // ---- Messaging (NIP-04 / NIP-17) ----
