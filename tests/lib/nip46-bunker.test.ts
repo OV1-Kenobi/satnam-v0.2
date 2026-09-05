@@ -218,6 +218,24 @@ describe('authorizeRequest (SEC-002 regression + fail-closed order)', () => {
     );
   });
 
+  it('rejects a pairing whose expiresAt is a malformed date string — SEC-008 regression (fail-closed, no NaN pass-through)', async () => {
+    const pairing = makePairing({ expiresAt: 'not-a-date' });
+    await expectPresenceError(
+      () =>
+        authorizeRequest(pairing, CLIENT_A, [CLIENT_A], 'sign_event:1', [1]) as unknown as void,
+      'expired-pairing',
+    );
+  });
+
+  it('rejects a pairing with an empty-string expiresAt — SEC-008 regression (malformed is expired, not absent)', async () => {
+    const pairing = makePairing({ expiresAt: '' });
+    await expectPresenceError(
+      () =>
+        authorizeRequest(pairing, CLIENT_A, [CLIENT_A], 'sign_event:1', [1]) as unknown as void,
+      'expired-pairing',
+    );
+  });
+
   it('allows a pairing with no expiresAt (never expires)', async () => {
     const pairing = makePairing({ expiresAt: undefined });
     await expect(

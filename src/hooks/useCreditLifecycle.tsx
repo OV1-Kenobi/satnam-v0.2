@@ -125,7 +125,7 @@ export interface UseCreditLifecycleResult {
 export function useCreditLifecycle(
   agentPubkey: string | null,
   ceps: CepsClient | null,
-  vault: { loadAgentNsec(agentNpub: string): Promise<string> } | null,
+  vault: { loadAgentSigningKey(agentNpub: string): Promise<string> } | null,
   relayUrl?: string
 ): UseCreditLifecycleResult {
   const [activeEnvelopes, setActiveEnvelopes] = useState<CreditEnvelope[]>([]);

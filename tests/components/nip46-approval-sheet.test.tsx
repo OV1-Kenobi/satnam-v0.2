@@ -59,23 +59,25 @@ afterEach(() => {
 describe('ApprovalSheet', () => {
   let onApprove: ReturnType<typeof vi.fn>;
   let onReject: ReturnType<typeof vi.fn>;
+  let onDismiss: ReturnType<typeof vi.fn>;
   let onClose: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     onApprove = vi.fn();
     onReject = vi.fn();
+    onDismiss = vi.fn();
     onClose = vi.fn();
   });
 
   it('renders nothing when request is null', () => {
-    const { container } = render(<ApprovalSheet request={null} onApprove={onApprove} onReject={onReject} />);
+    const { container } = render(<ApprovalSheet request={null} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
     // When request is null, the component returns null — container has no children
     expect(container.firstChild).toBeNull();
   });
 
   it('displays requesting client npub (bech32 + truncated hex)', () => {
     const request = makeRequest({ clientPubkey: CLIENT_HEX });
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     expect(screen.getByText(/requesting client/i)).toBeInTheDocument();
     // The npub and hex are rendered as <p> elements with text content
@@ -87,7 +89,7 @@ describe('ApprovalSheet', () => {
 
   it('shows event kind and human summary (display-only)', () => {
     const request = makeRequest({ eventKind: 42, summary: SUMMARY });
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     expect(screen.getByText(/event kind/i)).toBeInTheDocument();
     expect(screen.getByText('42')).toBeInTheDocument();
@@ -97,7 +99,7 @@ describe('ApprovalSheet', () => {
 
   it('shows optional relay origin when available (spec §3.5)', () => {
     const request = makeRequest({ originRelay: ORIGIN_RELAY });
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     expect(screen.getByText(/origin relay/i)).toBeInTheDocument();
     expect(screen.getByText(ORIGIN_RELAY)).toBeInTheDocument();
@@ -105,14 +107,14 @@ describe('ApprovalSheet', () => {
 
   it('hides relay origin when not provided', () => {
     const request = makeRequest({ originRelay: undefined });
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     expect(screen.queryByText(/origin relay/i)).not.toBeInTheDocument();
   });
 
   it('renders explicit [Approve] [Reject] buttons always together', () => {
     const request = makeRequest();
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     const approveBtn = screen.getByRole('button', { name: /approve/i });
     const rejectBtn = screen.getByRole('button', { name: /reject/i });
@@ -124,7 +126,7 @@ describe('ApprovalSheet', () => {
 
   it('disables Approve button when vault is locked (gate)', () => {
     const request = makeRequest();
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} vaultUnlocked={false} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} vaultUnlocked={false} />);
 
     const approveBtn = screen.getByRole('button', { name: /approve/i });
     expect(approveBtn).toBeDisabled();
@@ -132,7 +134,7 @@ describe('ApprovalSheet', () => {
 
   it('enables Approve button when vault is unlocked', () => {
     const request = makeRequest();
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} vaultUnlocked={true} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} vaultUnlocked={true} />);
 
     const approveBtn = screen.getByRole('button', { name: /approve/i });
     expect(approveBtn).toBeEnabled();
@@ -140,7 +142,7 @@ describe('ApprovalSheet', () => {
 
   it('does not auto-approve (no auto-approve control rendered)', () => {
     const request = makeRequest();
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     // No toggle, checkbox, or auto-approve-like control
     expect(screen.queryAllByRole('switch')).toHaveLength(0);
@@ -155,21 +157,21 @@ describe('ApprovalSheet', () => {
 
   it('does not timeout-approve (no timeout-approve control)', () => {
     const request = makeRequest();
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     expect(screen.queryByText(/timeout/i)).not.toBeInTheDocument();
   });
 
   it('does not batch-approve (no batch-approve control)', () => {
     const request = makeRequest();
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     expect(screen.queryByText(/batch/i)).not.toBeInTheDocument();
   });
 
   it('does not have keyboard-only shortcut that fires without tap', () => {
     const request = makeRequest();
-    const { container } = render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    const { container } = render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     // Simulate pressing Enter on the document (should not trigger approve)
     fireEvent.keyDown(document, { key: 'Enter' });
@@ -182,7 +184,7 @@ describe('ApprovalSheet', () => {
 
   it('invokes onApprove with request id when Approve tapped', () => {
     const request = makeRequest({ id: 'req-abc' });
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     const approveBtn = screen.getByRole('button', { name: /approve/i });
     fireEvent.click(approveBtn);
@@ -193,7 +195,7 @@ describe('ApprovalSheet', () => {
 
   it('prevents double-tap on Approve (ignore subsequent taps)', () => {
     const request = makeRequest();
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     const approveBtn = screen.getByRole('button', { name: /approve/i });
     fireEvent.click(approveBtn);
@@ -204,7 +206,7 @@ describe('ApprovalSheet', () => {
 
   it('invokes onReject with request id when Reject tapped', () => {
     const request = makeRequest({ id: 'req-xyz' });
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     const rejectBtn = screen.getByRole('button', { name: /reject/i });
     fireEvent.click(rejectBtn);
@@ -215,7 +217,7 @@ describe('ApprovalSheet', () => {
 
   it('prevents double-tap on Reject (ignore subsequent taps)', () => {
     const request = makeRequest();
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} />);
 
     const rejectBtn = screen.getByRole('button', { name: /reject/i });
     fireEvent.click(rejectBtn);
@@ -226,7 +228,7 @@ describe('ApprovalSheet', () => {
 
   it('invokes onClose when dismissed via X button', () => {
     const request = makeRequest();
-    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onClose={onClose} />);
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} onClose={onClose} />);
 
     const closeBtn = screen.getByLabelText(/close/i);
     fireEvent.click(closeBtn);
@@ -234,13 +236,46 @@ describe('ApprovalSheet', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('invokes onClose when clicked outside the modal (backdrop)', () => {
+  it('invokes onDismiss with request id when dismissed via X button — SEC-005 (dismissal is a rejection)', () => {
+    const request = makeRequest({ id: 'req-dismiss' });
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} onClose={onClose} />);
+
+    const closeBtn = screen.getByLabelText(/close/i);
+    fireEvent.click(closeBtn);
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onDismiss).toHaveBeenCalledWith('req-dismiss');
+  });
+
+  it('fires onDismiss (rejection contract) before onClose (UI cleanup) on X dismissal — SEC-005', () => {
+    const request = makeRequest({ id: 'req-order' });
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} onClose={onClose} />);
+
+    fireEvent.click(screen.getByLabelText(/close/i));
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onDismiss.mock.invocationCallOrder[0]).toBeLessThan(onClose.mock.invocationCallOrder[0]);
+  });
+
+  it('does not emit onDismiss after a terminal tap (X after Approve) — SEC-005', () => {
+    const request = makeRequest();
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /approve/i }));
+    fireEvent.click(screen.getByLabelText(/close/i));
+
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('does not dismiss via backdrop click (X button is the only dismissal surface — SEC-005)', () => {
     const request = makeRequest();
     // The component does NOT support backdrop-click dismissal in this WP — onClose
     // is only invoked via the X button. The backdrop element exists but is inert.
     // This test pins that the X-button path is the only dismissal surface, ruling
     // out accidental backdrop-click dismissal.
-    const { container } = render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onClose={onClose} />);
+    const { container } = render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} onClose={onClose} />);
 
     const backdrop = container.querySelector('.fixed.inset-0');
     expect(backdrop).toBeInTheDocument();
@@ -248,6 +283,7 @@ describe('ApprovalSheet', () => {
       fireEvent.click(backdrop);
       // Backdrop click must NOT trigger onClose — only the X button does.
       expect(onClose).not.toHaveBeenCalled();
+      expect(onDismiss).not.toHaveBeenCalled();
     }
 
     // The X button IS the onClose path:
@@ -262,6 +298,7 @@ describe('ApprovalSheet', () => {
       request={request}
       onApprove={onApprove}
       onReject={onReject}
+      onDismiss={onDismiss}
       approveLabel="Yes, sign it"
       rejectLabel="No, reject"
     />);

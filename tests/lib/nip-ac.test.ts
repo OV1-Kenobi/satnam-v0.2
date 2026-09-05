@@ -55,8 +55,10 @@ vi.mock('nostr-tools', async (importOriginal) => {
       querySync: vi.fn(async () => []),
     })),
     nip19: {
-      decode: vi.fn((nsec: string) => {
-        if (nsec.startsWith('nsec1')) {
+      decode: vi.fn((input: string) => {
+        // Protocol-faithful constants: real nostr-tools nip19.decode returns
+        // { type: 'nsec' } for nsec1 bech32 — kept for mock fidelity (SEC-009).
+        if (input.startsWith('nsec1')) {
           return { type: 'nsec', data: new Uint8Array(32).fill(2) };
         }
         throw new Error('Invalid bech32');
@@ -104,7 +106,7 @@ function makeMockCeps(listEvents: any[] = []) {
 // ---------------------------------------------------------------------------
 
 const mockVault = {
-  loadAgentNsec: vi.fn(async (_npub: string) => '0'.repeat(64)),
+  loadAgentSigningKey: vi.fn(async (_npub: string) => '0'.repeat(64)),
 };
 
 // ---------------------------------------------------------------------------

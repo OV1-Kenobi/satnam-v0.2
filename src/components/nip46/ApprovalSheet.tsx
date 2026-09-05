@@ -15,6 +15,11 @@
  * - No batch approval
  * - No keyboard-only shortcut that fires without the tap
  *
+ * DISMISSAL CONTRACT (SEC-005): the X button dismisses the sheet; dismissal is
+ * a REJECTION. The parent MUST send {id, result: null, error: "user_rejected"}
+ * via the required onDismiss prop — a dismissed request must never hang. The
+ * backdrop is inert; outside clicks do not dismiss.
+ *
  * This is a deliberate contrast with the existing in-repo approval precedent
  * `src/components/probe/ToolCallApproval.tsx`, whose docstring lists an
  * "Auto-approve toggle for trusted tools" — that pattern is NOT copied here.
@@ -58,7 +63,19 @@ export interface ApprovalSheetProps {
    * {id, result: null, error: "user_rejected"} (spec §3.2).
    */
   onReject: (requestId: string) => void;
-  /** Called when the sheet is dismissed (X button or outside click). */
+  /**
+   * Called when the sheet is dismissed via the X button WITHOUT an explicit
+   * Approve/Reject tap. Dismissal is a REJECTION (design note §3, spec §3.2):
+   * the caller MUST send {id, result: null, error: "user_rejected"} for this
+   * request id — a dismissed request must never hang. Required so the parent
+   * cannot forget the rejection contract (SEC-005).
+   */
+  onDismiss: (requestId: string) => void;
+  /**
+   * Called after onDismiss on X-button dismissal (UI cleanup only — the
+   * rejection contract is onDismiss). The backdrop is intentionally inert:
+   * outside clicks do NOT dismiss the sheet (pinned by test).
+   */
   onClose?: () => void;
   /** Whether the vault is currently unlocked (gate for Approve tap). */
   vaultUnlocked?: boolean;
@@ -92,13 +109,16 @@ function hexToNpub(hex: string): string {
  * ApprovalSheet — the per-request human approval surface for NIP-46 remote signing.
  *
  * Renders only when a request is present. The sheet is modal: it blocks
- * interaction with the rest of the app until the user taps Approve or Reject.
- * There is no auto-approve, no timeout-approve, no batch approval.
+ * interaction with the rest of the app until the user taps Approve, taps
+ * Reject, or dismisses via the X button. Dismissal is a rejection (SEC-005):
+ * the parent MUST send {id, result: null, error: "user_rejected"} through
+ * onDismiss. There is no auto-approve, no timeout-approve, no batch approval.
  */
 export function ApprovalSheet({
   request,
   onApprove,
   onReject,
+  onDismiss,
   onClose,
   vaultUnlocked = true,
   approveLabel = 'Approve',
@@ -130,6 +150,12 @@ export function ApprovalSheet({
   };
 
   const handleDismiss = (): void => {
+    // After a terminal tap (Approve/Reject), dismissal must not emit a second
+    // response for the same request id (one terminal decision per request).
+    if (tappedApprove || tappedReject) return;
+    // Dismissal is a rejection (SEC-005): fire the rejection contract first,
+    // then the UI cleanup callback. A dismissed request must never hang.
+    onDismiss(request.id);
     onClose?.();
   };
 

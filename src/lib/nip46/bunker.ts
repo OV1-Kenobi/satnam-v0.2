@@ -163,11 +163,19 @@ export async function authorizeRequest(
   // 3. Expiry check (design §4 check 4 between presence and method): an expired
   // pairing must NEVER fall through to a user-facing approval prompt. Expired
   // grants are revoked here, before any method or per-kind allowlist is evaluated.
-  if (pairing.expiresAt && Date.now() > new Date(pairing.expiresAt).getTime()) {
-    throw new Nip46PresenceError(
-      'expired-pairing',
-      'Authorization failed: pairing has expired',
-    );
+  // 3. Expiry check (design §4 check 4 between presence and method): an expired
+  // pairing must NEVER fall through to a user-facing approval prompt. Fail-closed
+  // on malformed dates (SEC-008): an unparseable expiresAt is treated as expired
+  // (Date.now() > NaN is always false — a malformed date must not fail open).
+  // Absent expiresAt (undefined) still means "never expires" (pinned by test).
+  if (pairing.expiresAt !== undefined) {
+    const expiresAtMs = new Date(pairing.expiresAt).getTime();
+    if (Number.isNaN(expiresAtMs) || Date.now() > expiresAtMs) {
+      throw new Nip46PresenceError(
+        'expired-pairing',
+        'Authorization failed: pairing has expired',
+      );
+    }
   }
 
   // 4. Method check: requested method must be in declaredMethods on the pairing entry

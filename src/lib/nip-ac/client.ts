@@ -121,7 +121,9 @@ export type CreditLifecycleCallback = (event: {
 
 /**
  * Typed error for NIP-AC client validation failures.
- * Messages name fields; values are never echoed (fail-closed).
+ * Messages name fields. Binding errors echo the mismatched tag and content
+ * values (public pubkeys and event IDs only — never secret material) so a
+ * tag/content desync can be diagnosed; format errors name the field only.
  */
 export class NipAcClientError extends Error {
   readonly code: 'invalid-pubkey';
@@ -556,8 +558,10 @@ export function buildDefaultNotice(params: {
  *
  * Provides a high-level API for creating intents, accepting offers, authorizing
  * spends, settling envelopes, and issuing default notices. All events are
- * published via CEPS. The agent's nsec is retrieved from the OPFS Vault on
- * each call and zeroed from memory after use.
+ * published via CEPS and signed by the CEPS active session
+ * (signEventWithActiveSession). This module performs NO vault retrieval and
+ * handles NO key material; the optional `_vault` constructor seam is reserved
+ * and currently unused (SEC-009).
  *
  * @example
  * ```ts
@@ -575,7 +579,7 @@ export class CreditLifecycleManager {
 
   constructor(
     ceps: CepsClient,
-    _vault?: { loadAgentNsec(agentNpub: string): Promise<string> }
+    _vault?: { loadAgentSigningKey(agentNpub: string): Promise<string> }
   ) {
     this.ceps = ceps;
   }
@@ -583,9 +587,8 @@ export class CreditLifecycleManager {
   /**
    * Create and publish a credit intent (kind:39240).
    *
-   * The active session's pubkey is used as the intent author. The nsec is
-   * loaded from vault only if needed for signing; for intents the CEPS active
-   * session handles signing.
+   * The active session's pubkey is used as the intent author. The CEPS active
+   * session signs the event; this module loads no key material.
    *
    * @param params - Intent parameters
    * @returns Published intent event ID
