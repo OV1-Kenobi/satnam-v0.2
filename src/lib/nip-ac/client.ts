@@ -116,8 +116,43 @@ export type CreditLifecycleCallback = (event: {
 }) => void;
 
 // ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/**
+ * Typed error for NIP-AC client validation failures.
+ * Messages name fields; values are never echoed (fail-closed).
+ */
+export class NipAcClientError extends Error {
+  readonly code: 'invalid-pubkey';
+  constructor(message: string) {
+    super(message);
+    this.name = 'NipAcClientError';
+    this.code = 'invalid-pubkey';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Fail-closed format gate: exactly 64 lowercase hex chars. Reject-only. */
+function assertHexPubkey(value: string, field: string): void {
+  if (!/^[0-9a-f]{64}$/.test(value)) {
+    throw new NipAcClientError(
+      `${field} must be a 64-character lowercase hex pubkey`,
+    );
+  }
+}
+
+/** Fail-closed binding gate: assert tag value matches content field. */
+function assertBinding(tagValue: string | undefined, contentValue: string, binding: string): void {
+  if (tagValue !== contentValue) {
+    throw new NipAcClientError(
+      `${binding}: tag value "${tagValue}" does not match content field "${contentValue}"`,
+    );
+  }
+}
 
 /**
  * Generate a short random hex string for use as a d-tag identifier.
@@ -276,6 +311,10 @@ export function buildCreditEnvelope(params: {
     expiryTimestamp,
   } = params;
 
+  // Rider R1 §1 — seam-level format gate
+  assertHexPubkey(providerPubkey, 'providerPubkey');
+  assertHexPubkey(governorPubkey, 'governorPubkey');
+
   const tags: string[][] = [
     ['d', generateDTag('envelope')],
     ['e', offerEventId],
@@ -293,6 +332,12 @@ export function buildCreditEnvelope(params: {
     scope_constraints_hash: scopeConstraintsHash,
     expires_at: expiryTimestamp,
   };
+
+  // Rider R1 §3 — binding assertions: prevent silent tag/content desync
+  const pTag = tags.find((t) => t[0] === 'p');
+  const eTag = tags.find((t) => t[0] === 'e');
+  assertBinding(pTag![1], content.agent_pubkey, 'buildCreditEnvelope: p tag');
+  assertBinding(eTag![1], content.offer_id, 'buildCreditEnvelope: e tag');
 
   return {
     kind: 39242,
@@ -334,6 +379,9 @@ export function buildSpendAuth(params: {
 }): UnsignedEvent {
   const { envelopeEventId, agentPubkey, amountSats, purpose, rail, recipient } = params;
 
+  // Rider R1 §1 — seam-level format gate
+  assertHexPubkey(agentPubkey, 'agentPubkey');
+
   const tags: string[][] = [
     ['e', envelopeEventId],
     ['p', agentPubkey],
@@ -348,6 +396,14 @@ export function buildSpendAuth(params: {
     rail: rail ?? 'lightning',
     ...(recipient ? { recipient } : {}),
   });
+
+  // Rider R1 §3 — binding assertions: prevent silent tag/content desync
+  const pTag = tags.find((t) => t[0] === 'p');
+  const eTag = tags.find((t) => t[0] === 'e');
+  const parsedContent = JSON.parse(content);
+  assertBinding(pTag![1], parsedContent.agent_pubkey, 'buildSpendAuth: p tag');
+  assertBinding(eTag![1], parsedContent.envelope_id, 'buildSpendAuth: e tag');
+  assertBinding(tags.find((t) => t[0] === 'amount')![1], String(parsedContent.amount_sats), 'buildSpendAuth: amount tag');
 
   return {
     kind: 39243,
@@ -403,6 +459,10 @@ export function buildSettlementReceipt(params: {
     completionProof,
   } = params;
 
+  // Rider R1 §1 — seam-level format gate
+  assertHexPubkey(agentPubkey, 'agentPubkey');
+  assertHexPubkey(governorPubkey, 'governorPubkey');
+
   // Normalize score to 0–100 at this single seam (spec uses 0–100 in SettlementReceiptContent)
   const score = Math.round(Math.min(100, Math.max(0, taskCompletionScore)));
 
@@ -426,6 +486,13 @@ export function buildSettlementReceipt(params: {
     ...(cashuRedemptionProof ? { sig4sats_proof: cashuRedemptionProof } : {}),
     ...(completionProof ? { completion_proof: completionProof } : {}),
   });
+
+  // Rider R1 §3 — binding assertions: prevent silent tag/content desync
+  const pTag = tags.find((t) => t[0] === 'p');
+  const eTag = tags.find((t) => t[0] === 'e');
+  const parsedContent = JSON.parse(content);
+  assertBinding(pTag![1], parsedContent.agent_pubkey, 'buildSettlementReceipt: p tag');
+  assertBinding(eTag![1], parsedContent.envelope_id, 'buildSettlementReceipt: e tag');
 
   return {
     kind: 39244,

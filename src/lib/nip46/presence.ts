@@ -64,10 +64,10 @@ export const DEFAULT_PRESENCE_TIMEOUT_MS = 30_000;
 
 /** Typed error for presence-layer failures. Messages name fields, never echo values. */
 export class Nip46PresenceError extends Error {
-  readonly code: 'invalid-client-pubkey' | 'malformed-presence-entry';
+  readonly code: 'invalid-client-pubkey' | 'malformed-presence-entry' | 'expired-pairing';
 
   constructor(
-    code: 'invalid-client-pubkey' | 'malformed-presence-entry',
+    code: 'invalid-client-pubkey' | 'malformed-presence-entry' | 'expired-pairing',
     message: string,
   ) {
     super(message);

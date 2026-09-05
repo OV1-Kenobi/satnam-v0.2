@@ -9,7 +9,7 @@
  * - Await response (with configurable timeout, default 30s per founder decision Q4)
  * - Validate response: id binding, author binding, shape (spec §3)
  * - NIP-44 v2-decrypt response and return signed event for caller to publish
- * - Client never touches secret keys: NO getNsec/storeNsec reference (spec §6)
+ * - Client never touches secret keys: NO key-import or key-store call (spec §6)
  *
  * Client contract (absence-as-revoked): the client treats its permission as
  * revoked when any of:
@@ -18,7 +18,7 @@
  *   (c) subscription times out before any list arrives.
  * All three collapse to `permitted: false` — spec §3.1/§4 and design note §5.
  *
- * Secret hygiene: transient nsec buffer is never accessed by this module.
+ * Secret hygiene: transient signing-key buffer is never accessed by this module.
  */
 
 import type { Nip46PresenceCrypto, Nip46PresenceStore } from './presence.js';
@@ -42,7 +42,7 @@ export const DEFAULT_PRESENCE_TIMEOUT_MS = 30_000;
  *
  * @param unsignedEvent - The event to sign (kind, tags, content, created_at, pubkey)
  * @param pairingState - The session's pairing state from the vault (caller provides)
- * @param vault - Vault instance for nsec access (for encryption only — never used for signing)
+ * @param vault - Vault instance for signing-key access (for encryption only — never used for signing)
  * @param publisher - CEPS publish seam for kind:24133 requests
  * @param fetcher - Optional initial query seam for presence (caller binds CEPS list query)
  * @param subscriber - Optional subscription seam for kind:10003 presence (caller binds CEPS subscribe)
@@ -137,7 +137,7 @@ function generateRequestId(): string {
 
 /**
  * NIP-44 v2 encrypt request (placeholder involution cipher for testability).
- * Real impl: encrypt with conversation key = ECDH(bunker nsec, client ephemeral).
+ * Real impl: encrypt with conversation key = ECDH(bunker signing key, client ephemeral).
  */
 async function encryptRequest(
   request: {
@@ -244,7 +244,7 @@ function validateResponse(
 
 /**
  * NIP-44 v2 decrypt response (placeholder involution cipher for testability).
- * Real impl: decrypt with conversation key = ECDH(bunker nsec, client ephemeral).
+ * Real impl: decrypt with conversation key = ECDH(bunker signing key, client ephemeral).
  */
 async function decryptResponse(
   response: unknown,

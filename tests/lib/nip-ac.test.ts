@@ -38,6 +38,7 @@ import {
   buildDefaultNotice,
   calculateReputationDelta,
   CreditLifecycleManager,
+  NipAcClientError,
 } from '../../src/lib/nip-ac/client.js';
 import type { NostrEvent } from '../../src/lib/nip-ac/types.js';
 
@@ -113,7 +114,7 @@ const mockVault = {
 function makeOfferEvent(overrides: Partial<NostrEvent> = {}): NostrEvent {
   return {
     id: 'offer-event-id',
-    pubkey: 'provider-pubkey',
+    pubkey: 'a'.repeat(64),
     created_at: Math.floor(Date.now() / 1000),
     kind: 39241,
     tags: [
@@ -122,7 +123,7 @@ function makeOfferEvent(overrides: Partial<NostrEvent> = {}): NostrEvent {
     ],
     content: JSON.stringify({
       intent_id: 'intent-event-id',
-      provider_pubkey: 'provider-pubkey',
+      provider_pubkey: 'a'.repeat(64),
       price_sats: 1000,
       delivery_seconds: 3600,
       capabilities: ['research', 'summarization'],
@@ -216,7 +217,7 @@ describe('parseCreditOffer', () => {
     const offer = parseCreditOffer(makeOfferEvent());
 
     expect(offer.eventId).toBe('offer-event-id');
-    expect(offer.providerPubkey).toBe('provider-pubkey');
+    expect(offer.providerPubkey).toBe('a'.repeat(64));
     expect(offer.intentEventId).toBe('intent-event-id');
     expect(offer.priceSats).toBe(1000);
     expect(offer.deliverySeconds).toBe(3600);
@@ -253,7 +254,7 @@ describe('buildCreditEnvelope', () => {
     const expiry = Math.floor(Date.now() / 1000) + 7200;
     const event = buildCreditEnvelope({
       offerEventId: 'offer-id',
-      providerPubkey: 'provider-pk',
+      providerPubkey: 'a'.repeat(64),
       governorPubkey: 'b'.repeat(64),
       maxSats: 1000,
       scopeConstraintsHash: 'scope-hash-abc123',
@@ -267,7 +268,7 @@ describe('buildCreditEnvelope', () => {
     expect(eTags[0][1]).toBe('offer-id');
 
     const pTag = event.tags.find((t) => t[0] === 'p');
-    expect(pTag?.[1]).toBe('provider-pk');
+    expect(pTag?.[1]).toBe('a'.repeat(64));
 
     const maxSatsTag = event.tags.find((t) => t[0] === 'max_sats');
     expect(maxSatsTag?.[1]).toBe('1000');
@@ -282,7 +283,7 @@ describe('buildCreditEnvelope', () => {
   it('8. never emits performance_bond tag (bond facts live in settlement content)', () => {
     const event = buildCreditEnvelope({
       offerEventId: 'offer-id',
-      providerPubkey: 'provider-pk',
+      providerPubkey: 'a'.repeat(64),
       governorPubkey: 'b'.repeat(64),
       maxSats: 1000,
       scopeConstraintsHash: 'scope-hash',
@@ -800,5 +801,199 @@ describe('NIP-AC schema conformance (builders ↔ types.ts)', () => {
       expect(serialized).not.toContain('msats');
       expect(serialized).not.toContain('_msats');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rider R1: 64-hex lowercase format validation at builder seams
+// ---------------------------------------------------------------------------
+
+describe('Rider R1: 64-hex lowercase format validation at builder seams', () => {
+  const VALID_PK = 'a'.repeat(64);
+  const INVALID_UPPERCASE = 'A'.repeat(64);
+  const INVALID_63 = 'a'.repeat(63);
+  const INVALID_65 = 'a'.repeat(65);
+  const INVALID_NONHEX = 'a'.repeat(31) + 'G'.repeat(33);
+  const EMPTY = '';
+
+  it('R1a. buildCreditEnvelope: valid 64-char lowercase hex accepted', () => {
+    expect(() => buildCreditEnvelope({
+      offerEventId: 'offer-id',
+      providerPubkey: VALID_PK,
+      governorPubkey: 'b'.repeat(64),
+      maxSats: 1000,
+      scopeConstraintsHash: 'scope-hash',
+      expiryTimestamp: 9999999,
+    })).not.toThrow();
+  });
+
+  it('R1b. buildCreditEnvelope: uppercase pubkey rejected', () => {
+    expect(() => buildCreditEnvelope({
+      offerEventId: 'offer-id',
+      providerPubkey: INVALID_UPPERCASE,
+      governorPubkey: 'b'.repeat(64),
+      maxSats: 1000,
+      scopeConstraintsHash: 'scope-hash',
+      expiryTimestamp: 9999999,
+    })).toThrow(NipAcClientError);
+  });
+
+  it('R1c. buildCreditEnvelope: 63-char pubkey rejected', () => {
+    expect(() => buildCreditEnvelope({
+      offerEventId: 'offer-id',
+      providerPubkey: INVALID_63,
+      governorPubkey: 'b'.repeat(64),
+      maxSats: 1000,
+      scopeConstraintsHash: 'scope-hash',
+      expiryTimestamp: 9999999,
+    })).toThrow(NipAcClientError);
+  });
+
+  it('R1d. buildCreditEnvelope: 65-char pubkey rejected', () => {
+    expect(() => buildCreditEnvelope({
+      offerEventId: 'offer-id',
+      providerPubkey: INVALID_65,
+      governorPubkey: 'b'.repeat(64),
+      maxSats: 1000,
+      scopeConstraintsHash: 'scope-hash',
+      expiryTimestamp: 9999999,
+    })).toThrow(NipAcClientError);
+  });
+
+  it('R1e. buildCreditEnvelope: non-hex chars rejected', () => {
+    expect(() => buildCreditEnvelope({
+      offerEventId: 'offer-id',
+      providerPubkey: INVALID_NONHEX,
+      governorPubkey: 'b'.repeat(64),
+      maxSats: 1000,
+      scopeConstraintsHash: 'scope-hash',
+      expiryTimestamp: 9999999,
+    })).toThrow(NipAcClientError);
+  });
+
+  it('R1f. buildCreditEnvelope: empty pubkey rejected', () => {
+    expect(() => buildCreditEnvelope({
+      offerEventId: 'offer-id',
+      providerPubkey: EMPTY,
+      governorPubkey: 'b'.repeat(64),
+      maxSats: 1000,
+      scopeConstraintsHash: 'scope-hash',
+      expiryTimestamp: 9999999,
+    })).toThrow(NipAcClientError);
+  });
+
+  it('R1g. buildSpendAuth: valid 64-char lowercase hex accepted', () => {
+    expect(() => buildSpendAuth({
+      envelopeEventId: 'env-id',
+      agentPubkey: VALID_PK,
+      amountSats: 100,
+      purpose: 'test',
+    })).not.toThrow();
+  });
+
+  it('R1h. buildSpendAuth: uppercase pubkey rejected', () => {
+    expect(() => buildSpendAuth({
+      envelopeEventId: 'env-id',
+      agentPubkey: INVALID_UPPERCASE,
+      amountSats: 100,
+      purpose: 'test',
+    })).toThrow(NipAcClientError);
+  });
+
+  it('R1i. buildSettlementReceipt: valid 64-char lowercase hex accepted', () => {
+    expect(() => buildSettlementReceipt({
+      envelopeEventId: 'env-id',
+      agentPubkey: VALID_PK,
+      governorPubkey: 'b'.repeat(64),
+      taskCompletionScore: 85,
+      totalSatsSpent: 900,
+      performanceBondRedeemed: false,
+    })).not.toThrow();
+  });
+
+  it('R1j. buildSettlementReceipt: uppercase governor pubkey rejected', () => {
+    expect(() => buildSettlementReceipt({
+      envelopeEventId: 'env-id',
+      agentPubkey: VALID_PK,
+      governorPubkey: INVALID_UPPERCASE,
+      taskCompletionScore: 85,
+      totalSatsSpent: 900,
+      performanceBondRedeemed: false,
+    })).toThrow(NipAcClientError);
+  });
+
+  it('R1k. binding: p tag === content.agent_pubkey across all three builders', () => {
+    const envelope = buildCreditEnvelope({
+      offerEventId: 'offer-id',
+      providerPubkey: VALID_PK,
+      governorPubkey: 'b'.repeat(64),
+      maxSats: 1000,
+      scopeConstraintsHash: 'scope-hash',
+      expiryTimestamp: 9999999,
+    });
+    const pTag = envelope.tags.find((t) => t[0] === 'p')![1];
+    const contentAgent = JSON.parse(envelope.content).agent_pubkey;
+    expect(pTag).toBe(contentAgent);
+
+    const spendAuth = buildSpendAuth({
+      envelopeEventId: 'env-id',
+      agentPubkey: VALID_PK,
+      amountSats: 100,
+      purpose: 'test',
+    });
+    const spendPTag = spendAuth.tags.find((t) => t[0] === 'p')![1];
+    const spendContentAgent = JSON.parse(spendAuth.content).agent_pubkey;
+    expect(spendPTag).toBe(spendContentAgent);
+
+    const settlement = buildSettlementReceipt({
+      envelopeEventId: 'env-id',
+      agentPubkey: VALID_PK,
+      governorPubkey: 'b'.repeat(64),
+      taskCompletionScore: 85,
+      totalSatsSpent: 900,
+      performanceBondRedeemed: false,
+    });
+    const settlePTag = settlement.tags.find((t) => t[0] === 'p')![1];
+    const settleContentAgent = JSON.parse(settlement.content).agent_pubkey;
+    expect(settlePTag).toBe(settleContentAgent);
+  });
+
+  it('R1l. binding: e tag === content field across builders', () => {
+    // CreditEnvelope: e tag === content.offer_id
+    const envelope = buildCreditEnvelope({
+      offerEventId: 'offer-id',
+      providerPubkey: VALID_PK,
+      governorPubkey: 'b'.repeat(64),
+      maxSats: 1000,
+      scopeConstraintsHash: 'scope-hash',
+      expiryTimestamp: 9999999,
+    });
+    const eTag = envelope.tags.find((t) => t[0] === 'e')![1];
+    const contentOffer = JSON.parse(envelope.content).offer_id;
+    expect(eTag).toBe(contentOffer);
+
+    // SpendAuth: e tag === content.envelope_id
+    const spendAuth = buildSpendAuth({
+      envelopeEventId: 'env-id',
+      agentPubkey: VALID_PK,
+      amountSats: 100,
+      purpose: 'test',
+    });
+    const spendEtag = spendAuth.tags.find((t) => t[0] === 'e')![1];
+    const spendContentEnvId = JSON.parse(spendAuth.content).envelope_id;
+    expect(spendEtag).toBe(spendContentEnvId);
+
+    // SettlementReceipt: e tag === content.envelope_id
+    const settlement = buildSettlementReceipt({
+      envelopeEventId: 'env-id',
+      agentPubkey: VALID_PK,
+      governorPubkey: 'b'.repeat(64),
+      taskCompletionScore: 85,
+      totalSatsSpent: 900,
+      performanceBondRedeemed: false,
+    });
+    const settleEtag = settlement.tags.find((t) => t[0] === 'e')![1];
+    const settleContentEnvId = JSON.parse(settlement.content).envelope_id;
+    expect(settleEtag).toBe(settleContentEnvId);
   });
 });
