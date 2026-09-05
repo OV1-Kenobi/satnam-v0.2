@@ -11,6 +11,7 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run tests/lib/nip46-ceps-bindings.integration.test.ts",
     "lint": "tsc --noEmit",
     "check:invariants": "node scripts/check-invariants.mjs",
     "check:deps": "node scripts/check-deps.mjs"

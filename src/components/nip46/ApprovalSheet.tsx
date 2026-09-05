@@ -19,6 +19,9 @@
  * a REJECTION. The parent MUST send {id, result: null, error: "user_rejected"}
  * via the required onDismiss prop — a dismissed request must never hang. The
  * backdrop is inert; outside clicks do not dismiss.
+ * SEC-010: exactly one terminal decision (Approve / Reject / Dismiss) may fire
+ * per request id; the first terminal action latches and suppresses all later
+ * callbacks.
  *
  * This is a deliberate contrast with the existing in-repo approval precedent
  * `src/components/probe/ToolCallApproval.tsx`, whose docstring lists an
@@ -124,13 +127,15 @@ export function ApprovalSheet({
   approveLabel = 'Approve',
   rejectLabel = 'Reject',
 }: ApprovalSheetProps): React.JSX.Element | null {
-  const [tappedApprove, setTappedApprove] = useState(false);
-  const [tappedReject, setTappedReject] = useState(false);
+  // One terminal decision per request (SEC-010): the FIRST of Approve /
+  // Reject / Dismiss latches this flag and suppresses every later callback
+  // for the same request id — including cross-button taps and repeated
+  // dismissals. Reset when a new request arrives.
+  const [terminalAction, setTerminalAction] = useState<'approve' | 'reject' | 'dismiss' | null>(null);
 
-  // Reset tap state when a new request arrives
+  // Reset terminal state when a new request arrives
   useEffect(() => {
-    setTappedApprove(false);
-    setTappedReject(false);
+    setTerminalAction(null);
   }, [request?.id]);
 
   if (request === null) {
@@ -138,23 +143,25 @@ export function ApprovalSheet({
   }
 
   const handleApprove = (): void => {
-    if (tappedApprove) return; // prevent double-tap
-    setTappedApprove(true);
+    if (terminalAction !== null) return; // one terminal decision per request (SEC-010)
+    setTerminalAction('approve');
     onApprove(request.id);
   };
 
   const handleReject = (): void => {
-    if (tappedReject) return; // prevent double-tap
-    setTappedReject(true);
+    if (terminalAction !== null) return; // one terminal decision per request (SEC-010)
+    setTerminalAction('reject');
     onReject(request.id);
   };
 
   const handleDismiss = (): void => {
-    // After a terminal tap (Approve/Reject), dismissal must not emit a second
-    // response for the same request id (one terminal decision per request).
-    if (tappedApprove || tappedReject) return;
-    // Dismissal is a rejection (SEC-005): fire the rejection contract first,
-    // then the UI cleanup callback. A dismissed request must never hang.
+    // Dismissal is a terminal action too (SEC-010): latch it BEFORE firing,
+    // so a later tap or a second X cannot emit a second response for the
+    // same request id. Dismissal is a rejection (SEC-005): fire the rejection
+    // contract first, then the UI cleanup callback. A dismissed request must
+    // never hang.
+    if (terminalAction !== null) return;
+    setTerminalAction('dismiss');
     onDismiss(request.id);
     onClose?.();
   };
@@ -244,7 +251,7 @@ export function ApprovalSheet({
           <button
             type="button"
             onClick={handleReject}
-            disabled={tappedReject}
+            disabled={terminalAction !== null}
             className="flex-1 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {rejectLabel}
@@ -252,7 +259,7 @@ export function ApprovalSheet({
           <button
             type="button"
             onClick={handleApprove}
-            disabled={tappedApprove || !vaultUnlocked}
+            disabled={terminalAction !== null || !vaultUnlocked}
             className="flex-1 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {approveLabel}

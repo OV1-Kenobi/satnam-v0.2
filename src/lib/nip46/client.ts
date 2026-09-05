@@ -21,9 +21,9 @@
  * Secret hygiene: transient signing-key buffer is never accessed by this module.
  */
 
-import type { Nip46PresenceCrypto, Nip46PresenceStore } from './presence.js';
 import type { VaultOps, Nip46PairingState } from '../vault/types.js';
 import type { UnsignedEvent } from '../nip-ac/client.js';
+import { nip44 } from 'nostr-tools';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -42,12 +42,10 @@ export const DEFAULT_PRESENCE_TIMEOUT_MS = 30_000;
  *
  * @param unsignedEvent - The event to sign (kind, tags, content, created_at, pubkey)
  * @param pairingState - The session's pairing state from the vault (caller provides)
- * @param vault - Vault instance for signing-key access (for encryption only — never used for signing)
+ * @param vault - Retained for the future pairing-lookup/parent-integration flow; NOT used by this module's crypto (the conversation key comes from `pairingState`)
  * @param publisher - CEPS publish seam for kind:24133 requests
  * @param fetcher - Optional initial query seam for presence (caller binds CEPS list query)
- * @param subscriber - Optional subscription seam for kind:10003 presence (caller binds CEPS subscribe)
- * @param crypto - Encryption/decryption seam (NIP-44 v2 via encryptBytes/decryptBytes)
- * @param store - Persistence seam for presence.json (caller binds vault encrypted-entry)
+ * @param subscriber - Optional subscription seam for kind:10003 presence (caller binds CEPS subscribe); the real CEPS binding is async — see Item 3
  * @param bunkerPubkey - The bunker's hex pubkey (expected author of response)
  * @param timeoutMs - Optional presence timeout override (default 30s)
  * @returns The signed event {id, sig, pubkey, kind, tags, content} for caller to publish
@@ -58,9 +56,7 @@ export async function processSignEvent(
   vault: VaultOps,
   publisher: (event: unknown) => Promise<unknown>,
   fetcher: (() => Promise<unknown>) | undefined,
-  subscriber: ((onEvent: (event: unknown) => void) => (() => void)) | undefined,
-  crypto: Nip46PresenceCrypto,
-  store: Nip46PresenceStore,
+  subscriber: ((onEvent: (event: unknown) => void) => Promise<(() => void)> | (() => void)) | undefined,
   bunkerPubkey: string,
   timeoutMs: number = DEFAULT_PRESENCE_TIMEOUT_MS,
 ): Promise<UnsignedEvent> {
@@ -72,29 +68,19 @@ export async function processSignEvent(
     params: [unsignedEvent],
   };
 
-  // 2. NIP-44 v2-encrypt request (placeholder — real impl uses conversation key)
-  // In a real implementation, this would derive the conversation key from
-  // pairingState.ephemeralSecretKey and do NIP-44 v2 encryption.
-  // For this WP-2 implementation, we use a mock involution cipher to prove
-  // the round-trip composes encrypt->save->load->decrypt.
-  void await encryptRequest(
-    unsignedRequest,
-    pairingState,
-    vault,
-    crypto,
-  );
+  // 2. NIP-44 v2-encrypt request with the conversation key (real cipher —
+  // SEC-006 standing condition; placeholder involution removed).
+  const ciphertext = await encryptRequest(unsignedRequest, pairingState);
 
-  // 3. Publish kind:24133 request
+  // 3. Publish kind:24133 request with the NIP-44 ciphertext in content
   const requestEvent = {
     id: requestId,
-    pubkey: pairingState.remotePubkey, // client's ephemeral pubkey
+    pubkey: pairingState.ephemeralPubkey, // the client's OWN ephemeral pubkey (author — F-1 semantics)
     created_at: Math.floor(Date.now() / 1000),
     kind: 24133,
     tags: [['p', bunkerPubkey]], // bunker's pubkey as p tag
-    content: '',
+    content: ciphertext,
   };
-  // In a real impl, content would be the NIP-44 ciphertext.
-  // For testability, we keep content empty and rely on test mocks.
   await publisher(requestEvent);
 
   // 4. Await response with presence-based absence-as-revoked semantics
@@ -104,8 +90,6 @@ export async function processSignEvent(
     vault,
     fetcher,
     subscriber,
-    crypto,
-    store,
     bunkerPubkey,
     timeoutMs,
   );
@@ -113,15 +97,9 @@ export async function processSignEvent(
   // 5. Validate response: id binding, author binding, shape
   validateResponse(response, requestId, bunkerPubkey);
 
-  // 6. NIP-44 v2-decrypt response and return signed event
-  const signedEvent = await decryptResponse(
-    response,
-    pairingState,
-    vault,
-    crypto,
-  );
-
-  return signedEvent;
+  // 6. NIP-44 v2-decrypt response and return the validated envelope
+  const responseEnvelope = await decryptResponse(response, pairingState);
+  return responseEnvelope as unknown as UnsignedEvent;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,39 +114,41 @@ function generateRequestId(): string {
 }
 
 /**
- * NIP-44 v2 encrypt request (placeholder involution cipher for testability).
- * Real impl: encrypt with conversation key = ECDH(bunker signing key, client ephemeral).
+ * NIP-44 v2-encrypt a request with the pairing's conversation key (SEC-006
+ * standing condition: real cipher — the placeholder involution is removed).
+ * Conversation key = ECDH of the paired session keys: the client's ephemeral
+ * secret with the remote signer's pubkey (design note §1 step 4, §6).
+ * Returns the ciphertext STRING placed in the kind:24133 event content.
  */
-async function encryptRequest(
+export async function encryptRequest(
   request: {
     id: string;
     method: string;
     params: unknown[];
   },
-  _pairing: Nip46PairingState,
-  _vault: VaultOps,
-  crypto: Nip46PresenceCrypto,
-): Promise<unknown> {
-  // For testability: use a mock involution cipher so the at-rest blob
-  // genuinely does not contain plaintext, proving the round-trip.
-  // Real impl would use NIP-44 v2 with conversation key.
-  const json = JSON.stringify(request);
-  const plaintext = new TextEncoder().encode(json);
-  return await crypto.encryptBytes(plaintext);
+  pairing: Nip46PairingState,
+): Promise<string> {
+  const conversationKey = nip44.v2.utils.getConversationKey(
+    pairing.ephemeralSecretKey,
+    pairing.remotePubkey,
+  );
+  return nip44.v2.encrypt(JSON.stringify(request), conversationKey);
 }
 
 /**
  * Await NIP-44 v2 response with absence-as-revoked semantics.
  * Combines initial query, subscription window, and timeout handling.
+ *
+ * SEC-006/CEPS scope note: the kind:24133 response-wait is the
+ * parent-integration milestone (fix-plan 08, Item 3 scope boundary); this
+ * stub is replaced there, not here.
  */
 async function awaitResponse(
   requestId: string,
   pairing: Nip46PairingState,
   _vault: VaultOps,
   _fetcher: (() => Promise<unknown>) | undefined,
-  _subscriber: ((onEvent: (event: unknown) => void) => (() => void)) | undefined,
-  _crypto: Nip46PresenceCrypto,
-  _store: Nip46PresenceStore,
+  _subscriber: ((onEvent: (event: unknown) => void) => Promise<(() => void)> | (() => void)) | undefined,
   bunkerPubkey: string,
   _timeoutMs: number,
 ): Promise<unknown> {
@@ -224,43 +204,42 @@ function validateResponse(
       `Response author mismatch: expected ${expectedAuthor}, got ${resp.pubkey}`,
     );
   }
-
-  // Check shape: content should be JSON with {id, result, error}
-  try {
-    const contentObj = JSON.parse(resp.content);
-    if (
-      typeof contentObj !== 'object' ||
-      contentObj === null ||
-      typeof contentObj.id !== 'string' ||
-      (contentObj.result !== null && typeof contentObj.result !== 'string') ||
-      (contentObj.error !== null && typeof contentObj.error !== 'string')
-    ) {
-      throw new Error('Response content has invalid shape');
-    }
-  } catch {
-    throw new Error('Response content is not valid JSON');
-  }
 }
 
 /**
- * NIP-44 v2 decrypt response (placeholder involution cipher for testability).
- * Real impl: decrypt with conversation key = ECDH(bunker signing key, client ephemeral).
+ * NIP-44 v2-decrypt a response with the pairing's conversation key and
+ * validate the decrypted envelope shape {id, result, error} (spec §3).
+ * The wire content is ciphertext and can NEVER be JSON-parsed before
+ * decryption — the shape check moved here from validateResponse (the real
+ * cipher makes the old pre-decryption parse impossible).
  */
-async function decryptResponse(
+export async function decryptResponse(
   response: unknown,
-  _pairing: Nip46PairingState,
-  _vault: VaultOps,
-  crypto: Nip46PresenceCrypto,
-): Promise<UnsignedEvent> {
-  const resp = response as {
-    id: string;
-    content: string;
-  };
-
-  // For testability: use mock involution cipher
-  // Real impl would use NIP-44 v2 decrypt with conversation key.
-  const ciphertext = new TextEncoder().encode(resp.content);
-  const plaintext = await crypto.decryptBytes(ciphertext);
-  const json = new TextDecoder().decode(plaintext);
-  return JSON.parse(json) as UnsignedEvent;
+  pairing: Nip46PairingState,
+): Promise<{ id: string; result: string | null; error: string | null }> {
+  const resp = response as { content: string };
+  const conversationKey = nip44.v2.utils.getConversationKey(
+    pairing.ephemeralSecretKey,
+    pairing.remotePubkey,
+  );
+  const plaintext = nip44.v2.decrypt(resp.content, conversationKey);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(plaintext);
+  } catch {
+    throw new Error('Response content is not valid JSON after decryption');
+  }
+  if (
+    parsed === null ||
+    typeof parsed !== 'object' ||
+    typeof (parsed as { id?: unknown }).id !== 'string' ||
+    ((parsed as { result?: unknown }).result !== null &&
+      typeof (parsed as { result?: unknown }).result !== 'string') ||
+    ((parsed as { error?: unknown }).error !== null &&
+      typeof (parsed as { error?: unknown }).error !== 'string')
+  ) {
+    throw new Error('Response content has invalid shape');
+  }
+  const envelope = parsed as { id: string; result: string | null; error: string | null };
+  return envelope;
 }

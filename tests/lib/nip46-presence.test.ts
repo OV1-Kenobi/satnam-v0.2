@@ -554,4 +554,31 @@ describe('awaitPresenceVerdict (absence-as-revoked window)', () => {
     expect(result).toEqual({ permitted: false, reason: 'timeout', clients: null });
     expect(Date.now() - started).toBeLessThan(30_000);
   });
+
+  it('accepts an ASYNC subscribe seam (real CEPS binding) and cleans up on exit — fix-plan 08 Item 3', async () => {
+    let unsubscribed = 0;
+    const result = await awaitPresenceVerdict({
+      clientPubkey: CLIENT_A,
+      timeoutMs: 5_000,
+      subscribe: async (onEvent) => {
+        onEvent(observationFromClients([CLIENT_A]));
+        return () => {
+          unsubscribed += 1;
+        };
+      },
+    });
+    expect(result).toEqual({ permitted: true, clients: [CLIENT_A] });
+    expect(unsubscribed).toBe(1);
+  });
+
+  it('a REJECTED async subscribe fails closed as unobservable (condition b) — fix-plan 08 Item 3', async () => {
+    const result = await awaitPresenceVerdict({
+      clientPubkey: CLIENT_A,
+      timeoutMs: 5_000,
+      subscribe: async () => {
+        throw new Error('relay unreachable');
+      },
+    });
+    expect(result).toEqual({ permitted: false, reason: 'unobservable', clients: null });
+  });
 });

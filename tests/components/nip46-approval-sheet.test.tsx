@@ -306,4 +306,40 @@ describe('ApprovalSheet', () => {
     expect(screen.getByRole('button', { name: /yes, sign it/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /no, reject/i })).toBeInTheDocument();
   });
+
+  it('does not emit onReject after dismissal (dismissal latches terminal state) — SEC-010', () => {
+    const request = makeRequest({ id: 'req-dismiss-reject' });
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} onClose={onClose} />);
+
+    fireEvent.click(screen.getByLabelText(/close/i));
+    fireEvent.click(screen.getByRole('button', { name: /reject/i }));
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onDismiss).toHaveBeenCalledWith('req-dismiss-reject');
+    expect(onReject).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not emit onReject after an Approve tap (cross-button one-decision invariant) — SEC-010', () => {
+    const request = makeRequest({ id: 'req-approve-reject' });
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /approve/i }));
+    fireEvent.click(screen.getByRole('button', { name: /reject/i }));
+
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onApprove).toHaveBeenCalledWith('req-approve-reject');
+    expect(onReject).not.toHaveBeenCalled();
+  });
+
+  it('does not emit a second onDismiss on a second X tap — SEC-010 (dismissal latches)', () => {
+    const request = makeRequest({ id: 'req-xx' });
+    render(<ApprovalSheet request={request} onApprove={onApprove} onReject={onReject} onDismiss={onDismiss} onClose={onClose} />);
+
+    fireEvent.click(screen.getByLabelText(/close/i));
+    fireEvent.click(screen.getByLabelText(/close/i));
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

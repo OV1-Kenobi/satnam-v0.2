@@ -424,11 +424,15 @@ export interface Nip46PresenceWatch {
   /**
    * Optional subscription seam (bunker slice binds CEPS subscribe for
    * kind:10003 from the bunker). Receives each observed event; returns an
-   * unsubscribe function, invoked on every exit path.
+   * unsubscribe function, invoked on every exit path. The unsubscribe may be
+   * returned asynchronously — the real CEPS binding (subscribeWithCeps) is
+   * async because the CEPS client is lazy-loaded (fix-plan 08, Item 3). A
+   * synchronous unsubscribe remains valid (existing callers unchanged).
+   * A REJECTED subscribe promise fails closed as 'unobservable' (condition b).
    */
   subscribe?: (
     onEvent: (event: Nip46PresenceObservation) => void,
-  ) => () => void;
+  ) => Promise<() => void> | (() => void);
 }
 
 /**
@@ -493,9 +497,15 @@ export async function awaitPresenceVerdict(
     }
 
     if (watch.subscribe !== undefined) {
-      unsubscribe = watch.subscribe((observation) => {
-        settle({ kind: 'event', observation });
-      });
+      try {
+        unsubscribe = await watch.subscribe((observation) => {
+          settle({ kind: 'event', observation });
+        });
+      } catch {
+        // Condition (b): the subscription cannot be established — the presence
+        // event cannot be observed. Revoked immediately, fail-closed.
+        return { permitted: false, reason: 'unobservable', clients: null };
+      }
     }
     const outcome = await settled;
     if (outcome.kind === 'event') {
