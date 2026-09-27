@@ -38,6 +38,13 @@ interface EnvConfig {
     cashu: boolean;
     nip90: boolean;
     frost: boolean;
+    clink: boolean;
+    botMother: boolean;
+    lnbits: boolean;
+    lnurl: boolean;
+    dryRun: boolean;
+    botMotherPow: boolean;
+    nwcByo: boolean;
   };
 }
 
@@ -172,10 +179,17 @@ function buildConfig(): EnvConfig {
 
   // ── Feature flags ─────────────────────────────────────────────────────────
   const features = {
-    nfc:       parseFlag('VITE_ENABLE_NFC',       false),
-    cashu:     parseFlag('VITE_ENABLE_CASHU',     false),
-    nip90:     parseFlag('VITE_ENABLE_NIP90',     false),
-    frost:     parseFlag('VITE_ENABLE_FROST',     false),
+    nfc:          parseFlag('VITE_ENABLE_NFC',              false),
+    cashu:        parseFlag('VITE_ENABLE_CASHU',            false),
+    nip90:        parseFlag('VITE_ENABLE_NIP90',            false),
+    frost:        parseFlag('VITE_ENABLE_FROST',            false),
+    clink:        parseFlag('VITE_ENABLE_CLINK',            false),
+    botMother:    parseFlag('VITE_ENABLE_BOT_MOTHER',       false),
+    lnbits:       parseFlag('VITE_ENABLE_LNBITS',           false),
+    lnurl:        parseFlag('VITE_ENABLE_LNURL',            false),
+    dryRun:       parseFlag('VITE_DRY_RUN',                 false),
+    botMotherPow: parseFlag('VITE_BOT_MOTHER_POW_REQUIRED', false),
+    nwcByo:       parseFlag('VITE_ENABLE_NWC_BYO',         false),
   };
 
   return {
@@ -290,3 +304,36 @@ export function isFrostEnabled(): boolean {
 // ── Re-export for convenience ─────────────────────────────────────────────────
 
 export type { EnvConfig };
+
+/**
+ * Phase 0 Dry-Run: pure CLINK.
+ */
+export function isClinkEnabled(): boolean {
+  return getConfig().features.clink;
+}
+export function isBotMotherEnabled(): boolean {
+  return getConfig().features.botMother;
+}
+export function isDryRun(): boolean {
+  return getConfig().features.dryRun;
+}
+export function isLnbitsEnabled(): boolean {
+  return getConfig().features.lnbits;
+}
+export function isLnurlEnabled(): boolean {
+  return getConfig().features.lnurl;
+}
+export function isBotMotherPowRequired(): boolean {
+  return getConfig().features.botMotherPow;
+}
+export function isNwcByoEnabled(): boolean {
+  return getConfig().features.nwcByo;
+}
+export function getBridgeUrl(): string | null {
+  const v = optionalEnv('VITE_BRIDGE_URL', '');
+  return v || null;
+}
+export function getBotMotherRelay(): string | null {
+  const v = optionalEnv('VITE_BOT_MOTHER_RELAY', '');
+  return v || null;
+}

@@ -9,8 +9,9 @@
  * All schedule state is persisted in OPFS Vault at `payments/schedules.json`
  * (serialized via the vault's Cashu proof storage slot with a dedicated key).
  *
- * ## Routing
- * - `rail: 'lightning'` — uses NwcConnectionManager.payInvoice()
+ * ## Routing (Phase 0 dry-run)
+ * - `rail: 'lightning'` — uses NwcConnectionManager.payInvoice() (BYO) OR CLINK dry stub
+ * - `rail: 'lnbits'` — OFF in Phase 0 dry-run (VITE_ENABLE_LNBITS=false) — code retained, not deleted
  * - `rail: 'cashu'` — uses CashuClient.sendTokens() or meltTokens()
  * - `rail: 'lnbits'` — uses LNbitsClient.payInvoice()
  * - `rail: 'auto'` — selects lightning (LUD-16 available) or cashu

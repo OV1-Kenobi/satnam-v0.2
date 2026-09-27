@@ -1,0 +1,5 @@
+bridge.satnam.pub {
+  reverse_proxy localhost:3001
+}
+# DNS: CNAME bridge → VPS_HOST or A bridge → VPS_IP — NOT a Netlify site.
+# DO NOT set SERVICE_URL — Bridge URL only.
