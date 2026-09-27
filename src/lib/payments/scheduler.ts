@@ -11,9 +11,9 @@
  *
  * ## Routing (Phase 0 dry-run)
  * - `rail: 'lightning'` — uses NwcConnectionManager.payInvoice() (BYO) OR CLINK dry stub
- * - `rail: 'lnbits'` — OFF in Phase 0 dry-run (VITE_ENABLE_LNBITS=false) — code retained, not deleted
+ * - `rail: 'lnbits' deprecated Phase 0` — OFF in Phase 0 dry-run (VITE_ENABLE_LNBITS=false) — code retained, not deleted
  * - `rail: 'cashu'` — uses CashuClient.sendTokens() or meltTokens()
- * - `rail: 'lnbits'` — uses LNbitsClient.payInvoice()
+ * - `rail: 'lnbits' deprecated Phase 0` — uses LNbitsClient.payInvoice()
  * - `rail: 'auto'` — selects lightning (LUD-16 available) or cashu
  *
  * ## Usage
@@ -492,7 +492,7 @@ export class PaymentScheduler {
         return { paymentHash: token.slice(0, 64) }; // use token prefix as ID
       }
 
-      case 'lnbits': {
+      case 'lnbits': { // deprecated Phase 0 — VITE_ENABLE_LNBITS=false
         if (!this.lnbits) {
           throw new Error('LNbits rail: LNbitsClient not provided');
         }
