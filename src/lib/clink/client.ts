@@ -35,8 +35,11 @@ export async function resolveToBolt11(
     }
     return { ok: false, reason: 'unsupported_input_dry' };
   }
-  // Live path — deferred to Phase 1 (LDK adapter). Fail closed for now.
-  return { ok: false, reason: 'live_not_implemented_phase0_dryrun' };
+  // Live path — uses CLINK sdk stub (Phase 0 dry returns same dry bolt11, Phase 1 will call getLiveSdk)
+  const { DryClinkSdk } = await import('./sdk.js');
+  const s = new DryClinkSdk('wss://relay.satnam.pub');
+  const r = await s.noffer(raw, amountMsats);
+  return { ok: true, bolt11: r.bolt11, mode: 'dry', source: raw.startsWith('noffer1') ? 'noffer' : 'lud16-bridge' };
 }
 
 export function isDryBolt11(bolt11: string): boolean {

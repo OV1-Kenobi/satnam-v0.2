@@ -10,7 +10,7 @@ services:
       - "3001:3001"
     environment:
       - PORT=3001
-      - CLINK_RELAY=wss://relay.satnam.pub
-      - DOMAIN=bridge.satnam.pub
+      - CLINK_RELAY=wss://relay.satnam.pub # [RELAY_PLACEHOLDER] — your StrFry or wss://relay.shock.network live
+      - DOMAIN=[VPS_HOST] # bridge.satnam.pub placeholder — supply YOUR_VPS_HOSTNAME/IP later
       - DRY_RUN=true
     restart: unless-stopped

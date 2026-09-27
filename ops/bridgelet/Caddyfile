@@ -1,4 +1,4 @@
-bridge.satnam.pub {
+[VPS_HOST] # bridge.satnam.pub — CNAME bridge → [VPS_HOST] or A → [VPS_IP] {
   reverse_proxy localhost:3001
 }
 # DNS: CNAME bridge → VPS_HOST or A bridge → VPS_IP — NOT a Netlify site.

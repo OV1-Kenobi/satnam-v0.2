@@ -59,3 +59,10 @@ bridge.satnam.pub {
 - `VITE_ENABLE_LNURL=false` hides LNbits `createLUD16` UI, but Bridgelet still serves legacy LNURL-p
 ```
 
+
+## 5. Bot-Mother Hardening (no external)
+
+- `Vault storeNsec agent/{label}.nsec` + `NIP-26 delegation` (`Guardian → Agent`, `kind=1` tag `delegation` + `FROST` if group)
+- `rate_limits` (`nip05_identifiers` shadow) per `mother pubkey` 10/hr (in-memory + Supabase `rate_limits` insert)
+- `CLINK Enroll 21004` PoW: on `GFY required_difficulty`, run `hashcashPow(seed, difficulty)` until `sha256(seed+nonce)` leading zeros — live, not mocked
+- Supabase mirror: `nip05_identifiers(username=agenticNN, domain=shockwallet.app, pubkey=agentPubkey)` + `lightning_addresses(lud16 same)` for NIP-05/LUD16 parity
