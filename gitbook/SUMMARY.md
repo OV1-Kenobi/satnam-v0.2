@@ -130,3 +130,7 @@
 ## FAQ
 
 * [Frequently Asked Questions](faq/README.md)
+
+* [CLINK](developer-reference/libraries/clink/README.md)
+* [LDK](developer-reference/libraries/ldk/README.md)
+* [Bridgelet](developer-reference/libraries/bridgelet/README.md)
