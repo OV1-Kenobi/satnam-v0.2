@@ -20,6 +20,10 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Local recovery/backup scratch files (preventive hygiene — never committed)
+*.bak-*
+*.bak
+
 # Netlify
 .netlify/
 
