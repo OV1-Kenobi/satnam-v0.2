@@ -1,0 +1,82 @@
+{
+  "$comment": "Satnam registrar handshake. One fetch tells an agent how to interact with the registrar. Status fields are truthful: an endpoint marked gated is implemented but disabled until the operator enables it, and MUST NOT be treated as live.",
+  "satnam": {
+    "version": "1",
+    "updated": "2026-09-29",
+    "operator": "Livingry Services",
+    "registrar": "https://satnam.pub",
+    "bridge": "https://bridge.satnam.pub",
+    "relays": {
+      "human_lane": "wss://relay.satnam.pub",
+      "agent_lane": "wss://relay.shock.network",
+      "public_fallbacks_otp_only": [
+        "wss://relay.damus.io",
+        "wss://relay.nostr.band"
+      ]
+    },
+    "discovery": {
+      "nip05": "https://satnam.pub/.well-known/nostr.json",
+      "agent": "https://satnam.pub/.well-known/agent.json",
+      "llms": "https://satnam.pub/llms.txt",
+      "ai": "https://satnam.pub/ai.txt",
+      "openapi": "https://satnam.pub/openapi.json",
+      "sitemap": "https://satnam.pub/sitemap.xml"
+    },
+    "endpoints": {
+      "birth": {
+        "path": "/bot-mother/birth",
+        "method": "POST",
+        "auth": "nip98",
+        "status": "gated",
+        "status_detail": "Implemented and tested. Default-off; returns 501 live_requires_authorization until the operator enables it. Authentication is required and unsigned or replayed requests are rejected.",
+        "request": {
+          "label": "string, sanitized to [a-z0-9_-], bounded length",
+          "tier": "optional string"
+        },
+        "response": {
+          "pubkey": "64-char hex",
+          "nprofile": "NIP-19 nprofile with relay hints",
+          "lineage": "role plus parent reference and birth depth",
+          "mirror": "delegated-authority mirror receipt",
+          "secret_material": "never returned; a reference only"
+        }
+      },
+      "scan": {
+        "path": "/api/nfc/scan",
+        "method": "GET",
+        "auth": "none (SUN)",
+        "status": "gated",
+        "status_detail": "Implemented with SUN verification, counter monotonicity and replay rejection. Behind the issuer flag, default-off.",
+        "query": {
+          "p": "32-hex encrypted PICC data",
+          "c": "16-hex SUN CMAC"
+        }
+      },
+      "health": {
+        "path": "/health",
+        "method": "GET",
+        "auth": "none",
+        "status": "active"
+      }
+    },
+    "identity_model": {
+      "roles": ["guardian", "steward", "adult", "offspring"],
+      "note": "The same four roles describe human groups and agent families; the two sides mirror each other. Not all stewards, adults, or offspring are agents. A Bot-Mother-birthed identity is an adult; its creations are offspring; a bot family is stewarded by a human."
+    },
+    "flows": {
+      "human": "Family Foundry: claims names and founds the family or business identity",
+      "agent": "Bot-Mother: births agent identities into the same mirrored role structure"
+    },
+    "guarantees": {
+      "keys_server_side": false,
+      "autonomous_customer_decisions": false,
+      "human_approval_required_for_consequential_actions": true
+    },
+    "rate_limits": {
+      "birth_per_identity": "10/hour",
+      "birth_per_address": "not yet published",
+      "global": "not yet published",
+      "on_exceed": "rate-limit response with retry delay; flagging, not permanent blocking"
+    }
+  }
+}

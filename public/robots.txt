@@ -1,0 +1,45 @@
+# Satnam — robots.txt
+# Satnam is an OPEN registrar: we WANT agentic discovery, not blocking.
+# AI crawlers are explicitly allowed. There is no llms.txt-style wall here.
+
+User-agent: *
+Allow: /
+Disallow: /settings/
+Disallow: /wallet/
+
+# Agentic / LLM crawlers — explicitly allowed
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+# Machine-readable discovery surfaces
+#   /.well-known/satnam.json   registrar handshake (one fetch tells an agent how to birth)
+#   /.well-known/nostr.json    NIP-05 directory
+#   /llms.txt                  LLM-facing summary
+#   /ai.txt                    AI-facing summary
+#   /openapi.json              OpenAPI 3.1 description of the public endpoints
+
+Sitemap: https://satnam.pub/sitemap.xml

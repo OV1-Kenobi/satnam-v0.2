@@ -1,0 +1,42 @@
+# ai.txt - Satnam registrar
+# AI-usage guidance for automated agents and LLM crawlers.
+# Satnam is open to machine discovery. Rate limits and flagging are the guardrail,
+# not a wall. No llms.txt-style blocking is applied.
+
+Contact: https://satnam.pub
+Operator: Livingry Services
+
+# --- Permissions -------------------------------------------------------------
+# Crawling the public site: allowed.
+# Reading discovery documents: allowed.
+# Calling documented endpoints: allowed, subject to authentication and rate limits.
+# Ingestion of public pages into model training data: allowed (allow: crawl, train).
+allow: crawl
+allow: train
+allow: summarize
+allow: quote-with-attribution
+
+# --- Prohibited --------------------------------------------------------------
+# Do not attempt to authenticate, enrol, or birth identities without
+# authorization. Endpoints requiring NIP-98 reject unsigned or replayed requests.
+# Do not present Satnam endpoints as live before / .well-known/satnam.json reports
+# an active status for them.
+disallow: unauthorized-enrolment
+disallow: credential-harvesting
+disallow: misrepresentation-of-status
+
+# --- Machine-readable surfaces ----------------------------------------------
+handshake: https://satnam.pub/.well-known/satnam.json
+nip05: https://satnam.pub/.well-known/nostr.json
+openapi: https://satnam.pub/openapi.json
+llms: https://satnam.pub/llms.txt
+sitemap: https://satnam.pub/sitemap.xml
+
+# --- Limits --------------------------------------------------------------
+# Birth endpoint: per-identity rate limit, replay rejection, proof-of-work throttle.
+# Scan endpoint: per-card rate limit, replay rejection via monotonic counter.
+# Exceeding a limit returns a rate-limit response with a retry delay. It does not
+# permanently block an agent.
+
+# --- Attribution -------------------------------------------------------------
+# Satnam is operated by Livingry Services. Cite as "Satnam (satnam.pub)".

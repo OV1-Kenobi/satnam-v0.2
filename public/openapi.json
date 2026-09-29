@@ -1,0 +1,200 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Satnam Registrar API",
+    "version": "1.0.0",
+    "description": "Public interface of the Satnam sovereign Nostr identity registrar. Endpoints marked with x-satnam-status 'gated' are implemented and tested but disabled by default until the operator enables them; they respond 501 live_requires_authorization. Do not treat a gated endpoint as live. Satnam never returns key material.",
+    "contact": {
+      "name": "Livingry Services",
+      "url": "https://satnam.pub"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://satnam.pub",
+      "description": "Registrar (site and public endpoints)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "agent-birth",
+      "description": "Bot-Mother births agent identities into the mirrored role structure."
+    },
+    {
+      "name": "nfc",
+      "description": "NTAG424 SUN tap verification."
+    },
+    {
+      "name": "health",
+      "description": "Liveness."
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Daemon liveness",
+        "description": "Unauthenticated by design. Returns version and registrar public identity summary. No secrets.",
+        "operationId": "getHealth",
+        "x-satnam-status": "active",
+        "responses": {
+          "200": {
+            "description": "Healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean" },
+                    "version": { "type": "string" },
+                    "registrarPubkey": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bot-mother/birth": {
+      "post": {
+        "tags": ["agent-birth"],
+        "summary": "Birth an agent identity",
+        "description": "Creates an agent identity inside the caller's group, with lineage and a delegated-authority mirror receipt. Requires NIP-98 authentication signed over the request method, URL and body. Replayed or unsigned requests are rejected. The response never contains secret material; it returns a reference only. Gated: returns 501 live_requires_authorization until the operator enables it.",
+        "operationId": "birthAgentIdentity",
+        "x-satnam-status": "gated",
+        "x-satnam-auth": "nip98",
+        "security": [
+          { "nip98": [] }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "description": "Agent label. Sanitized to [a-z0-9_-] with a bounded length.",
+                    "example": "agentic01"
+                  },
+                  "tier": {
+                    "type": "string",
+                    "description": "Optional capability tier.",
+                    "example": "worker"
+                  }
+                },
+                "required": ["label"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Identity birthed. Dry mode returns the same shape with dry-labelled values and writes nothing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean" },
+                    "pubkey": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                    "nprofile": { "type": "string" },
+                    "role": { "type": "string", "enum": ["guardian", "steward", "adult", "offspring"] },
+                    "parentBindingId": { "type": ["string", "null"], "format": "uuid" },
+                    "birthDepth": { "type": "integer", "minimum": 0 },
+                    "secretRef": { "type": "string", "description": "Reference only. Never the secret." },
+                    "mirror": { "type": "object", "description": "Delegated-authority mirror receipt." },
+                    "dryRun": { "type": "boolean" }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "400": { "description": "Malformed request, invalid label, or invalid JSON body." },
+          "401": { "description": "Missing, invalid, or replayed NIP-98 authentication." },
+          "403": { "description": "Delegation or authority refused, or dry execution disabled in production." },
+          "409": { "description": "Duplicate label for this group." },
+          "429": {
+            "description": "Rate limit exceeded. Returns a retry delay.",
+            "headers": {
+              "Retry-After": {
+                "schema": { "type": "integer" },
+                "description": "Seconds until retry."
+              }
+            }
+          },
+          "501": { "description": "live_requires_authorization. The endpoint is implemented but gated off." }
+        }
+      }
+    },
+    "/api/nfc/scan": {
+      "get": {
+        "tags": ["nfc"],
+        "summary": "Verify an NTAG424 SUN tap",
+        "description": "Verifies the encrypted PICC data and SUN CMAC from a physical tag, enforcing counter monotonicity and replay rejection. Public by design (the SUN payload is the proof). Rate limited per card. Gated: behind the issuer flag, default-off.",
+        "operationId": "scanTag",
+        "x-satnam-status": "gated",
+        "x-satnam-auth": "sun",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+            "description": "32-hex encrypted PICC data."
+          },
+          {
+            "name": "c",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+            "description": "16-hex SUN CMAC."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verification result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean" },
+                    "uid": { "type": "string" },
+                    "ctr": { "type": "integer" },
+                    "reason": { "type": "string" }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "400": { "description": "Malformed or missing parameters." },
+          "409": { "description": "Replay rejected: counter not ahead of the last seen value." },
+          "429": { "description": "Per-card rate limit exceeded." },
+          "501": { "description": "Endpoint gated off." }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "nip98": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "NIP-98: a signed Nostr event (kind 27235) covering the request method, URL and body hash, presented as 'Nostr <base64>'. Satnam verifies the signature, the payload hash and a bounded timestamp window, and rejects replays."
+      }
+    }
+  },
+  "x-satnam-policies": {
+    "key_material": "Never returned, never held server-side.",
+    "autonomy": "No autonomous customer-facing decisions; consequential actions require human approval.",
+    "flagging": "Suspicious patterns are flagged for human review rather than permanently blocked.",
+    "discovery": "Open to agentic discovery by design."
+  }
+}

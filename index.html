@@ -10,6 +10,50 @@
     <meta name="author" content="Satnam" />
     <meta name="robots" content="index, follow" />
 
+    <!-- ── Agentic discovery: JSON-LD ────────────────────────────────────── -->
+    <!-- Machine-readable registrar description for crawlers. Status fields are
+         truthful: gated endpoints are implemented but disabled until enabled. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Service",
+      "name": "Satnam Registrar",
+      "alternateName": "Satnam",
+      "serviceType": "Nostr identity registrar and agent birthing service",
+      "provider": {
+        "@type": "Organization",
+        "name": "Livingry Services",
+        "url": "https://satnam.pub"
+      },
+      "areaServed": "Nostr",
+      "url": "https://satnam.pub",
+      "description": "Sovereign Nostr identity registrar: NIP-05 names and Lightning addresses bound to physical NFC multi-factor tags, with mirrored role structure for human groups (Family Foundry) and agent families (Bot-Mother). No key material is held server-side.",
+      "sameAs": [
+        "https://satnam.pub/.well-known/satnam.json",
+        "https://satnam.pub/llms.txt"
+      ],
+      "potentialAction": [
+        {
+          "@type": "Action",
+          "name": "Get the registrar handshake",
+          "target": "https://satnam.pub/.well-known/satnam.json"
+        },
+        {
+          "@type": "Action",
+          "name": "Read the OpenAPI description",
+          "target": "https://satnam.pub/openapi.json"
+        }
+      ],
+      "offers": {
+        "@type": "Offer",
+        "availability": "https://schema.org/PreOrder",
+        "description": "Agent identity birthing via the Bot-Mother flow. Endpoint implemented; enablement pending operator authorization.",
+        "url": "https://satnam.pub/.well-known/satnam.json"
+      }
+    }
+    </script>
+
+
     <!-- ── Theme / color ────────────────────────────────────────────────── -->
     <!-- NOTE: theme_color matches manifest.webmanifest (#f7931a = Bitcoin orange) -->
     <meta name="theme-color" content="#f7931a" />
