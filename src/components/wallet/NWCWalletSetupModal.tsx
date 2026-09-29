@@ -30,6 +30,7 @@ import {
   Zap,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
+// Phase 0: BYO only — VITE_ENABLE_NWC_BYO=true, no @getalby/sdk import
 
 interface NWCWalletSetupModalProps {
   isOpen: boolean;

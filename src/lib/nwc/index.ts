@@ -25,3 +25,7 @@ export type {
   TxListOptions,
   NwcError,
 } from './types.js';
+
+// Phase 0: BYO NWC — users paste any NIP-47 URI (Alby Hub, Mutiny, etc.) into Vault.
+// No @getalby/sdk Hub detection. The URI's relay+secret is the only coupling.
+// See connection-manager.ts addConnection(label, nwcUri).

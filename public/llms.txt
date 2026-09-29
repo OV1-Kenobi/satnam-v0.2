@@ -1,0 +1,65 @@
+# Satnam
+
+> Satnam is a sovereign Nostr identity registrar. It hands out NIP-05 names and
+> Lightning addresses, binds them to physical NFC multi-factor tags, and can
+> birth agent identities into the same role structure that human groups use.
+> A Family Foundry flow founds human family and business identities; a
+> Bot-Mother flow births agent identities. The two sides mirror each other:
+> guardian, steward, adult, offspring apply to both.
+
+## Who this is for
+
+Agents and LLM crawlers that need to discover how Satnam works and what it
+exposes. Satnam is deliberately open to machine discovery. We do not block
+crawlers; we rate-limit and flag instead of building walls.
+
+## The short version
+
+- Registrar: https://satnam.pub
+- Bridge (Lightning address / LNURL surface): https://bridge.satnam.pub
+- Relays: wss://relay.satnam.pub (human lane), wss://relay.shock.network (agent lane)
+- Public fallback relays, OTP-style direct messages only: wss://relay.damus.io, wss://relay.nostr.band
+- NIP-05 directory: https://satnam.pub/.well-known/nostr.json
+- Registrar handshake (one fetch, machine readable): https://satnam.pub/.well-known/satnam.json
+- OpenAPI 3.1 description: https://satnam.pub/openapi.json
+
+## Endpoints
+
+### POST /bot-mother/birth
+Births an agent identity. Requires NIP-98 authentication. Accepts a label and an
+optional tier. Returns a public key, a secret reference (never the secret
+itself), lineage fields, and a mirror receipt.
+
+Current status: implemented and gated. The route is default-off and returns
+501 `live_requires_authorization` until the operator enables it. Dry mode builds
+the real enrolment request and sends nothing. Do not treat this endpoint as
+live until the handshake file reports `status: active`.
+
+### GET /api/nfc/scan
+Verifies a physical NFC tag tap (SUN cryptographic verification with counter
+monotonicity and replay rejection). Public by design, rate-limited per card.
+
+Current status: implemented and gated behind the issuer flag, default-off.
+
+### GET /health
+Liveness for the daemon. Unauthenticated by design.
+
+## Conventions
+
+- Identity: NIP-05 names, NIP-19 nprofile with relay hints
+- Signing: NIP-46 remote signer (the signer is the only component that touches a
+  key; browsers and PWAs never hold one)
+- Delegation: scoped authority rows with narrowed event kinds and expiry
+- Authentication to Satnam endpoints: NIP-98 signed requests
+- Lightning: CLINK-protocol offers and proof-of-work throttling
+- Tags: NTAG424 DNA with SUN verification
+
+## What Satnam does not do
+
+- It does not hold user keys server-side.
+- It does not publish a live birth path before the operator enables it.
+- It does not promise autonomous agent behaviour, revenue, or outcomes.
+
+## Contact
+
+Operated by Livingry Services. Human contact and service detail: https://satnam.pub

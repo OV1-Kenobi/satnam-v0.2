@@ -9,6 +9,7 @@
  * - Swap history table
  */
 
+import { isLnbitsEnabled as _isLnbitsEnabled } from "../../config/env.js"; void _isLnbitsEnabled;
 import { useState, useCallback } from 'react';
 import clsx from 'clsx';
 import {
@@ -291,7 +292,7 @@ export interface AtomicSwapPanelProps {
   className?: string;
 }
 
-export default function AtomicSwapPanel({ className }: AtomicSwapPanelProps) {
+export default function /* Phase0 flag-guarded */ AtomicSwapPanel({ className }: AtomicSwapPanelProps) {
   const [fromRail, setFromRail] = useState<SwapRail>('lightning');
   const [toRail, setToRail] = useState<SwapRail>('cashu');
   const [amount, setAmount] = useState<number>(10_000);

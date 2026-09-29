@@ -1,0 +1,16 @@
+services:
+  bridgelet:
+    image: node:20-alpine
+    command: sh -c "npm i && node server.js"
+    working_dir: /app
+    volumes:
+      - ./server.js:/app/server.js
+      - ./package.json:/app/package.json
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - CLINK_RELAY=wss://relay.satnam.pub # [RELAY_PLACEHOLDER] — your StrFry or wss://relay.shock.network live
+      - DOMAIN=[VPS_HOST] # bridge.satnam.pub placeholder — supply YOUR_VPS_HOSTNAME/IP later
+      - DRY_RUN=true
+    restart: unless-stopped

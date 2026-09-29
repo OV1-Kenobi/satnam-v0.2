@@ -29,6 +29,7 @@ import {
 } from 'react';
 
 import type { Vault } from '../lib/vault/vault.js';
+import { isLnbitsEnabled } from '../config/env.js';
 import { LNbitsClient } from '../lib/lnbits/client.js';
 import type {
   LNbitsConfig,
@@ -146,6 +147,7 @@ export function useLNbits(
   }, []);
 
   const doRefresh = useCallback(async () => {
+    if (!isLnbitsEnabled()) return;
     if (!clientRef.current.isConnected()) return;
 
     setLoading(true);
@@ -201,6 +203,7 @@ export function useLNbits(
   // -------------------------------------------------------------------------
 
   const connect = useCallback(async (config: LNbitsConfig): Promise<void> => {
+    if (!isLnbitsEnabled()) throw new Error('LNbits disabled (VITE_ENABLE_LNBITS=false) — Phase 0 pure CLINK dry-run');
     setLoading(true);
     setError(undefined);
     try {

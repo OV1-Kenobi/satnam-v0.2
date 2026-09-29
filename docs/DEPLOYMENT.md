@@ -355,3 +355,23 @@ The free tier has row-level limits. If `rate_limits` table grows large, configur
 ### CSP Violations
 
 Check browser console for CSP violations. If a legitimate resource is blocked, update `netlify.toml` → `Content-Security-Policy` header. Do NOT add `'unsafe-eval'` (S12 invariant).
+
+
+## Phase 0 Dry-Run — CLINK Pure (2026-09-27)
+
+Pure CLINK dry-run. No LND/LDK invoice.
+
+| Env | Value |
+|---|---|
+| `VITE_ENABLE_CLINK` | `true` |
+| `VITE_ENABLE_BOT_MOTHER` | `true` |
+| `VITE_ENABLE_LNBITS` | `false` (code retained) |
+| `VITE_ENABLE_LNURL` | `false` (LNURL infra off, Bridgelet still serves LNURL-p dry) |
+| `VITE_DRY_RUN` | `true` |
+| `VITE_BRIDGE_URL` | `https://bridge.satnam.pub` |
+| `VITE_BOT_MOTHER_RELAY` | `wss://relay.satnam.pub` (dry) → flip to `wss://relay.shock.network` live |
+| `VITE_ENABLE_NWC_BYO` | `true` (paste any NIP-47 URI) |
+
+Bridgelet: `ops/bridgelet/` — `docker compose up -d`, Caddy `bridge.satnam.pub { reverse_proxy localhost:3001 }`.
+DNS: `CNAME bridge → VPS` or `A bridge → VPS_IP` — NOT Netlify site. Do not set SERVICE_URL.
+Bot-Mother dry: `POST /bot-mother/birth?dryRun=1` on satnamd → synthetic `noffer1dry / ndebit1dry / agenticNN@shockwallet.app`.

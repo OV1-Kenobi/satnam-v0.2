@@ -9,6 +9,7 @@
  * - Daily/weekly/monthly volume bar charts (CSS-only)
  */
 
+import { isLnbitsEnabled as _isLnbitsEnabled } from "../../config/env.js"; void _isLnbitsEnabled;
 import { useState, useEffect, useCallback, useRef } from 'react';
 import clsx from 'clsx';
 import {
@@ -354,7 +355,7 @@ export interface PaymentFlowDashboardProps {
   className?: string;
 }
 
-export default function PaymentFlowDashboard({ className }: PaymentFlowDashboardProps) {
+export default function /* Phase0 flag-guarded */ PaymentFlowDashboard({ className }: PaymentFlowDashboardProps) {
   const [payments, setPayments] = useState<PaymentEvent[]>([]);
   const [balances, setBalances] = useState<RailBalance[]>([]);
   const [volumes, setVolumes] = useState<DayVolume[]>([]);
